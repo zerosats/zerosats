@@ -1,0 +1,37 @@
+import rollupV1Artifact from "../artifacts/contracts/rollup2/RollupV1.sol/RollupV1.json";
+import { network, viem } from "hardhat";
+import { readFile } from "fs/promises";
+
+async function main() {
+  // Connect to the "citrea" network (make sure it's defined in hardhat.config.ts)
+  const { viem } = await network.connect({
+    network: "citreaTestnet",
+    chainId: 5115,
+  });
+
+  const publicClient = await viem.getPublicClient();
+  const [owner] = await viem.getWalletClients();
+
+  const rollupV1 = await owner.deployContract({
+    abi: rollupV1Artifact.abi,
+    bytecode: rollupV1Artifact.bytecode,
+  });
+
+  console.log(`📝 Transaction hash: ${rollupV1}`);
+
+  const rollupV1Addr = (
+    await publicClient.waitForTransactionReceipt({ hash: rollupV1 })
+  ).contractAddress;
+
+  if (rollupV1Addr === null || rollupV1Addr === undefined)
+    throw new Error("Rollup address not found");
+
+  console.log(`✅ Transaction confirmed in block`);
+
+  console.log(`✅ Rollup Contract (Implementation): ${rollupV1Addr}`);
+}
+
+main().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});
