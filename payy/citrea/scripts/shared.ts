@@ -41,19 +41,25 @@ export async function deployBin(
   const verifierTx = await walletClient.deployContract({
     bytecode: `0x${bin}`,
     abi: [],
-    gas: 2100000n,
+    gas: 30000000n,
   });
 
   console.log(`📝 Transaction hash: ${verifierTx}`);
 
-  const verifierAddr = (
-    await publicClient.waitForTransactionReceipt({ hash: verifierTx })
-  ).contractAddress;
+  const receipt = await publicClient.waitForTransactionReceipt({
+    hash: verifierTx,
+  });
+
+  if (receipt.status == "success") {
+    console.log(`✅ Transaction confirmed in block`);
+  } else {
+    console.log(`❌ Transaction reverted`);
+  }
+
+  const verifierAddr = receipt.contractAddress;
 
   if (verifierAddr === null || verifierAddr === undefined)
     throw new Error("Verifier address not found");
-
-  console.log(`✅ Transaction confirmed in block`);
 
   return verifierAddr;
 }

@@ -135,10 +135,7 @@ async function main() {
 
   console.log(`✅ Minter configured: ${hash}`);
 
-  hash = await usdc.write.mint([
-    account.address,
-    parseUnits("1000000000", 6),
-  ], {
+  hash = await usdc.write.mint([account.address, parseUnits("1000000000", 6)], {
     gas: 1_000_000n,
   });
   await publicClient.waitForTransactionReceipt({ hash });
