@@ -72,21 +72,16 @@ async function main() {
     walletClient,
   );
 
-  if (aggregateVerifierAddr === null || aggregateVerifierAddr === undefined)
-    throw new Error("Verifier address not found");
-
   console.log(`✅ Aggregate Verifier Contract: ${aggregateVerifierAddr}`);
-
+  /*
   const mintVerifierAddr = await deployBin(
     "noir/mint_HonkVerifier.bin",
     publicClient,
     walletClient,
   );
 
-  if (mintVerifierAddr === null || aggregateVerifierAddr === undefined)
-    throw new Error("Verifier address not found");
-
   console.log(`✅ Mint Verifier Contract: ${mintVerifierAddr}`);
+  */
 }
 
 main()

@@ -19,12 +19,17 @@ async function main() {
 
   console.log(`📝 Transaction hash: ${rollupV1}`);
 
-  const rollupV1Addr = (
-    await publicClient.waitForTransactionReceipt({ hash: rollupV1 })
-  ).contractAddress;
+  const receipt = await publicClient.waitForTransactionReceipt({
+    hash: rollupV1,
+  });
 
-  if (rollupV1Addr === null || rollupV1Addr === undefined)
-    throw new Error("Rollup address not found");
+  if (receipt.status == "success") {
+    console.log(`✅ Transaction confirmed in block`);
+  } else {
+    console.log(`❌ Transaction reverted`);
+  }
+
+  const rollupV1Addr = receipt.contractAddress;
 
   console.log(`✅ Transaction confirmed in block`);
 

@@ -56,10 +56,5 @@ export async function deployBin(
     console.log(`❌ Transaction reverted`);
   }
 
-  const verifierAddr = receipt.contractAddress;
-
-  if (verifierAddr === null || verifierAddr === undefined)
-    throw new Error("Verifier address not found");
-
-  return verifierAddr;
+  return receipt.contractAddress;
 }

@@ -12,5 +12,8 @@
     "typescript": "~5.8.0",
     "viem": "^2.37.6"
   },
-  "type": "module"
+  "type": "module",
+  "dependencies": {
+    "chai": "^6.0.1"
+  }
 }

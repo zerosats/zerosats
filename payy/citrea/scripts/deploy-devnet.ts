@@ -6,15 +6,19 @@ import {
   parseEther,
   formatEther,
   encodeFunctionData,
+  deployContract
 } from "viem";
 import { privateKeyToAccount, mnemonicToAccount } from "viem/accounts";
 import { deployBin, citreaChain } from "./shared";
 import { readFile } from "fs/promises";
 import { join } from "path";
 
-const usdcAddress = "0x809d550fca64d94bd9f66e60752a544199cfac3d";
-const aggregateVerifierAddr = "0x5eb3bc0a489c5a8288765d2336659ebca68fcd00";
-const mintVerifierAddr = "0x36c02da8a0983159322a80ffe9f24b1acff8b570";
+// Auto-updated by generate_fixturecs.sh - do not modify manually
+const AGG_AGG_VERIFICATION_KEY_HASH =
+  "0x1594fce0e59bc3785292f9ab4f5a1e45f5795b4a616aff5cdc4d32a223f69f0c";
+
+const usdcAddress = "0x5fbdb2315678afecb367f032d93f642f64180aa3";
+const aggregateVerifierAddr = "0xe7f1725e7734ce288f8367e1bb143e90bb3f0512";
 
 async function main() {
   console.log("🚀 Connecting to Citrea...");
@@ -84,28 +88,21 @@ async function main() {
   const rollupV1 = await walletClient.deployContract({
     abi: rollupV1Artifact.abi,
     bytecode: rollupV1Artifact.bytecode,
-    // Add constructor arguments if needed
-    // args: [arg1, arg2, ...],
   });
 
   console.log(`📝 Transaction hash: ${rollupV1}`);
 
-  const rollupV1Addr = (
-    await publicClient.waitForTransactionReceipt({ hash: rollupV1 })
-  ).contractAddress;
+  let receipt = await publicClient.waitForTransactionReceipt({
+    hash: rollupV1,
+  });
 
-  if (rollupV1Addr === null || rollupV1Addr === undefined)
-    throw new Error("Verifier address not found");
+  if (receipt.status == "success") {
+    console.log(`✅ Transaction confirmed in block`);
+  } else {
+    console.log(`❌ Transaction reverted`);
+  }
 
-  console.log(`✅ Transaction confirmed in block`);
-
-  console.log(`✅ Rollup Contract (Implementation): ${rollupV1Addr}`);
-
-  const emptyMerkleTreeRootHash =
-    "0x" +
-    (await readFile("contracts/empty_merkle_tree_root_hash.txt"))
-      .toString()
-      .trimEnd();
+  console.log(`✅ Rollup Contract (Implementation): ${receipt.contractAddress}`);
 
   const rollupInitializeCalldata = encodeFunctionData({
     abi: rollupV1Artifact.abi,
@@ -116,7 +113,7 @@ async function main() {
       aggregateVerifierAddr,
       proverAddress,
       validators,
-      emptyMerkleTreeRootHash,
+      AGG_AGG_VERIFICATION_KEY_HASH,
     ],
   });
 
@@ -126,11 +123,19 @@ async function main() {
     {},
   );
 
-  const proxyAddr = (
-    await publicClient.waitForTransactionReceipt({ hash: rollupProxy })
-  ).contractAddress;
+  console.log(`📝 Transaction hash: ${rollupProxy}`);
 
-  console.log(`✅ Rollup Contract (Proxy): ${proxyAddr}`);
+  receipt = await publicClient.waitForTransactionReceipt({
+    hash: rollupProxy,
+  });
+
+  if (receipt.status == "success") {
+    console.log(`✅ Transaction confirmed in block`);
+  } else {
+    console.log(`❌ Transaction reverted`);
+  }
+
+  console.log(`✅ Rollup Contract (Proxy): ${receipt.contractAddress}`);
 
   /*
   // Example transaction (uncomment to test)
