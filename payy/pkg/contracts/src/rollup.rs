@@ -291,9 +291,9 @@ impl RollupContract {
     }
 
     pub async fn from_eth_node(eth_node: &EthNode, secret_key: SecretKey) -> Result<Self> {
-        let rollup_addr = "cf7ed3acca5a467e9e704c703e8d87f634fb0fc9";
+        let rollup_addr = "dc64a140aa3e981100a9beca4e685f962f0cf6c9";
         let client = Client::from_eth_node(eth_node);
-        Self::load(client, 1337, rollup_addr, secret_key).await
+        Self::load(client, 5655, rollup_addr, secret_key).await
     }
 
     pub fn at_height(self, height: Option<u64>) -> Self {

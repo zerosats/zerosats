@@ -419,8 +419,9 @@ async fn mint_from() {
 #[tokio::test]
 async fn burn_to() {
     // Set up the environment
+    println!("HERE 1");
     let env = make_env(EthNodeOptions::default()).await;
-
+    println!("HERE {:}", env.rollup_contract.address());
     env.usdc_contract
         .transfer(env.rollup_contract.address(), 100)
         .await

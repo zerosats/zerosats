@@ -63,7 +63,7 @@ impl ServerConfig {
             keep_port_after_drop,
             safe_eth_height_offset: 0,
             rollup_contract: Address::from_slice(
-                &hex::decode("cf7ed3acca5a467e9e704c703e8d87f634fb0fc9").unwrap(),
+                &hex::decode("dc64a140aa3e981100a9beca4e685f962f0cf6c9").unwrap(),
             ),
             secret_key: hex::decode(
                 "ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80",
@@ -684,7 +684,7 @@ async fn rollup_contract(addr: Address, eth_node: &EthNode) -> RollupContract {
     let client = contracts::Client::new(&eth_node.rpc_url(), None);
     RollupContract::load(
         client,
-        1337,
+        5655,
         &hex::encode(addr.as_bytes()),
         SecretKey::from_str("ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80")
             .unwrap(),
@@ -699,7 +699,7 @@ async fn usdc_contract(rollup: &RollupContract, eth_node: &EthNode) -> USDCContr
     let client = contracts::Client::new(&eth_node.rpc_url(), None);
     USDCContract::load(
         client,
-        1337,
+        5655,
         &hex::encode(usdc_addr.as_bytes()),
         SecretKey::from_str("ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80")
             .unwrap(),

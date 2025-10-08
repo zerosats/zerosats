@@ -6,7 +6,6 @@ import {
   parseEther,
   formatEther,
   encodeFunctionData,
-  deployContract
 } from "viem";
 import { privateKeyToAccount, mnemonicToAccount } from "viem/accounts";
 import { deployBin, citreaChain } from "./shared";

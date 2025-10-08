@@ -87,7 +87,7 @@ impl AcrossWithAuthorizationContract {
         let contract_addr = "TODO";
 
         let client = Client::from_eth_node(eth_node);
-        Self::load(client, 1337, contract_addr, signer).await
+        Self::load(client, 5655, contract_addr, signer).await
     }
 
     pub async fn call(&self, func: &str, params: impl Tokenize + Clone) -> Result<H256> {

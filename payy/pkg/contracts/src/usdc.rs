@@ -89,7 +89,7 @@ impl USDCContract {
         let usdc_addr = "5fbdb2315678afecb367f032d93f642f64180aa3";
 
         let client = Client::from_eth_node(eth_node);
-        Self::load(client, 1337, usdc_addr, signer).await
+        Self::load(client, 5655, usdc_addr, signer).await
     }
 
     pub async fn call(&self, func: &str, params: impl Tokenize + Clone) -> Result<H256> {
