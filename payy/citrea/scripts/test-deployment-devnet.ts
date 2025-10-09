@@ -15,11 +15,8 @@ import { deployBin, citreaChain } from "./shared";
 import { readFile } from "fs/promises";
 import { join } from "path";
 
-const usdcAddress = "0x809d550fca64d94bd9f66e60752a544199cfac3d";
-const aggregateVerifierAddr = "0x5eb3bc0a489c5a8288765d2336659ebca68fcd00";
-const mintVerifierAddr = "0x36c02da8a0983159322a80ffe9f24b1acff8b570";
-const rollupImplAddr = "0xfd471836031dc5108809d173a067e8486b9047a3";
-const rollupProxyAddr = "0xcbeaf3bde82155f56486fb5a1072cb8baaf547cc";
+const usdcAddress = "0x5fbdb2315678afecb367f032d93f642f64180aa3";
+const rollupProxyAddr = "0x610178da211fef7d417bc0e6fed39f05609ad788";
 
 async function main() {
   console.log("🚀 Connecting to Citrea...");
