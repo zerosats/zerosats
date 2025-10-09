@@ -1,4 +1,6 @@
 import rollupV1Artifact from "../artifacts/contracts/rollup2/RollupV1.sol/RollupV1.json";
+import proxyArtifact from "../openzeppelin-contracts/contracts/proxy/transparent/TransparentUpgradeableProxy.sol/TransparentUpgradeableProxy.json";
+
 import {
   createPublicClient,
   createWalletClient,
@@ -101,7 +103,9 @@ async function main() {
     console.log(`❌ Transaction reverted`);
   }
 
-  console.log(`✅ Rollup Contract (Implementation): ${receipt.contractAddress}`);
+  let rollupAddress = receipt.contractAddress;
+
+  console.log(`✅ Rollup Contract (Implementation): ${rollupAddress}`);
 
   const rollupInitializeCalldata = encodeFunctionData({
     abi: rollupV1Artifact.abi,
@@ -116,16 +120,16 @@ async function main() {
     ],
   });
 
-  const rollupProxy = await walletClient.deployContract(
-    "@openzeppelin/contracts/proxy/transparent/TransparentUpgradeableProxy.sol:TransparentUpgradeableProxy",
-    [rollupV1.address, account.address, rollupInitializeCalldata],
-    {},
-  );
+  const rollupProxyTx = await walletClient.deployContract({
+    abi: proxyArtifact.abi,
+    bytecode: proxyArtifact.bytecode,
+    args: [rollupAddress, account.address, rollupInitializeCalldata],
+  });
 
-  console.log(`📝 Transaction hash: ${rollupProxy}`);
+  console.log(`📝 Transaction hash: ${rollupProxyTx}`);
 
   receipt = await publicClient.waitForTransactionReceipt({
-    hash: rollupProxy,
+    hash: rollupProxyTx,
   });
 
   if (receipt.status == "success") {
