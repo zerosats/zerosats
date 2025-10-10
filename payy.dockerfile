@@ -13,6 +13,13 @@ RUN apt-get update && apt-get install -y \
     git \
     cmake \
     clang \
+    libc6-dev \
+    libgflags-dev \
+    libsnappy-dev \
+    zlib1g-dev \
+    libbz2-dev \
+    liblz4-dev \
+    libzstd-dev \
     && rm -rf /var/lib/apt/lists/* \
     && apt-get clean
 
