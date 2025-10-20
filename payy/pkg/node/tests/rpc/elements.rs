@@ -8,7 +8,7 @@ use super::{Server, ServerConfig, mint, rollup_contract, usdc_contract};
 use barretenberg::Prove;
 use testutil::eth::EthNode;
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test(flavor = "current_thread")]
 async fn list_elements_unspent_default() {
     let eth_node = EthNode::default().run_and_deploy().await;
     let server_config = ServerConfig::single_node(false);
@@ -42,7 +42,7 @@ async fn list_elements_unspent_default() {
     assert!(!item.spent, "expected unspent element to have spent=false");
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test(flavor = "current_thread")]
 async fn list_elements_include_spent() {
     let eth_node = EthNode::default().run_and_deploy().await;
     let server =

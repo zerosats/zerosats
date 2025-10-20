@@ -7,7 +7,7 @@ use crate::rpc::{ServerConfig, mint, rollup_contract};
 
 use super::usdc_contract;
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test(flavor = "current_thread")]
 async fn smirk_elements_export() {
     let eth_node = EthNode::default().run_and_deploy().await;
     let server =

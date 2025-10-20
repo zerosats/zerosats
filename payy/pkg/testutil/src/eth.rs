@@ -6,6 +6,10 @@ use std::{
 
 use once_cell::sync::Lazy;
 
+use serde_json::json;
+use std::fs;
+use std::path::Path;
+
 use crate::PortPool;
 
 fn find_eth() -> PathBuf {
@@ -15,7 +19,7 @@ fn find_eth() -> PathBuf {
 }
 
 static PORT_POOL: Lazy<Mutex<PortPool>> =
-    once_cell::sync::Lazy::new(|| Mutex::new(PortPool::new(12345..12345)));
+    once_cell::sync::Lazy::new(|| Mutex::new(PortPool::new(12345..12346)));
 
 #[derive(Debug)]
 pub struct EthNode {
@@ -56,8 +60,8 @@ impl EthNode {
     }
 
     pub fn run(&mut self) {
-        // This must be the actual hardhat bin instead of running it through yarn,
-        // because we send a SIGKILL which yarn can't forward to the hardhat node.
+        // This must be the actual Citrea dev bin instead of running it through yarn,
+        // because we send a SIGKILL which yarn can't forward to the Citrea dev node.
         let mut command = Command::new("/citrea");
 
         command.current_dir(find_eth());
@@ -77,16 +81,24 @@ impl EthNode {
                 .stderr(std::process::Stdio::null());
         }
 
-        let process = command.spawn().expect("Failed to start hardhat node");
+        let process = command.spawn().expect("Failed to start Citrea dev node");
         self.process = Some(process);
     }
 
     fn stop(&mut self) {
         if let Some(mut process) = self.process.take() {
-            process.kill().expect("Failed to kill hardhat node");
+            process.kill().expect("Failed to kill Citrea dev node");
             process
                 .wait()
-                .expect("Failed to wait for hardhat node to exit");
+                .expect("Failed to wait for Citrea dev node to exit");
+        }
+
+        let resources_dir = Path::new("/app/citrea/resources");
+        if resources_dir.exists() {
+            match fs::remove_dir_all(resources_dir) {
+                Ok(_) => println!("Successfully removed /app/citrea/resources"),
+                Err(e) => println!("Failed to remove /app/citrea/resources: {}", e),
+            }
         }
     }
 
@@ -102,7 +114,12 @@ impl EthNode {
         loop {
             let is_last_retry = retry == max_retries - 1;
 
-            let req = reqwest::Client::new().get(self.rpc_url()).build().unwrap();
+            let req = reqwest::Client::new().post(self.rpc_url()).json(&json!({
+        "jsonrpc": "2.0",
+        "method": "eth_chainId",
+        "params": [],
+        "id": 67
+    })).build().unwrap();
 
             match reqwest::Client::new().execute(req).await {
                 Ok(res) if res.status().is_success() => return Ok(()),
@@ -162,11 +179,11 @@ impl EthNode {
                 .stderr(std::process::Stdio::null());
         }
 
-        let mut process = command.spawn().expect("Failed to start hardhat deploy");
+        let mut process = command.spawn().expect("Failed to start Citrea deploy");
         let status = process.wait()?;
 
         if !status.success() {
-            Err("hardhat deploy returned a non-zero exit code".into())
+            Err("Citrea deploy returned a non-zero exit code".into())
         } else {
             Ok(())
         }
@@ -180,7 +197,7 @@ impl EthNode {
         .await
         .unwrap();
 
-        eth_node.wait().await.expect("Failed to wait for eth node");
+        eth_node.wait().await.expect("Failed to wait for Citrea node");
 
         let eth_node = tokio::task::spawn_blocking(move || {
             // Deploy is flaky
