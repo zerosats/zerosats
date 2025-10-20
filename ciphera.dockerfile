@@ -1,10 +1,7 @@
-# Dockerfile.aztec-rust
 FROM citrea
 
-# Set non-interactive mode to avoid tzdata prompts
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Install system dependencies for Rust and development
 RUN apt-get update && apt-get install -y \
     jq \
     nano \
@@ -23,6 +20,8 @@ RUN apt-get update && apt-get install -y \
     liblz4-dev \
     libzstd-dev \
     protobuf-compiler \
+    nodejs \
+    npm \
     && rm -rf /var/lib/apt/lists/* \
     && apt-get clean
 
@@ -37,6 +36,10 @@ ENV PATH="$PATH:/usr/src/noir/noir-repo/target/release:/usr/src/barretenberg/cpp
 # Create a workspace directory
 WORKDIR /app
 COPY ./payy .
+
+WORKDIR /app/citrea
+RUN npm ci
+RUN npx hardhat compile
 
 # Set bash as entrypoint with login shell to ensure profile is sourced
 ENTRYPOINT ["/bin/bash", "--login"]

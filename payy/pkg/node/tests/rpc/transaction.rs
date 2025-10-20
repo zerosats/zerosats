@@ -535,8 +535,8 @@ async fn burn_tx() {
         use_noop_verifier: true,
         ..Default::default()
     })
-    .run_and_deploy()
-    .await;
+        .run_and_deploy()
+        .await;
 
     let server =
         Server::setup_and_wait(ServerConfig::single_node(false), Arc::clone(&eth_node)).await;
@@ -599,8 +599,8 @@ async fn substitute_burn_to_address() {
         use_noop_verifier: true,
         ..Default::default()
     })
-    .run_and_deploy()
-    .await;
+        .run_and_deploy()
+        .await;
 
     let server =
         Server::setup_and_wait(ServerConfig::single_node(false), Arc::clone(&eth_node)).await;
