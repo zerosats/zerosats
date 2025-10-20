@@ -60,7 +60,7 @@ impl EthNode {
         // because we send a SIGKILL which yarn can't forward to the hardhat node.
         let mut command = Command::new("/citrea");
 
-        command.current_dir(find_citrea_dir());
+        command.current_dir(find_eth());
 
         command.arg("--dev");
         command.arg("--da-layer").arg("mock");
