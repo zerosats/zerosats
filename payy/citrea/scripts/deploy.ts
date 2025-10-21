@@ -8,12 +8,13 @@ import {
     http,
     parseEther,
     formatEther,
-    encodeFunctionData,
+    encodeFunctionData, getContract, parseUnits, maxUint256,
 } from "viem";
 import {privateKeyToAccount, mnemonicToAccount} from "viem/accounts";
 import {deployBin, citreaChain} from "./shared";
 import {readFile} from "fs/promises";
 import {join} from "path";
+import IUSDCArtifact from "../artifacts/contracts/IUSDC.sol/IUSDC.json";
 
 // Auto-updated by generate_fixturecs.sh - do not modify manually
 const AGG_AGG_VERIFICATION_KEY_HASH =
@@ -104,15 +105,21 @@ async function main() {
         publicClient,
         walletClient,
     );
-
-    if (usdcAddress === null || usdcAddress === undefined)
-        throw new Error("Verifier address not found");
-
     console.log(`✅ USDC Contract: ${usdcAddress}`);
 
-  console.log("\n🔍 Deploying Rollup");
+    console.log("\n🔍 Deploying Verifier. Looking for binary file...");
 
-  const rollupV1 = await walletClient.deployContract({
+    const aggregateVerifierAddr = await deployBin(
+        "noir/agg_agg_HonkVerifier.bin",
+        publicClient,
+        walletClient,
+    );
+
+    console.log(`✅ Aggregate Verifier Contract: ${aggregateVerifierAddr}`);
+
+    console.log("\n🔍 Deploying Rollup");
+
+    const rollupV1 = await walletClient.deployContract({
         abi: rollupV1Artifact.abi,
         bytecode: rollupV1Artifact.bytecode,
     });
@@ -163,8 +170,83 @@ async function main() {
     } else {
         console.log(`❌ Transaction reverted`);
     }
+    let rollupProxyAddr = receipt.contractAddress;
 
-    console.log(`✅ Rollup Contract (Proxy): ${receipt.contractAddress}`);
+    console.log(`✅ Rollup Contract (Proxy): ${rollupProxyAddr}`);
+
+    //console.log("\n🔍 Sending some tokens to prover");
+    //const sendTx = await walletClient.sendTransaction({
+    //    to: proverAddress,
+    //   value: 1n,
+    //});
+    //await publicClient.waitForTransactionReceipt({ hash: sendTx });
+    //console.log("Transaction sent successfully");
+
+    console.log("\n🔍 Testing deployment...");
+
+    const usdc = getContract({
+        address: usdcAddress,
+        abi: IUSDCArtifact.abi,
+        client: {public: publicClient, wallet: walletClient},
+    });
+
+    console.log(`✅ Obtained USDC contract: ${usdcAddress}`);
+
+    let hash = await usdc.write.initialize(
+        [
+            "USD Coin",
+            "USDC",
+            "USD",
+            6,
+            account.address,
+            account.address,
+            account.address,
+            account.address,
+        ],
+        {
+            gas: 1_000_000n,
+        },
+    );
+    await publicClient.waitForTransactionReceipt({hash});
+    console.log(`✅ Sent test USDC: ${hash}`);
+
+    hash = await usdc.write.initializeV2(["USD Coin"], {
+        gas: 1_000_000n,
+    });
+    await publicClient.waitForTransactionReceipt({hash});
+
+    console.log(`✅ V2 initialized: ${hash}`);
+
+    hash = await usdc.write.initializeV2_1([account.address], {
+        gas: 1_000_000n,
+    });
+    await publicClient.waitForTransactionReceipt({hash});
+
+    console.log(`✅ V2.1 initialized: ${hash}`);
+
+    hash = await usdc.write.configureMinter(
+        [account.address, parseUnits("1000000000", 6)],
+        {
+            gas: 1_000_000n,
+        },
+    );
+    await publicClient.waitForTransactionReceipt({hash});
+
+    console.log(`✅ Minter configured: ${hash}`);
+
+    hash = await usdc.write.mint([account.address, parseUnits("1000000000", 6)], {
+        gas: 1_000_000n,
+    });
+    await publicClient.waitForTransactionReceipt({hash});
+
+    console.log(`✅ Minted to ${account.address}: ${hash}`);
+
+    hash = await usdc.write.approve([rollupProxyAddr, maxUint256], {
+        gas: 1_000_000n,
+    });
+    await publicClient.waitForTransactionReceipt({hash});
+
+    console.log("All mint (test) transactions executed");
 
     /*
     // Example transaction (uncomment to test)

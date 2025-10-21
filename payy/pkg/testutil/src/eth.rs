@@ -106,42 +106,56 @@ impl EthNode {
         format!("http://127.0.0.1:{}", self.port)
     }
 
-    async fn wait_for_healthy(&self) -> Result<(), Box<dyn std::error::Error>> {
+    async fn wait_for_healthy(&self) -> Result<u64, Box<dyn std::error::Error>> {
         let time_between_requests = std::time::Duration::from_millis(100);
-        let max_retries = 10_000 / time_between_requests.as_millis() as usize;
+        let max_retries = 1_000 / time_between_requests.as_millis() as usize;
 
-        let mut retry = 0;
-        loop {
+        let client = reqwest::Client::new();
+
+        for retry in 0..max_retries {
             let is_last_retry = retry == max_retries - 1;
 
-            let req = reqwest::Client::new().post(self.rpc_url()).json(&json!({
-        "jsonrpc": "2.0",
-        "method": "eth_chainId",
-        "params": [],
-        "id": 67
-    })).build().unwrap();
+            let req = client
+                .post(self.rpc_url())
+                .json(&json!({
+                "jsonrpc": "2.0",
+                "method": "eth_blockNumber",
+                "params": [],
+                "id": 1
+            }))
+                .build()?;
 
-            match reqwest::Client::new().execute(req).await {
-                Ok(res) if res.status().is_success() => return Ok(()),
-                Ok(res) if is_last_retry => {
-                    return Err(format!("Failed to get health: {}", res.status()).into());
+            match client.execute(req).await {
+                Ok(res) if res.status().is_success() => {
+                    if let Ok(body) = res.json::<serde_json::Value>().await {
+                        if let Some(result) = body.get("result").and_then(|r| r.as_str()) {
+                            let block_height = u64::from_str_radix(result.trim_start_matches("0x"), 16)?;
+                            return Ok(block_height);
+                        }
+                    }
                 }
-                Ok(_) => {}
+                Ok(res) if is_last_retry => {
+                    return Err(format!("Failed to get block height: {}", res.status()).into());
+                }
                 Err(err) if is_last_retry => return Err(err.into()),
-                Err(_) => {}
+                _ => {}
             }
 
             tokio::time::sleep(time_between_requests).await;
-            retry += 1;
         }
+
+        Err("Max retries exceeded".into())
     }
 
-    async fn wait(&self) -> Result<(), Box<dyn std::error::Error>> {
-        self.wait_for_healthy().await?;
-        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-        self.wait_for_healthy().await?;
-
-        Ok(())
+    async fn wait_for_next_block(&self) -> Result<u64, Box<dyn std::error::Error>> {
+        let current_block = self.wait_for_healthy().await?;
+        loop {
+            let block_height = self.wait_for_healthy().await?;
+            if block_height > current_block {
+                return Ok(block_height);
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
     }
 
     fn deploy(&self) -> Result<(), Box<dyn std::error::Error>> {
@@ -197,7 +211,7 @@ impl EthNode {
         .await
         .unwrap();
 
-        eth_node.wait().await.expect("Failed to wait for Citrea node");
+        eth_node.wait_for_next_block().await.expect("Failed to wait for Citrea node");
 
         let eth_node = tokio::task::spawn_blocking(move || {
             // Deploy is flaky
