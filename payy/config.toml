@@ -30,7 +30,7 @@ smirk-path = "~/.polybase/smirk"
 
 eth-rpc-url = "http://localhost:12345"
 
-rollup-contract-addr = "0x610178da211fef7d417bc0e6fed39f05609ad788"
+rollup-contract-addr = "0xe7f1725e7734ce288f8367e1bb143e90bb3f0512"
 
 health-check-commit-interval-sec = 60
 

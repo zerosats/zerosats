@@ -34,7 +34,7 @@ RUN . /root/.bashrc && noirup
 RUN curl -L https://raw.githubusercontent.com/AztecProtocol/aztec-packages/refs/heads/master/barretenberg/bbup/install | bash
 RUN . /root/.bashrc && bbup -v 1.0.0-nightly.20250723
 
-ENV PATH="$PATH:/usr/src/noir/noir-repo/target/release:/usr/src/barretenberg/cpp/build/bin:/usr/local/cargo/bin"
+ENV PATH="/usr/local/cargo/bin:/usr/src/noir/noir-repo/target/release:/usr/src/barretenberg/cpp/build/bin:${PATH}"
 
 # Create a workspace directory
 WORKDIR /app

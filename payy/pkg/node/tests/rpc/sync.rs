@@ -48,7 +48,7 @@
 //     servers
 // }
 
-// #[tokio::test(flavor = "current_thread")]
+// #[tokio::test(flavor = "multi_thread")]
 // #[serial]
 // async fn block_db_missing() {
 //     let [mut server_a, server_b, _server_c, _server_d] = setup().await;
@@ -71,7 +71,7 @@
 //     assert_eq!(server_a_height.root_hash, server_b_height.root_hash);
 // }
 
-// #[tokio::test(flavor = "current_thread")]
+// #[tokio::test(flavor = "multi_thread")]
 // #[serial]
 // async fn smirk_missing() {
 //     let [mut server_a, server_b, _server_c, _server_d] = setup().await;
@@ -94,7 +94,7 @@
 //     assert_eq!(server_a_height.root_hash, server_b_height.root_hash);
 // }
 
-// #[tokio::test(flavor = "current_thread")]
+// #[tokio::test(flavor = "multi_thread")]
 // #[serial]
 // async fn db_and_smirk_missing() {
 //     let [mut server_a, server_b, _server_c, _server_d] = setup().await;
@@ -118,7 +118,7 @@
 //     assert_eq!(server_a_height.root_hash, server_b_height.root_hash);
 // }
 
-// #[tokio::test(flavor = "current_thread")]
+// #[tokio::test(flavor = "multi_thread")]
 // #[serial]
 // async fn missing_blocks() {
 //     let [mut server_a, server_b, _server_c, _server_d] = setup().await;
@@ -146,7 +146,7 @@
 //     assert_eq!(server_a_height.root_hash, server_b_height.root_hash);
 // }
 
-// #[tokio::test(flavor = "current_thread")]
+// #[tokio::test(flavor = "multi_thread")]
 // #[serial]
 // async fn corrupted_smirk() {
 //     let [mut server_a, server_b, _server_c, _server_d] = setup().await;

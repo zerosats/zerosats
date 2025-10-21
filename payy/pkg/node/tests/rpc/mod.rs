@@ -63,7 +63,7 @@ impl ServerConfig {
             keep_port_after_drop,
             safe_eth_height_offset: 0,
             rollup_contract: Address::from_slice(
-                &hex::decode("610178da211fef7d417bc0e6fed39f05609ad788").unwrap(),
+                &hex::decode("e7f1725e7734ce288f8367e1bb143e90bb3f0512").unwrap(),
             ),
             secret_key: hex::decode(
                 "ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80",
