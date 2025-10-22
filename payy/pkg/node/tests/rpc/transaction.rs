@@ -571,6 +571,7 @@ async fn burn_tx() {
 
     for i in 0.. {
         let height = rollup.block_height().await.unwrap();
+        println!("rollup height {}", height);
         if height == tx_resp.height.0 {
             break;
         }

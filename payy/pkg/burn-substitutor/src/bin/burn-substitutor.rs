@@ -22,7 +22,7 @@ pub struct Config {
     #[arg(
         long,
         env = "ROLLUP_CONTRACT_ADDRESS",
-        default_value = "0xe7f1725e7734ce288f8367e1bb143e90bb3f0512"
+        default_value = "0xcf7ed3acca5a467e9e704c703e8d87f634fb0fc9"
     )]
     rollup_contract_address: String,
 

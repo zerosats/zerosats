@@ -19,7 +19,7 @@ const AGG_AGG_VERIFICATION_KEY_HASH =
   "0x1594fce0e59bc3785292f9ab4f5a1e45f5795b4a616aff5cdc4d32a223f69f0c";
 
 const usdcAddress = "0x5fbdb2315678afecb367f032d93f642f64180aa3";
-const aggregateVerifierAddr = "0xe7f1725e7734ce288f8367e1bb143e90bb3f0512";
+const aggregateVerifierAddr = "0xcf7ed3acca5a467e9e704c703e8d87f634fb0fc9";
 
 async function main() {
   console.log("🚀 Connecting to Citrea...");
