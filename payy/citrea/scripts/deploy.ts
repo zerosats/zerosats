@@ -31,8 +31,6 @@ const USDC_ADDRESSES: Record<string, string> = {
     // 80001: '0x2058A9D7613eEE744279e3856Ef0eAda5FCbaA7e'
 };
 
-const aggregateVerifierAddr = "0xe7f1725e7734ce288f8367e1bb143e90bb3f0512";
-
 async function main() {
     console.log("🚀 Connecting to Citrea...");
 

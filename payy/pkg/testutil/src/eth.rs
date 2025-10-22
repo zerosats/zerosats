@@ -182,7 +182,7 @@ impl EthNode {
         }
 
         command.arg("run");
-        command.arg("scripts/deploy-devnet.ts");
+        command.arg("scripts/deploy.ts");
 
         let should_log = std::env::var("LOG_HARDHAT_DEPLOY_OUTPUT")
             .map(|v| v == "1")
