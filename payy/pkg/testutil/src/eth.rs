@@ -72,7 +72,7 @@ impl EthNode {
         command.arg("--sequencer").arg("/configs/mock/sequencer_config.toml");
         command.arg("--genesis-paths").arg("/genesis/mock/");
 
-        let should_log = std::env::var("LOG_HARDHAT_OUTPUT")
+        let should_log = std::env::var("LOG_CITREA_OUTPUT")
             .map(|v| v == "1")
             .unwrap_or(false);
         if !should_log {

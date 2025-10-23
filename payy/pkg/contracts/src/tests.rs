@@ -66,9 +66,7 @@ fn to_address(secret_key: &SecretKey) -> Address {
     Address::from_slice(address_bytes)
 }
 
-async fn sign_block(new_root: &Element, height: u64, other_hash: [u8; 32]) -> Vec<u8> {
-    let env = make_env(EthNodeOptions::default()).await;
-
+async fn sign_block(env: &Env, new_root: &Element, height: u64, other_hash: [u8; 32]) -> Vec<u8> {
     let proposal_hash = keccak256(&{
         let mut bytes = vec![];
         bytes.extend_from_slice(convert_element_to_h256(new_root).as_bytes());
@@ -311,7 +309,7 @@ async fn verify_transfers() {
     // Sign
     let other_hash = [0u8; 32];
     let height = 1;
-    let sig = sign_block(&agg_agg.new_root(), height, other_hash).await;
+    let sig = sign_block(&env, &agg_agg.new_root(), height, other_hash).await;
 
     // Set the root, we add some pre-existing values to the tree before generating the UTXO,
     // so the tree is not empty
@@ -419,9 +417,7 @@ async fn mint_from() {
 #[tokio::test]
 async fn burn_to() {
     // Set up the environment
-    println!("HERE 1");
     let env = make_env(EthNodeOptions::default()).await;
-    println!("HERE {:}", env.rollup_contract.address());
     env.usdc_contract
         .transfer(env.rollup_contract.address(), 100)
         .await
@@ -495,7 +491,7 @@ async fn burn_to() {
     // Sign the block
     let other_hash = [0u8; 32];
     let height = 1;
-    let sig = sign_block(&agg_agg.new_root(), height, other_hash).await;
+    let sig = sign_block(&env, &agg_agg.new_root(), height, other_hash).await;
 
     // Get the initial balance of the EVM address
     let initial_balance = env.usdc_contract.balance(env.evm_address).await.unwrap();
@@ -611,7 +607,7 @@ async fn substitute_burn() {
     // Sign the block
     let other_hash = [0u8; 32];
     let height = 1;
-    let sig = sign_block(&agg_agg.new_root(), height, other_hash).await;
+    let sig = sign_block(&env, &env, &agg_agg.new_root(), height, other_hash).await;
 
     // Get the initial balance of the EVM address
     let initial_caller_balance = env.usdc_contract.balance(env.evm_address).await.unwrap();

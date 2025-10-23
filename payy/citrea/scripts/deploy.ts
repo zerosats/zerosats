@@ -244,6 +244,7 @@ async function main() {
     });
     await publicClient.waitForTransactionReceipt({hash});
 
+    console.log(`✅ Approved maxUint256 to ${rollupProxyAddr}: ${hash}`);
     console.log("All mint (test) transactions executed");
 
     /*
