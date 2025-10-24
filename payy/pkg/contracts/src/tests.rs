@@ -7,8 +7,7 @@ use element::Element;
 use ethereum_types::{H256, U256};
 use hash::hash_merge;
 use secp256k1::PublicKey;
-use std::str::FromStr;
-use std::sync::Arc;
+use std::{ str::FromStr, sync::Arc, time::Duration };
 use test_rollup::rollup::Rollup;
 use testutil::ACCOUNT_1_SK;
 use testutil::eth::{EthNode, EthNodeOptions};
@@ -306,10 +305,14 @@ async fn verify_transfers() {
     let agg_agg = AggAgg::new([agg_utxo1_proof, agg_utxo2_proof]);
     let agg_agg_proof = prove_and_verify(&agg_agg).unwrap();
 
+    tokio::time::sleep(Duration::from_secs(1)).await;
+
     // Sign
     let other_hash = [0u8; 32];
     let height = 1;
     let sig = sign_block(&env, &agg_agg.new_root(), height, other_hash).await;
+
+    tokio::time::sleep(Duration::from_secs(1)).await;
 
     // Set the root, we add some pre-existing values to the tree before generating the UTXO,
     // so the tree is not empty
@@ -317,6 +320,8 @@ async fn verify_transfers() {
         .set_root(&agg_agg.old_root())
         .await
         .unwrap();
+
+    tokio::time::sleep(Duration::from_secs(1)).await;
 
     assert_eq!(agg_agg_proof.proof.0.len(), 508 * 32);
     env.rollup_contract
@@ -334,6 +339,13 @@ async fn verify_transfers() {
         )
         .await
         .unwrap();
+
+    tokio::time::sleep(Duration::from_secs(2)).await;
+
+    let rollup_height = env.rollup_contract.block_height().await.unwrap();
+    println!("Current height: {}", rollup_height);
+
+    assert_ne!(rollup_height, 0); // consider changing on assert_eq!(rollup_height, 1)
 }
 
 #[tokio::test]
@@ -408,6 +420,8 @@ async fn mint_from() {
         .await
         .unwrap();
 
+    tokio::time::sleep(Duration::from_secs(1)).await;
+
     env.rollup_contract
         .mint(&mint_hash, &note.value, &note.contract)
         .await
@@ -415,6 +429,7 @@ async fn mint_from() {
 }
 
 #[tokio::test]
+#[ignore] // outdated test, there is no burn method. Burns are done via verifyRollup
 async fn burn_to() {
     // Set up the environment
     let env = make_env(EthNodeOptions::default()).await;
@@ -607,7 +622,7 @@ async fn substitute_burn() {
     // Sign the block
     let other_hash = [0u8; 32];
     let height = 1;
-    let sig = sign_block(&env, &env, &agg_agg.new_root(), height, other_hash).await;
+    let sig = sign_block(&env, &agg_agg.new_root(), height, other_hash).await;
 
     // Get the initial balance of the EVM address
     let initial_caller_balance = env.usdc_contract.balance(env.evm_address).await.unwrap();
@@ -617,6 +632,8 @@ async fn substitute_burn() {
         .set_root(&agg_agg.old_root())
         .await
         .unwrap();
+
+    tokio::time::sleep(Duration::from_secs(1)).await;
 
     env.rollup_contract
         .substitute_burn(
@@ -628,6 +645,8 @@ async fn substitute_burn() {
         )
         .await
         .unwrap();
+
+    tokio::time::sleep(Duration::from_secs(1)).await;
 
     let balance_after_substitute = env.usdc_contract.balance(env.evm_address).await.unwrap();
     assert_eq!(balance_after_substitute, initial_caller_balance - 100);
@@ -644,10 +663,12 @@ async fn substitute_burn() {
             other_hash,
             height,
             &[&sig],
-            500_000,
+            1_500_000,
         )
         .await
         .unwrap();
+
+    tokio::time::sleep(Duration::from_secs(2)).await;
 
     // Verify the balance increased by the burnt amount
     let new_balance = env.usdc_contract.balance(burn_address).await.unwrap();

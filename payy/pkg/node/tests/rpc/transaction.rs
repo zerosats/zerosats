@@ -530,6 +530,7 @@ async fn two_transactions_with_duplicate_input_should_conflict() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+#[ignore] // see contracts::tests::burn_to memo
 async fn burn_tx() {
     let eth_node = EthNode::new(EthNodeOptions {
         use_noop_verifier: true,
@@ -595,6 +596,7 @@ async fn burn_tx() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+#[ignore] // see contracts::tests::burn_to memo
 async fn substitute_burn_to_address() {
     let eth_node = EthNode::new(EthNodeOptions {
         use_noop_verifier: true,
@@ -752,6 +754,8 @@ async fn double_mint_same_mint_hash_different_address() {
 
     // Submit to EVM
     rollup.mint(&mint_hash, &value, &note_kind).await.unwrap();
+
+    tokio::time::sleep(Duration::from_secs(2)).await;
 
     // Mint note A for Alice
     let alice_note = Note::new_with_psi(alice_address, value, psi);
