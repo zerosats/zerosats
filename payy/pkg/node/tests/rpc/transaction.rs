@@ -580,8 +580,6 @@ async fn burn_tx() {
         if i == 120 {
             panic!("Failed to wait for tx to be included in a block");
         }
-
-        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
     }
 
     let balance = usdc.balance(to).await.unwrap();
@@ -676,8 +674,6 @@ async fn substitute_burn_to_address() {
         if i == 10 {
             panic!("Failed to wait for tx to be included in a block");
         }
-
-        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
     }
 
     let balance = usdc.balance(to).await.unwrap();
@@ -754,8 +750,6 @@ async fn double_mint_same_mint_hash_different_address() {
 
     // Submit to EVM
     rollup.mint(&mint_hash, &value, &note_kind).await.unwrap();
-
-    tokio::time::sleep(Duration::from_secs(2)).await;
 
     // Mint note A for Alice
     let alice_note = Note::new_with_psi(alice_address, value, psi);

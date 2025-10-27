@@ -38,7 +38,7 @@ rollup-wait-time-ms = 3000
 
 bad-blocks = []
 
-safe-eth-height-offset = 0
+safe-eth-height-offset = 1
 
 [p2p]
 # Addresses are "multiaddr"s - see the libp2p docs for more details:
