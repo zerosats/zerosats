@@ -32,11 +32,52 @@ const USDC_ADDRESSES: Record<string, string> = {
 };
 
 async function main() {
-    console.log("🚀 Connecting to Citrea...");
 
-    // Auto-detect environment and set URL
-    const rpcUrl = "http://localhost:12345";
-    console.log(`RPC URL: ${rpcUrl}`);
+    console.log("Initialization...");
+    const isTestnet = process.env.IS_TESTNET === "1";
+    let proverAddress = process.env.PROVER_ADDRESS as `0x${string}`;
+    let validators = process.env.VALIDATORS?.split(",") ?? ([] as Array<`0x${string}`>);
+    let ownerAddress = process.env.OWNER as `0x${string}`;
+
+    console.log("    Citrea Testnet - ", isTestnet);
+    console.log("    Prover Address - ", proverAddress);
+    console.log("    Validators - ", validators);
+    console.log("    Owner - ", ownerAddress);
+
+    const maybeNoopVerifier = (verifier: string) =>
+        isTestnet ? verifier : "NoopVerifierHonk.bin";
+
+    let account;
+    let rpcUrl;
+
+    if (isTestnet) {
+        account = mnemonicToAccount('rail flame music embark label blade bomb front reform mango aisle moment')
+        rpcUrl = "https://rpc.testnet.citrea.xyz";
+        if (proverAddress === undefined)
+            throw new Error("PROVER_ADDRESS is not set");
+        if (validators.length === 0) throw new Error("VALIDATORS is not set");
+        if (ownerAddress === undefined) throw new Error("OWNER is not set");
+    } else {
+        const privateKey =
+            "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
+        account = privateKeyToAccount(privateKey as `0x${string}`);
+        rpcUrl = "http://localhost:12345";
+
+        if (proverAddress === undefined) {
+            proverAddress = account.address;
+        }
+
+        if (validators.length === 0) {
+            validators = [account.address];
+        }
+
+        if (ownerAddress === undefined) {
+            ownerAddress = account.address;
+        }
+    }
+
+    console.log("🚀 Connecting to Citrea...");
+    console.log(`    Using URL: ${rpcUrl}`);
 
     // Create clients with dynamic RPC URL
     const publicClient = createPublicClient({
@@ -53,10 +94,6 @@ async function main() {
         }),
     });
 
-    const privateKey =
-        "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
-    const account = privateKeyToAccount(privateKey as `0x${string}`);
-    //const account = mnemonicToAccount('rail flame music embark label blade bomb front reform mango aisle moment')
 
     const walletClient = createWalletClient({
         account,
@@ -72,9 +109,6 @@ async function main() {
             retryCount: 3,
         }),
     });
-
-    const proverAddress = account.address;
-    const validators = [account.address];
 
     // Test basic connectivity
     console.log("\n🔍 Testing connection...");
@@ -108,7 +142,7 @@ async function main() {
     console.log("\n🔍 Deploying Verifier. Looking for binary file...");
 
     const aggregateVerifierAddr = await deployBin(
-        "noir/agg_agg_HonkVerifier.bin",
+        maybeNoopVerifier("noir/agg_agg_HonkVerifier.bin"),
         publicClient,
         walletClient,
     );
@@ -142,7 +176,7 @@ async function main() {
         abi: rollupV1Artifact.abi,
         functionName: "initialize",
         args: [
-            account.address,
+            ownerAddress,
             usdcAddress,
             aggregateVerifierAddr,
             proverAddress,
@@ -154,7 +188,7 @@ async function main() {
     const rollupProxyTx = await walletClient.deployContract({
         abi: proxyArtifact.abi,
         bytecode: proxyArtifact.bytecode,
-        args: [rollupAddress, account.address, rollupInitializeCalldata],
+        args: [rollupAddress, ownerAddress, rollupInitializeCalldata],
     });
 
     console.log(`📝 Transaction hash: ${rollupProxyTx}`);
@@ -172,80 +206,103 @@ async function main() {
 
     console.log(`✅ Rollup Contract (Proxy): ${rollupProxyAddr}`);
 
-    //console.log("\n🔍 Sending some tokens to prover");
-    //const sendTx = await walletClient.sendTransaction({
-    //    to: proverAddress,
-    //   value: 1n,
-    //});
-    //await publicClient.waitForTransactionReceipt({ hash: sendTx });
-    //console.log("Transaction sent successfully");
+    const eip1967AdminStorageSlot =
+        "0xb53127684a568b3173ae13b9f8a6016e243e63b6e8ee1178d6a717850b5d6103";
+    let admin = await publicClient.getStorageAt({
+        address: rollupProxyAddr,
+        slot: eip1967AdminStorageSlot,
+    });
+    admin = `0x${admin?.slice(2 + 12 * 2)}`;
+    console.log(`✅ Rollup Proxy Admin: ${admin}`);
 
-    console.log("\n🔍 Testing deployment...");
+/*
+    const proxyAdmin = await getContract({
+        address: admin,
+        abi: "@openzeppelin/contracts/proxy/transparent/ProxyAdmin.sol:ProxyAdmin",
+        client: {public: publicClient, wallet: walletClient},
+    });
+*/
+
+/*
+    console.log("\n🔍 Sending some tokens to prover");
+    const sendTx = await walletClient.sendTransaction({
+        to: proverAddress,
+       value: 1n,
+    });
+    await publicClient.waitForTransactionReceipt({ hash: sendTx });
+    console.log("Transaction sent successfully");
+*/
+
 
     const usdc = getContract({
         address: usdcAddress,
         abi: IUSDCArtifact.abi,
         client: {public: publicClient, wallet: walletClient},
     });
-
     console.log(`✅ Obtained USDC contract: ${usdcAddress}`);
 
-    let hash = await usdc.write.initialize(
-        [
-            "USD Coin",
-            "USDC",
-            "USD",
-            6,
-            account.address,
-            account.address,
-            account.address,
-            account.address,
-        ],
-        {
+
+    if (!isTestnet) {
+        console.log("\n🔍 Testing deployment...");
+
+        let hash = await usdc.write.initialize(
+            [
+                "USD Coin",
+                "USDC",
+                "USD",
+                6,
+                ownerAddress,
+                ownerAddress,
+                ownerAddress,
+                ownerAddress,
+            ],
+            {
+                gas: 1_000_000n,
+            },
+        );
+        await publicClient.waitForTransactionReceipt({hash});
+        console.log(`✅ Sent test USDC: ${hash}`);
+
+        hash = await usdc.write.initializeV2(["USD Coin"], {
             gas: 1_000_000n,
-        },
-    );
-    await publicClient.waitForTransactionReceipt({hash});
-    console.log(`✅ Sent test USDC: ${hash}`);
+        });
+        await publicClient.waitForTransactionReceipt({hash});
 
-    hash = await usdc.write.initializeV2(["USD Coin"], {
-        gas: 1_000_000n,
-    });
-    await publicClient.waitForTransactionReceipt({hash});
+        console.log(`✅ V2 initialized: ${hash}`);
 
-    console.log(`✅ V2 initialized: ${hash}`);
-
-    hash = await usdc.write.initializeV2_1([account.address], {
-        gas: 1_000_000n,
-    });
-    await publicClient.waitForTransactionReceipt({hash});
-
-    console.log(`✅ V2.1 initialized: ${hash}`);
-
-    hash = await usdc.write.configureMinter(
-        [account.address, parseUnits("1000000000", 6)],
-        {
+        hash = await usdc.write.initializeV2_1([ownerAddress], {
             gas: 1_000_000n,
-        },
-    );
-    await publicClient.waitForTransactionReceipt({hash});
+        });
+        await publicClient.waitForTransactionReceipt({hash});
 
-    console.log(`✅ Minter configured: ${hash}`);
+        console.log(`✅ V2.1 initialized: ${hash}`);
 
-    hash = await usdc.write.mint([account.address, parseUnits("1000000000", 6)], {
+        hash = await usdc.write.configureMinter(
+            [ownerAddress, parseUnits("1000000000", 6)],
+            {
+                gas: 1_000_000n,
+            },
+        );
+        await publicClient.waitForTransactionReceipt({hash});
+
+        console.log(`✅ Minter configured: ${hash}`);
+
+        hash = await usdc.write.mint([ownerAddress, parseUnits("1000000000", 6)], {
+            gas: 1_000_000n,
+        });
+        await publicClient.waitForTransactionReceipt({hash});
+
+        console.log(`✅ Minted to ${ownerAddress}: ${hash}`);
+        console.log("All mint (test) transactions executed");
+    }
+
+    console.log("\n🔍 Approving USDC spending for proxy...");
+    let hash = await usdc.write.approve([rollupProxyAddr, maxUint256], {
         gas: 1_000_000n,
     });
     await publicClient.waitForTransactionReceipt({hash});
-
-    console.log(`✅ Minted to ${account.address}: ${hash}`);
-
-    hash = await usdc.write.approve([rollupProxyAddr, maxUint256], {
-        gas: 1_000_000n,
-    });
-    await publicClient.waitForTransactionReceipt({hash});
-
     console.log(`✅ Approved maxUint256 to ${rollupProxyAddr}: ${hash}`);
-    console.log("All mint (test) transactions executed");
+
 
     /*
     // Example transaction (uncomment to test)
