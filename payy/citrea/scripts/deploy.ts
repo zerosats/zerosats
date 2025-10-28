@@ -11,7 +11,7 @@ import {
     encodeFunctionData, getContract, parseUnits, maxUint256,
 } from "viem";
 import {privateKeyToAccount, mnemonicToAccount} from "viem/accounts";
-import {deployBin, citreaChain} from "./shared";
+import {deployBin, citreaDevChain, citreaTestChain} from "./shared";
 import {readFile} from "fs/promises";
 import {join} from "path";
 import IUSDCArtifact from "../artifacts/contracts/IUSDC.sol/IUSDC.json";
@@ -37,26 +37,41 @@ async function main() {
     const isTestnet = process.env.IS_TESTNET === "1";
     let proverAddress = process.env.PROVER_ADDRESS as `0x${string}`;
     let validators = process.env.VALIDATORS?.split(",") ?? ([] as Array<`0x${string}`>);
-    let ownerAddress = process.env.OWNER as `0x${string}`;
 
     console.log("    Citrea Testnet - ", isTestnet);
     console.log("    Prover Address - ", proverAddress);
     console.log("    Validators - ", validators);
-    console.log("    Owner - ", ownerAddress);
+
 
     const maybeNoopVerifier = (verifier: string) =>
         isTestnet ? verifier : "NoopVerifierHonk.bin";
 
     let account;
     let rpcUrl;
+    let walletClient;
 
     if (isTestnet) {
-        account = mnemonicToAccount('rail flame music embark label blade bomb front reform mango aisle moment')
+        let seed = process.env.MNEMONIC as string;
+        account = mnemonicToAccount(seed)
         rpcUrl = "https://rpc.testnet.citrea.xyz";
         if (proverAddress === undefined)
             throw new Error("PROVER_ADDRESS is not set");
         if (validators.length === 0) throw new Error("VALIDATORS is not set");
-        if (ownerAddress === undefined) throw new Error("OWNER is not set");
+
+        walletClient = createWalletClient({
+            account,
+            chain: {
+                ...citreaTestChain,
+                rpcUrls: {
+                    default: {http: [rpcUrl]},
+                    public: {http: [rpcUrl]},
+                },
+            },
+            transport: http(rpcUrl, {
+                timeout: 60000,
+                retryCount: 3,
+            }),
+        });
     } else {
         const privateKey =
             "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
@@ -71,10 +86,24 @@ async function main() {
             validators = [account.address];
         }
 
-        if (ownerAddress === undefined) {
-            ownerAddress = account.address;
-        }
+        walletClient = createWalletClient({
+            account,
+            chain: {
+                ...citreaDevChain,
+                rpcUrls: {
+                    default: {http: [rpcUrl]},
+                    public: {http: [rpcUrl]},
+                },
+            },
+            transport: http(rpcUrl, {
+                timeout: 30000,
+                retryCount: 3,
+            }),
+        });
     }
+
+    let ownerAddress = account.address;
+    console.log("    Owner - ", ownerAddress);
 
     console.log("🚀 Connecting to Citrea...");
     console.log(`    Using URL: ${rpcUrl}`);
@@ -82,23 +111,7 @@ async function main() {
     // Create clients with dynamic RPC URL
     const publicClient = createPublicClient({
         chain: {
-            ...citreaChain,
-            rpcUrls: {
-                default: {http: [rpcUrl]},
-                public: {http: [rpcUrl]},
-            },
-        },
-        transport: http(rpcUrl, {
-            timeout: 30000,
-            retryCount: 3,
-        }),
-    });
-
-
-    const walletClient = createWalletClient({
-        account,
-        chain: {
-            ...citreaChain,
+            ...citreaDevChain,
             rpcUrls: {
                 default: {http: [rpcUrl]},
                 public: {http: [rpcUrl]},
@@ -128,6 +141,13 @@ async function main() {
     // Get gas price
     const gasPrice = await publicClient.getGasPrice();
     console.log(`✅ Gas Price: ${gasPrice} wei`);
+    const latestBlock = await publicClient.getBlock("latest");
+    const baseFee = latestBlock.baseFeePerGas;
+    if (!baseFee) {
+        throw new Error("Network doesn't support EIP-1559");
+    }
+    console.log(`✅ Base Fee: ${baseFee}`);
+
     console.log("\n🎉 Connection successful!");
 
     console.log("\n🔍 Deploying USDC. Looking for binary file...");

@@ -8,7 +8,7 @@ import {
 import { privateKeyToAccount, mnemonicToAccount } from "viem/accounts";
 
 // Simple custom chain definition for Citrea
-const citreaChain = {
+const citreaDevChain = {
   id: 5655,
   name: "Citrea Devnet",
   network: "citreaDevnet",
@@ -33,7 +33,7 @@ async function main() {
   // Create clients with dynamic RPC URL
   const publicClient = createPublicClient({
     chain: {
-      ...citreaChain,
+      ...citreaDevChain,
       rpcUrls: {
         default: { http: [rpcUrl] },
         public: { http: [rpcUrl] },
@@ -53,7 +53,7 @@ async function main() {
   const walletClient = createWalletClient({
     account,
     chain: {
-      ...citreaChain,
+      ...citreaDevChain,
       rpcUrls: {
         default: { http: [rpcUrl] },
         public: { http: [rpcUrl] },

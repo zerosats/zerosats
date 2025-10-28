@@ -11,7 +11,7 @@ import {
   maxUint256,
 } from "viem";
 import { privateKeyToAccount, mnemonicToAccount } from "viem/accounts";
-import { deployBin, citreaChain } from "./shared";
+import { deployBin, citreaDevChain } from "./shared";
 import { readFile } from "fs/promises";
 import { join } from "path";
 
@@ -28,7 +28,7 @@ async function main() {
   // Create clients with dynamic RPC URL
   const publicClient = createPublicClient({
     chain: {
-      ...citreaChain,
+      ...citreaDevChain,
       rpcUrls: {
         default: { http: [rpcUrl] },
         public: { http: [rpcUrl] },
@@ -48,7 +48,7 @@ async function main() {
   const walletClient = createWalletClient({
     account,
     chain: {
-      ...citreaChain,
+      ...citreaDevChain,
       rpcUrls: {
         default: { http: [rpcUrl] },
         public: { http: [rpcUrl] },

@@ -2,7 +2,7 @@ import { parseGwei, serializeTransaction } from "viem";
 import { readFile } from "fs/promises";
 
 // Simple custom chain definition for Citrea local regtest configuration
-export const citreaChain = {
+export const citreaDevChain = {
   id: 5655,
   name: "Citrea Devnet",
   network: "citreaDevnet",
@@ -19,6 +19,26 @@ export const citreaChain = {
   fees: {
     defaultPriorityFee: parseGwei("1000000000"),
     baseFeeMultiplier: 1000,
+  },
+} as const;
+
+export const citreaTestChain = {
+  id: 5115,
+  name: "Citrea Testnet",
+  network: "citreaTestnet",
+  nativeCurrency: {
+    decimals: 18,
+    name: "Citrea Bitcoin",
+    symbol: "cBTC",
+  },
+  rpcUrls: {
+    default: { http: [""] }, // Will be set dynamically
+    public: { http: [""] },
+  },
+  // Add default gas configuration
+  fees: {
+    defaultPriorityFee: parseGwei("10000100"),
+    baseFeeMultiplier: 1,
   },
 } as const;
 
@@ -41,7 +61,7 @@ export async function deployBin(
   const verifierTx = await walletClient.deployContract({
     bytecode: `0x${bin}`,
     abi: [],
-    gas: 30000000n,
+    gas: 10000000n,
   });
 
   console.log(`📝 Transaction hash: ${verifierTx}`);
