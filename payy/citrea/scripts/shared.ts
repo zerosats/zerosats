@@ -17,8 +17,8 @@ export const citreaDevChain = {
   },
   // Add default gas configuration
   fees: {
-    defaultPriorityFee: parseGwei("1000000000"),
-    baseFeeMultiplier: 1000,
+    defaultPriorityFee: parseGwei("1"),
+    baseFeeMultiplier: 1,
   },
 } as const;
 
@@ -37,7 +37,7 @@ export const citreaTestChain = {
   },
   // Add default gas configuration
   fees: {
-    defaultPriorityFee: parseGwei("10000100"),
+    defaultPriorityFee: parseGwei("1"),
     baseFeeMultiplier: 1,
   },
 } as const;
@@ -61,7 +61,7 @@ export async function deployBin(
   const verifierTx = await walletClient.deployContract({
     bytecode: `0x${bin}`,
     abi: [],
-    gas: 10000000n,
+    gas: 8000000n,
   });
 
   console.log(`📝 Transaction hash: ${verifierTx}`);
