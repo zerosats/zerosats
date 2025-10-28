@@ -17,7 +17,7 @@ export const citreaDevChain = {
   },
   // Add default gas configuration
   fees: {
-    defaultPriorityFee: parseGwei("1"),
+    defaultPriorityFee: parseGwei("0.5"),
     baseFeeMultiplier: 1,
   },
 } as const;
@@ -37,7 +37,7 @@ export const citreaTestChain = {
   },
   // Add default gas configuration
   fees: {
-    defaultPriorityFee: parseGwei("1"),
+    defaultPriorityFee: parseGwei("0.5"),
     baseFeeMultiplier: 1,
   },
 } as const;

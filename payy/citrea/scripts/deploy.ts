@@ -6,9 +6,8 @@ import {
     createPublicClient,
     createWalletClient,
     http,
-    parseEther,
     formatEther,
-    encodeFunctionData, getContract, parseUnits, maxUint256,
+    encodeFunctionData, getContract, parseUnits, formatUnits, maxUint256,
 } from "viem";
 import {privateKeyToAccount, mnemonicToAccount} from "viem/accounts";
 import {deployBin, citreaDevChain, citreaTestChain} from "./shared";
@@ -140,7 +139,7 @@ async function main() {
 
     // Get gas price
     const gasPrice = await publicClient.getGasPrice();
-    console.log(`✅ Gas Price: ${gasPrice} wei`);
+    console.log(`✅ Gas Price: ${gasPrice} wei, ${formatUnits(gasPrice, "gwei")} GWei`);
     const latestBlock = await publicClient.getBlock("latest");
     const baseFee = latestBlock.baseFeePerGas;
     if (!baseFee) {
