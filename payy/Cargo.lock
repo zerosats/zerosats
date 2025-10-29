@@ -7601,6 +7601,7 @@ dependencies = [
  "parking_lot 0.12.1",
  "reqwest",
  "serde",
+ "serde_json",
  "tokio",
 ]
 

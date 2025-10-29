@@ -1,10 +1,7 @@
-# Dockerfile.aztec-rust
-FROM aztecprotocol/aztec
+FROM rust:1.88-slim-trixie AS build
 
-# Set non-interactive mode to avoid tzdata prompts
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Install system dependencies for Rust and development
 RUN apt-get update && apt-get install -y \
     curl \
     build-essential \
@@ -20,38 +17,34 @@ RUN apt-get update && apt-get install -y \
     libbz2-dev \
     liblz4-dev \
     libzstd-dev \
+    protobuf-compiler \
     && rm -rf /var/lib/apt/lists/* \
     && apt-get clean
 
-# Install Rust 1.88.0 specifically
-RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- \
-    --default-toolchain 1.88.0 \
-    --profile default \
-    --component clippy,rustfmt \
-    -y
+RUN rustup override set 1.88.0
+RUN rustup component add rustfmt
 
-# Set up Rust environment for all subsequent commands
-ENV CARGO_HOME="/root/.cargo"
-ENV RUSTUP_HOME="/root/.rustup"
-ENV PATH="/root/.cargo/bin:${PATH}"
+COPY ./payy /app
 
-# Verify Rust installation and show versions
-RUN rustc --version && \
-    cargo --version && \
-    rustup --version
+WORKDIR /app/pkg
 
-ENV PATH="$PATH:/usr/src/noir/noir-repo/target/release:/usr/src/barretenberg/cpp/build/bin"
+RUN SKIP_GUEST_BUILD=1 cargo build --release
 
-# Create a workspace directory
-WORKDIR /workspace
+# our final base
+FROM rust:1.88-slim-trixie
 
-# Set bash as entrypoint with login shell to ensure profile is sourced
-ENTRYPOINT ["/bin/bash", "--login"]
+# copy the build artifact from the build stage
+# TODO: think about paths
 
-# Default command is interactive shell
-CMD ["-i"]
+WORKDIR /app
 
-# Build metadata
-LABEL maintainer="Payy Development Team"
-LABEL description="Aztec Protocol base image with Rust 1.88.0 and Payy development environment"
-LABEL version="1.0"
+COPY --from=build /app/target/release/burn-substitutor .
+COPY --from=build /app/target/release/generate_key .
+COPY --from=build /app/target/release/vk_hash .
+COPY --from=build /app/target/release/node .
+COPY --from=build /app/config-prod.toml config.toml
+
+EXPOSE 8091
+EXPOSE 5000
+
+ENTRYPOINT ["sh", "-c", "./node"]
