@@ -36,6 +36,11 @@ FROM rust:1.88-slim-trixie
 # copy the build artifact from the build stage
 # TODO: think about paths
 
+RUN apt-get update && apt-get install -y \
+    curl nano iputils-ping \
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get clean
+
 WORKDIR /app
 
 COPY --from=build /app/target/release/burn-substitutor .
@@ -47,4 +52,4 @@ COPY --from=build /app/config-prod.toml config.toml
 EXPOSE 8091
 EXPOSE 5000
 
-ENTRYPOINT ["sh", "-c", "./node"]
+ENTRYPOINT ["sh", "-c", "./node -c ./config.toml"]

@@ -97,7 +97,7 @@ async fn main() -> Result<()> {
         web3::signing::SecretKey::from_slice(&config.secret_key.secret_key().secret_bytes()[..])
             .unwrap();
     let contracts_client =
-        contracts::Client::new(&config.eth_rpc_url, config.minimum_gas_price_gwei);
+        contracts::Client::new(&config.evm_rpc_url, config.minimum_gas_price_gwei);
     let contract = contracts::RollupContract::load(
         contracts_client,
         5655,

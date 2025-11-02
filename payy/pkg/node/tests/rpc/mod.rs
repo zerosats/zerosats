@@ -213,7 +213,7 @@ impl Server {
         command
             .arg("--rollup-contract-addr")
             .arg(format!("0x{:x}", self.rollup_contract_addr));
-        command.arg("--eth-rpc-url").arg(self.eth_node.rpc_url());
+        command.arg("--evm-rpc-url").arg(self.eth_node.rpc_url());
 
         command.arg("--p2p-dial").arg(
             self.peers

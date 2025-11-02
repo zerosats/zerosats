@@ -12,7 +12,7 @@ use parking_lot::RwLock;
 use secp256k1::{Message, SECP256K1};
 use sha3::{Digest, Keccak256};
 use testutil::eth::EthNode;
-use tracing::warn;
+use tracing::{ info, warn };
 use web3::contract::tokens::{Detokenize, Tokenizable, TokenizableItem, Tokenize};
 use web3::ethabi::Token;
 use web3::futures::{Stream, StreamExt};
@@ -269,7 +269,7 @@ impl RollupContract {
         let contract_json =
             include_str!("../../../citrea/artifacts/contracts/rollup2/RollupV1.sol/RollupV1.json");
         let contract = client.load_contract_from_str(rollup_contract_addr, contract_json)?;
-        println!("{}, {}", chain_id, rollup_contract_addr);
+        info!("Starting node instance. ChainId {}, contract {}", chain_id, rollup_contract_addr);
         let domain_separator = calculate_domain_separator(
             "Rollup",
             "1",
@@ -291,7 +291,7 @@ impl RollupContract {
     }
 
     pub async fn from_eth_node(eth_node: &EthNode, secret_key: SecretKey) -> Result<Self> {
-        let rollup_addr = "cf7ed3acca5a467e9e704c703e8d87f634fb0fc9";
+        let rollup_addr = "b26db42b0cb837010752d7c371ec727141045438";
         let client = Client::from_eth_node(eth_node);
         Self::load(client, 5655, rollup_addr, secret_key).await
     }

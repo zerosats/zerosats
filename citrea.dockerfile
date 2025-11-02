@@ -4,9 +4,9 @@ WORKDIR /app
 
 # Install system dependencies
 RUN apt-get update && apt-get -y upgrade && \
-    apt-get install -y g++ libclang-dev pkg-config && \
-    apt-get install protobuf-compiler -y && apt-get install -y curl git && \
-    apt-get install cmake -y
+    apt-get install -y g++ libclang-dev pkg-config \
+    protobuf-compiler curl git libssl-dev \
+    cmake
 
 
 RUN git clone https://github.com/chainwayxyz/citrea.git --single-branch --branch erce/filter-changes /app

@@ -55,7 +55,7 @@ pub struct Config {
     /// Path to Smirk
     pub smirk_path: PathBuf,
 
-    pub eth_rpc_url: String,
+    pub evm_rpc_url: String,
 
     pub rollup_contract_addr: String,
 
@@ -141,8 +141,8 @@ impl Config {
                 .join(config.smirk_path.strip_prefix("~").unwrap());
         }
 
-        if let Some(eth_rpc_url) = args.eth_rpc_url {
-            config.eth_rpc_url = eth_rpc_url;
+        if let Some(evm_rpc_url) = args.evm_rpc_url {
+            config.evm_rpc_url = evm_rpc_url;
         }
 
         if let Some(rollup_contract_addr) = args.rollup_contract_addr {
