@@ -129,3 +129,22 @@ let mut command = Command::new(find_binary());
             process.id(),
             self.base_url()
         );
+
+### AWS Network Deployment Notes
+
+#### Citrea Tests
+
+curl -H "Content-Type: application/json" -X POST --data '{"jsonrpc":"2.0","method":"web3_clientVersion","params":[],"id":67}' http://172.26.2.88:8080
+
+curl -H "Content-Type: application/json" -X POST --data '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":67}' http://172.26.2.88:8080
+
+curl -H "Content-Type: application/json" -X POST --data '{"jsonrpc":"2.0","method":"eth_syncing","params":[],"id":67}' http://172.26.2.88:8080
+
+curl  -H "Content-Type: application/json" -X POST --data '{"jsonrpc":"2.0","method":"eth_getCode","params":["0x6019a8d435da34da0e709a30ba90560c440b7d89"],"id":1}' http://172.26.2.88:8080
+
+### Payy Network
+
+sudo docker run --rm -it --entrypoint bash satsbridge/ciphera:payy
+
+./node -c config.toml --mode=validator --rpc-laddr=0.0.0.0:8091 --p2p-laddr=/ip4/0.0.0.0/tcp/5000 --p2p-dial=/ip4/0.0.0.0/tcp/5001
+./node -c config.toml --mode=prover --rpc-laddr=0.0.0.0:8092 --p2p-laddr=/ip4/0.0.0.0/tcp/5001 --p2p-dial=/ip4/0.0.0.0/tcp/5000
