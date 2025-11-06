@@ -57,6 +57,8 @@ pub struct Config {
 
     pub evm_rpc_url: String,
 
+    pub chain_id: u64,
+
     pub rollup_contract_addr: String,
 
     /// If the last commit is older than this, health check will fail
@@ -143,6 +145,10 @@ impl Config {
 
         if let Some(evm_rpc_url) = args.evm_rpc_url {
             config.evm_rpc_url = evm_rpc_url;
+        }
+
+        if let Some(chain_id) = args.chain_id {
+            config.chain_id = chain_id;
         }
 
         if let Some(rollup_contract_addr) = args.rollup_contract_addr {

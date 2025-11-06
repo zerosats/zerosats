@@ -19,6 +19,9 @@ pub struct Config {
     #[arg(value_enum, long, env = "LOG_FORMAT", default_value = "PRETTY")]
     log_format: LogFormat,
 
+    #[arg(long, env = "ROLLUP_BASECHAIN_ID", default_value = 5655)]
+    chain_id: u64,
+
     #[arg(
         long,
         env = "ROLLUP_CONTRACT_ADDRESS",
@@ -83,14 +86,14 @@ async fn main() -> Result<(), eyre::Error> {
     let client = contracts::Client::new(&config.evm_rpc_url, config.minimum_gas_price_gwei);
     let rollup_contract = RollupContract::load(
         client.clone(),
-        137,
+        &config.chain_id,
         &config.rollup_contract_address,
         secret_key,
     )
     .await?;
     let usdc_contract = contracts::USDCContract::load(
         client.clone(),
-        137,
+        &config.chain_id,
         &config.usdc_contract_address,
         secret_key,
     )
