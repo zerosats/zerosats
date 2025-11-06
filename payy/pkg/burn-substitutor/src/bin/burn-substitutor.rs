@@ -19,7 +19,7 @@ pub struct Config {
     #[arg(value_enum, long, env = "LOG_FORMAT", default_value = "PRETTY")]
     log_format: LogFormat,
 
-    #[arg(long, env = "ROLLUP_BASECHAIN_ID", default_value = 5655)]
+    #[arg(long, env = "ROLLUP_BASECHAIN_ID")]
     chain_id: u64,
 
     #[arg(

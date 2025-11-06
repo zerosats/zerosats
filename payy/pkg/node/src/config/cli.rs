@@ -58,6 +58,10 @@ pub struct CliArgs {
     #[arg(long, env = "POLY_ETH_RPC_URL")]
     pub evm_rpc_url: Option<String>,
 
+    /// Base layer chain id
+    #[arg(long, env = "BASE_CHAIN_ID")]
+    pub chain_id: Option<u64>,
+
     /// Ethereum rollup contract address
     #[arg(long, env = "POLY_ROLLUP_CONTRACT")]
     pub rollup_contract_addr: Option<String>,

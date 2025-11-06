@@ -64,7 +64,7 @@ impl USDCContract {
 
     pub async fn load(
         client: Client,
-        chain_id: u128,
+        chain_id: &u64,
         usdc_contract_addr: &str,
         signer: SecretKey,
     ) -> Result<Self> {
@@ -73,7 +73,7 @@ impl USDCContract {
         let domain_separator = calculate_domain_separator(
             "USD Coin",
             "2",
-            U256::from(chain_id),
+            U256::from(chain_id.to_owned()),
             usdc_contract_addr.parse()?,
         );
         Ok(Self::new(
@@ -89,7 +89,8 @@ impl USDCContract {
         let usdc_addr = "5fbdb2315678afecb367f032d93f642f64180aa3";
 
         let client = Client::from_eth_node(eth_node);
-        Self::load(client, 5655, usdc_addr, signer).await
+        let chain_id = 5655 as u64;
+        Self::load(client, &chain_id, usdc_addr, signer).await
     }
 
     pub async fn call(&self, func: &str, params: impl Tokenize + Clone) -> Result<H256> {

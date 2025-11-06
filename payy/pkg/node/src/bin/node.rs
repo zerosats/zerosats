@@ -100,7 +100,7 @@ async fn main() -> Result<()> {
         contracts::Client::new(&config.evm_rpc_url, config.minimum_gas_price_gwei);
     let contract = contracts::RollupContract::load(
         contracts_client,
-        5655,
+        &config.chain_id,
         &config.rollup_contract_addr,
         secret_key,
     )

@@ -60,7 +60,7 @@ impl AcrossWithAuthorizationContract {
 
     pub async fn load(
         client: Client,
-        chain_id: u128,
+        chain_id: &u64,
         contract_address: &str,
         signer: SecretKey,
     ) -> Result<Self> {
@@ -71,7 +71,7 @@ impl AcrossWithAuthorizationContract {
         let domain_separator = calculate_domain_separator(
             "AcrossWithAuthorization",
             "1",
-            U256::from(chain_id),
+            U256::from(chain_id.to_owned()),
             contract_address.parse()?,
         );
         Ok(Self::new(
@@ -87,7 +87,8 @@ impl AcrossWithAuthorizationContract {
         let contract_addr = "TODO";
 
         let client = Client::from_eth_node(eth_node);
-        Self::load(client, 5655, contract_addr, signer).await
+        let chain_id = 5655 as u64;
+        Self::load(client, &chain_id, contract_addr, signer).await
     }
 
     pub async fn call(&self, func: &str, params: impl Tokenize + Clone) -> Result<H256> {

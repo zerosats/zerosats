@@ -262,7 +262,7 @@ impl RollupContract {
 
     pub async fn load(
         client: Client,
-        chain_id: u128,
+        chain_id: &u64,
         rollup_contract_addr: &str,
         signer: SecretKey,
     ) -> Result<Self> {
@@ -273,7 +273,7 @@ impl RollupContract {
         let domain_separator = calculate_domain_separator(
             "Rollup",
             "1",
-            U256::from(chain_id),
+            U256::from(chain_id.to_owned()),
             rollup_contract_addr.parse()?,
         );
 
@@ -294,6 +294,8 @@ impl RollupContract {
         let rollup_addr = "b26db42b0cb837010752d7c371ec727141045438";
         let client = Client::from_eth_node(eth_node);
         Self::load(client, 5655, rollup_addr, secret_key).await
+        let chain_id = 5655 as u64;
+        Self::load(client, &chain_id, rollup_addr, secret_key).await
     }
 
     pub fn at_height(self, height: Option<u64>) -> Self {
