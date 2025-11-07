@@ -99,3 +99,16 @@ Query parameters:
 
 Returns an object containing:
 - `last_7_days_txns' - daily transaction count for the last 7 days, excluding today
+
+
+```bash
+ podman run -v $(pwd)/payy/pkg:/app/pkg:z --rm -it --entrypoint bash payy-cli
+```
+
+```bash
+cargo run --bin pay-cli connect --host 63.176.138.198 --port 8091
+```
+
+```bash
+/app/target/debug/pay-cli connect --host 63.176.138.198 --port 8091
+```
