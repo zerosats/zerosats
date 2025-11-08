@@ -1,6 +1,8 @@
 use element::Element;
 use rand::{RngCore, rngs::OsRng};
-use zk_primitives::{InputNote, MerklePath, Note, get_address_for_private_key};
+use zk_primitives::{InputNote, MerklePath, Note, get_address_for_private_key, generate_note_kind_bridge_evm};
+use contracts::{Address, RollupContract, SecretKey, USDCContract, util::convert_h160_to_element};
+use web3::types::H160;
 
 // Reused from payy/pkg/contracts/src/tests/test_rollup.rs
 //
@@ -36,6 +38,14 @@ impl Wallet {
     }
 
     pub fn new_note(&self, amount: u64, contract: Element) -> Note {
+        //Note::new_with_psi(address, value, psi);
+        let chain = 5655 as u64; // Citrea chain
+
+        let token =
+            H160::from_slice(&hex::decode("52f74a8f9bdd29f77a5efd7f6cb44dcf6906a4b6").unwrap()); // Token Contract
+
+        let contract = generate_note_kind_bridge_evm(chain, token);
+
         Note {
             kind: Element::new(2),
             value: Element::new(amount),
@@ -44,6 +54,48 @@ impl Wallet {
             psi: Element::new(0),
         }
     }
+
+    #[expect(unused)]
+    pub fn mint() {
+
+    }
+/*    #[expect(unused)]
+    fn mint_with_note<'m, 't>(
+        rollup: &'m RollupContract,
+        _usdc: &'m USDCContract,
+        server: &'t Server,
+        note: Note,
+    ) -> (
+        impl Future<Output = Result<(), contracts::Error>> + 'm,
+        impl Future<Output = Result<TransactionResp, Error>> + 't,
+    ) {
+        let output_notes = [note.clone(), Note::padding_note()];
+        let utxo = zk_primitives::Utxo::new_mint(output_notes.clone());
+        let proof = utxo.prove().unwrap();
+
+        (
+            async move {
+                let tx = rollup
+                    .mint(&utxo.mint_hash(), &note.value, &note.contract)
+                    .await?;
+
+                while rollup
+                    .client
+                    .client()
+                    .eth()
+                    .transaction_receipt(tx)
+                    .await
+                    .unwrap()
+                    .is_none_or(|r| r.block_number.is_none())
+                {
+                    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                }
+
+                Ok(())
+            },
+            async move { server.transaction(&proof).await },
+        )
+    }*/
 }
 
 // =====================================================================

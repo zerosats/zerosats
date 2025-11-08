@@ -40,6 +40,7 @@ pub struct HeightResponse {
 /// Builder for constructing NodeClient instances with fluent API
 #[derive(Debug, Clone)]
 pub struct NodeClientBuilder {
+    name: String,
     host: String,
     port: u16,
     timeout: Duration,
@@ -54,10 +55,16 @@ impl NodeClientBuilder {
     /// - timeout: `10` seconds
     pub fn new() -> Self {
         Self {
+            name: "alice".to_string(),
             host: "127.0.0.1".to_string(),
             port: 8091,
             timeout: Duration::from_secs(10),
         }
+    }
+
+    pub fn name(mut self, name: impl Into<String>) -> Self {
+        self.name = name.into();
+        self
     }
 
     /// Set the host for the node
@@ -89,7 +96,8 @@ impl NodeClientBuilder {
         let base_url = format!("http://{}:{}/v0", self.host, self.port);
         debug!("Building NodeClient for: {}", base_url);
 
-        let keyfile_path = Path::new("key.json");
+        let file = format!("{}.json", self.name);
+        let keyfile_path = Path::new(&file);
 
         let wallet = if keyfile_path.is_file() {
             println!("\n🗝 Found keyfile!");
@@ -178,8 +186,9 @@ impl NodeClient {
     /// let client = NodeClient::new("localhost", 8091, 10)?;
     /// # Ok::<(), color_eyre::eyre::Error>(())
     /// ```
-    pub fn new(host: &str, port: u16, timeout_secs: u64) -> Result<Self> {
+    pub fn new(name: &str, host: &str, port: u16, timeout_secs: u64) -> Result<Self> {
         Self::builder()
+            .name(name)
             .host(host)
             .port(port)
             .timeout_secs(timeout_secs)

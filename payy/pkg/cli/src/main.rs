@@ -15,6 +15,10 @@ struct Cli {
     /// Enable verbose logging
     #[arg(global = true, short, long)]
     verbose: bool,
+
+    /// Enable verbose logging
+    #[arg(global = true, default_value = "alice", short, long)]
+    name: String,
 }
 
 #[derive(Subcommand, Debug)]
@@ -38,11 +42,12 @@ enum Commands {
 /// Handle the connect command
 ///
 /// Connects to a Pay node and performs health checks
-async fn handle_connect(host: &str, port: u16, timeout_secs: u64) -> Result<()> {
-    debug!("Connecting to Pay node at {}:{}", host, port);
+async fn handle_connect(name: &str, host: &str, port: u16, timeout_secs: u64) -> Result<()> {
+    debug!("Connecting wallet {} to Payy node at {}:{}", name, host, port);
 
     // Build client with fluent API
     let client = NodeClient::builder()
+        .name(name)
         .host(host)
         .port(port)
         .timeout_secs(timeout_secs)
@@ -113,7 +118,7 @@ async fn main() -> Result<()> {
             port,
             timeout,
         } => {
-            handle_connect(&host, port, timeout).await?;
+            handle_connect(&cli.name, &host, port, timeout).await?;
         }
     }
 
