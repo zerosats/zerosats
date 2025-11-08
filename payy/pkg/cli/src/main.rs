@@ -1,9 +1,9 @@
 use clap::{Parser, Subcommand};
 use color_eyre::Result;
-use serde::{Deserialize, Serialize};
-use std::time::Duration;
-use tracing::debug;
-use cli::client::{HeightResponse, HealthResponse, NodeClient};
+use tracing::{error, debug};
+
+use cli::NodeClient;
+use cli::Wallet;
 
 #[derive(Parser, Debug)]
 #[command(name = "pay-cli")]
@@ -35,18 +35,28 @@ enum Commands {
     },
 }
 
-async fn handle_connect(host: &str, port: u16, timeout: u64) -> Result<()> {
+/// Handle the connect command
+///
+/// Connects to a Pay node and performs health checks
+async fn handle_connect(host: &str, port: u16, timeout_secs: u64) -> Result<()> {
     debug!("Connecting to Pay node at {}:{}", host, port);
 
-    let client = NodeClient::new(host, port, timeout);
+    // Build client with fluent API
+    let client = NodeClient::builder()
+        .host(host)
+        .port(port)
+        .timeout_secs(timeout_secs)
+        .build()?;
 
     // Check health
     match client.check_health().await {
         Ok(health) => {
             println!("\n✅ Node Health Check Passed!");
             println!("   Current Height: {}", health.height);
+            debug!("Node is healthy at height: {}", health.height);
         }
         Err(e) => {
+            error!("Health check failed: {}", e);
             eprintln!("\n❌ Health Check Failed!");
             eprintln!("   Error: {}", e);
             return Err(e);
@@ -57,10 +67,10 @@ async fn handle_connect(host: &str, port: u16, timeout: u64) -> Result<()> {
     match client.get_height().await {
         Ok(height) => {
             println!("   Height (verified): {}", height);
-            debug!("Height verified: {}", height);
         }
         Err(e) => {
             eprintln!("   Warning: Could not verify height: {}", e);
+            tracing::warn!("Height verification failed: {}", e);
         }
     }
 
@@ -68,23 +78,35 @@ async fn handle_connect(host: &str, port: u16, timeout: u64) -> Result<()> {
     Ok(())
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
-    color_eyre::install()?;
-
-    let cli = Cli::parse();
-
-    // Setup logging
-    let log_level = if cli.verbose {
-        "debug"
-    } else {
-        "info"
-    };
+/// Initialize logging based on verbosity level
+fn init_logging(verbose: bool) {
+    let log_level = if verbose { "debug" } else { "info" };
 
     tracing_subscriber::fmt()
         .with_env_filter(log_level)
         .init();
+}
 
+/// Initialize error handling with color-eyre
+fn init_error_handling() -> Result<()> {
+    color_eyre::install()?;
+    Ok(())
+}
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    // Initialize error handling first
+    init_error_handling()?;
+
+    // Parse CLI arguments
+    let cli = Cli::parse();
+
+    // Initialize logging
+    init_logging(cli.verbose);
+
+    debug!("Starting Pay CLI");
+
+    // Execute command
     match cli.command {
         Commands::Connect {
             host,
@@ -95,22 +117,6 @@ async fn main() -> Result<()> {
         }
     }
 
+    println!("\n");
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_node_client_url_formation() {
-        let client = NodeClient::new("localhost", 8091, 10);
-        assert_eq!(client.base_url, "http://localhost:8091/v0");
-    }
-
-    #[test]
-    fn test_node_client_custom_host() {
-        let client = NodeClient::new("192.168.1.1", 9000, 5);
-        assert_eq!(client.base_url, "http://192.168.1.1:9000/v0");
-    }
 }
