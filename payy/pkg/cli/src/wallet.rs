@@ -37,22 +37,16 @@ impl Wallet {
         get_address_for_private_key(self.pk)
     }
 
-    pub fn new_note(&self, amount: u64, contract: Element) -> Note {
+    pub fn new_note(&self, amount: u64, chain: u64, token: H160) -> InputNote {
         //Note::new_with_psi(address, value, psi);
-        let chain = 5655 as u64; // Citrea chain
-
-        let token =
-            H160::from_slice(&hex::decode("52f74a8f9bdd29f77a5efd7f6cb44dcf6906a4b6").unwrap()); // Token Contract
-
         let contract = generate_note_kind_bridge_evm(chain, token);
-
-        Note {
+        InputNote::new(        Note {
             kind: Element::new(2),
             value: Element::new(amount),
             address: self.address(),
             contract,
             psi: Element::new(0),
-        }
+        }, self.pk)
     }
 
     #[expect(unused)]

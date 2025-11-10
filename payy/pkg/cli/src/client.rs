@@ -15,6 +15,8 @@ use std::str::FromStr;
 use tracing::debug;
 use element::Element;
 use crate::wallet::Wallet;
+use node_interface::{HeightResponse, TransactionResponse};
+use zk_primitives::UtxoProof;
 
 /// Singleton HTTP client shared across all NodeClient instances
 /// Provides connection pooling and efficient resource reuse
@@ -29,11 +31,6 @@ static HTTP_CLIENT: Lazy<reqwest::Client> = Lazy::new(|| {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct HealthResponse {
-    pub height: u64,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct HeightResponse {
     pub height: u64,
 }
 
@@ -205,6 +202,10 @@ impl NodeClient {
         self.timeout
     }
 
+    pub fn get_wallet(&self) -> &Wallet {
+        &self.wallet
+    }
+
     /// Check the health of the node
     ///
     /// Returns the current height if the node is healthy,
@@ -243,11 +244,6 @@ impl NodeClient {
 
         debug!("Fetching height from: {}", url);
 
-        #[derive(Deserialize)]
-        struct HeightResponseInner {
-            height: u64,
-        }
-
         let response = self
             .http_client
             .get(&url)
@@ -264,10 +260,41 @@ impl NodeClient {
         }
 
         let height_resp = response
-            .json::<HeightResponseInner>()
+            .json::<HeightResponse>()
             .await
             .map_err(|e| color_eyre::eyre::eyre!("Failed to parse height response: {}", e))?;
 
         Ok(height_resp.height)
+    }
+
+    pub async fn transaction(&self, proof: &UtxoProof) -> Result<TransactionResponse> {
+        let url = format!("{}/transaction", self.base_url);
+
+        debug!("Sending transaction via {}", url);
+
+        let response = self
+            .http_client
+            .post(&url)
+            .json(&json!({
+                "proof": proof,
+            }))
+            .timeout(self.timeout)
+            .send()
+            .await
+            .map_err(|e| color_eyre::eyre::eyre!("Failed to connect to node: {}", e))?;
+
+        if !response.status().is_success() {
+            return Err(color_eyre::eyre::eyre!(
+                "Node returned error status: {}",
+                response.status()
+            ));
+        }
+
+        let tx_resp = response
+            .json::<TransactionResponse>()
+            .await
+            .map_err(|e| color_eyre::eyre::eyre!("Failed to parse transaction response: {}", e))?;
+
+        Ok(tx_resp)
     }
 }
