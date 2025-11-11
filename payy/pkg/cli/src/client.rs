@@ -19,12 +19,14 @@ use node_interface::{HeightResponse, TransactionResponse};
 use zk_primitives::{ Note, UtxoProof};
 use web3::types::H160;
 use testutil::eth::{EthNode, EthNodeOptions};
-use contracts::RollupContract;
+use contracts::{ RollupContract, USDCContract } ;
 use web3::{
     contract::Contract,
     signing::{Key, SecretKey},
     types::Address,
 };
+use web3::types::U256;
+use contracts::ConfirmationType;
 
 /// Singleton HTTP client shared across all NodeClient instances
 /// Provides connection pooling and efficient resource reuse
@@ -306,30 +308,67 @@ impl NodeClient {
         Ok(tx_resp)
     }
 
-    pub async fn admin_mint(&self, geth_rpc: &str, chain_id: u64, secret: &str, rollup: &str, token: H160, amount: u64) -> Result<()> {
-        let note: Note = self.wallet.new_note_to_self(amount);
+    pub async fn admin_mint(&self, geth_rpc: &str, chain_id: u64, secret: &str, rollup: &str, usdc_contract: &str, note: &Note, utxo: &UtxoProof) -> Result<()> {
         //let eth_node = EthNode::default().run_and_deploy().await;
-
+        let sk = SecretKey::from_str(secret)?;
         let client = contracts::Client::new(geth_rpc, None);
+        let admin = H160::from_str("687bE257D3590697Da95a264154c71062C701936")?;
+
+        let usdc_contract = USDCContract::load(
+            client.clone(),
+            &chain_id,
+            &usdc_contract,
+            sk.clone(),
+        )
+            .await?;
+
+        /*
+        let tx_mint_erc20 = usdc_contract
+            .mint(H160::from_str("687bE257D3590697Da95a264154c71062C701936")?, 1000)
+            .await?;
+        let tx_approve = usdc_contract
+            .approve(, 1000)
+            .await?;
+
+        if usdc_contract
+            .allowance(rollup.signer_address, admin)
+            .await?
+            != U256::MAX
+        {
+            let approve_txn = usdc_contract.approve_max(rollup.address()).await?;
+            rollup.client
+                .wait_for_confirm(
+                    approve_txn,
+                    Duration::from_secs(1),
+                    ConfirmationType::Latest,
+                )
+                .await?;
+        }
+        */
 
         let rollup = RollupContract::load(
             client,
             &chain_id,
-            &hex::encode(rollup),
-            SecretKey::from_str(secret)
-                .unwrap(),
-        )
+            &rollup,
+            sk,
+        ).await?;
+
+        let tx = rollup
+            .mint(&utxo.hash(), &note.value, &note.contract)
+            .await?;
+
+        while rollup
+            .client
+            .client()
+            .eth()
+            .transaction_receipt(tx)
             .await
-            .unwrap();
+            .unwrap()
+            .is_none_or(|r| r.block_number.is_none())
+        {
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        }
 
-        //let mut server_config = ServerConfig::single_node(false);
-        //server_config.safe_eth_height_offset = 1;
-
-        /*
-        let mut server_config = ServerConfig::single_node(false);
-        server_config.safe_eth_height_offset = 1;
-        let server = Server::setup_and_wait(server_config, Arc::clone(&eth_node)).await;
-         */
         Ok(())
     }
 }

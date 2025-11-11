@@ -192,7 +192,7 @@ async fn handle_send(name: &str, host: &str, port: u16, timeout_secs: u64, note:
         let input_note: InputNote = serde_json::from_str(&json_str)?;
 
         // Check health
-        let chain = 5115 as u64; // Citrea chain        let token =
+        let chain = 5115 as u64; // Citrea chain
             H160::from_slice(&hex::decode("52f74a8f9bdd29f77a5efd7f6cb44dcf6906a4b6").unwrap()); // Token Contract
 
 
@@ -236,12 +236,18 @@ async fn handle_mint(name: &str, geth_rpc: &str, secret: &str, amount: u64, reci
 
     // Check health
     let chain = 5115 as u64; // Citrea chain
-    let token =
-        H160::from_slice(&hex::decode("52f74a8f9bdd29f77a5efd7f6cb44dcf6906a4b6").unwrap()); // Token Contract
-    let rollup = "b26db42b0cb837010752d7c371ec727141045438";
+    let token = "0x52f74a8f9bdd29f77a5efd7f6cb44dcf6906a4b6"; // Token Contract
+    let rollup = "0xb26db42b0cb837010752d7c371ec727141045438";
 
+    //let note = Note::new_with_psi(address, value, psi);
+    //let (eth_tx, rpc_tx) = mint_with_note(rollup, usdc, server, note.clone());
 
-    client.admin_mint(geth_rpc, chain, secret, rollup, token, amount).await?;
+    let note: Note = client.get_wallet().new_note_to_self(amount);
+    let output_notes = [note.clone(), Note::padding_note()];
+    let utxo = zk_primitives::Utxo::new_mint(output_notes.clone());
+    let snark = utxo.prove().unwrap();
+
+    client.admin_mint(geth_rpc, chain, secret, rollup, token, &note, &snark).await?;
 
     Ok(())
 }

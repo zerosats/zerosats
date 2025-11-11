@@ -21,11 +21,10 @@ smirk.workspace = true
 hex.workspace = true
 contracts.workspace = true
 web3.workspace = true
-use = "0.0.1-pre.0"
 barretenberg.workspace = true
 node-interface.workspace = true
 testutil.workspace = true
-fs = "0.0.5"
+hash.workspace = true
 
 [[bin]]
 name = "payy-cli"

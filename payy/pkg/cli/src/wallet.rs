@@ -1,4 +1,5 @@
 use element::Element;
+use hash::hash_merge;
 use rand::{RngCore, rngs::OsRng};
 use zk_primitives::{InputNote, MerklePath, Note, get_address_for_private_key, generate_note_kind_bridge_evm};
 use contracts::{Address, RollupContract, SecretKey, USDCContract, util::convert_h160_to_element};
@@ -49,7 +50,8 @@ impl Wallet {
     }
 
     pub fn new_note_to_self(&self, amount: u64) -> Note {
-        Note::new_with_psi(self.pk, Element::from(amount), Element::ZERO)
+        let alice_address = hash_merge([self.pk, Element::ZERO]);
+        Note::new_with_psi(alice_address, Element::from(amount), Element::ZERO)
     }
 
 /*    #[expect(unused)]
