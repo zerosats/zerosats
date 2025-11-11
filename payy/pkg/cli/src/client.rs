@@ -16,7 +16,15 @@ use tracing::debug;
 use element::Element;
 use crate::wallet::Wallet;
 use node_interface::{HeightResponse, TransactionResponse};
-use zk_primitives::UtxoProof;
+use zk_primitives::{ Note, UtxoProof};
+use web3::types::H160;
+use testutil::eth::{EthNode, EthNodeOptions};
+use contracts::RollupContract;
+use web3::{
+    contract::Contract,
+    signing::{Key, SecretKey},
+    types::Address,
+};
 
 /// Singleton HTTP client shared across all NodeClient instances
 /// Provides connection pooling and efficient resource reuse
@@ -296,5 +304,32 @@ impl NodeClient {
             .map_err(|e| color_eyre::eyre::eyre!("Failed to parse transaction response: {}", e))?;
 
         Ok(tx_resp)
+    }
+
+    pub async fn admin_mint(&self, geth_rpc: &str, chain_id: u64, secret: &str, rollup: &str, token: H160, amount: u64) -> Result<()> {
+        let note: Note = self.wallet.new_note_to_self(amount);
+        //let eth_node = EthNode::default().run_and_deploy().await;
+
+        let client = contracts::Client::new(geth_rpc, None);
+
+        let rollup = RollupContract::load(
+            client,
+            &chain_id,
+            &hex::encode(rollup),
+            SecretKey::from_str(secret)
+                .unwrap(),
+        )
+            .await
+            .unwrap();
+
+        //let mut server_config = ServerConfig::single_node(false);
+        //server_config.safe_eth_height_offset = 1;
+
+        /*
+        let mut server_config = ServerConfig::single_node(false);
+        server_config.safe_eth_height_offset = 1;
+        let server = Server::setup_and_wait(server_config, Arc::clone(&eth_node)).await;
+         */
+        Ok(())
     }
 }

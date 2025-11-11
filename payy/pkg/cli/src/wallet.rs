@@ -37,8 +37,7 @@ impl Wallet {
         get_address_for_private_key(self.pk)
     }
 
-    pub fn new_note(&self, amount: u64, chain: u64, token: H160) -> InputNote {
-        //Note::new_with_psi(address, value, psi);
+    pub fn new_input_note(&self, amount: u64, chain: u64, token: H160) -> InputNote {
         let contract = generate_note_kind_bridge_evm(chain, token);
         InputNote::new(        Note {
             kind: Element::new(2),
@@ -49,10 +48,10 @@ impl Wallet {
         }, self.pk)
     }
 
-    #[expect(unused)]
-    pub fn mint() {
-
+    pub fn new_note_to_self(&self, amount: u64) -> Note {
+        Note::new_with_psi(self.pk, Element::from(amount), Element::ZERO)
     }
+
 /*    #[expect(unused)]
     fn mint_with_note<'m, 't>(
         rollup: &'m RollupContract,

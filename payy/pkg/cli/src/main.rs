@@ -27,23 +27,36 @@ struct Cli {
     /// Enable verbose logging
     #[arg(global = true, default_value = "alice", short, long)]
     name: String,
+
+    /// RPC server host
+    #[arg(global = true, long, default_value = "127.0.0.1")]
+    host: String,
+
+    /// RPC server port
+    #[arg(global = true, short, long, default_value = "8091")]
+    port: u16,
+
+    /// Request timeout in seconds
+    #[arg(global = true, short, long, default_value = "10")]
+    timeout: u64,
 }
 
 #[derive(Subcommand, Debug)]
 enum Commands {
     /// Connect to a Pay node and check its health
-    Connect {
-        /// RPC server host
-        #[arg(long, default_value = "127.0.0.1")]
-        host: String,
+    Connect {},
+    Mint {
+        #[arg(required = true, long, short)]
+        geth_rpc: String,
 
-        /// RPC server port
-        #[arg(short, long, default_value = "8091")]
-        port: u16,
+        #[arg(required = true, long, short)]
+        secret: String,
 
-        /// Request timeout in seconds
-        #[arg(short, long, default_value = "10")]
-        timeout: u64,
+        #[arg(required = true, short, long)]
+        amount: u64,
+
+        #[arg(required = true, long, short)]
+        recipient: String,
     },
     Spend {
         /// Request amount to spend
@@ -51,18 +64,6 @@ enum Commands {
         amount: u64,
     },
     Send {
-        /// RPC server host
-        #[arg(long, default_value = "127.0.0.1")]
-        host: String,
-
-        /// RPC server port
-        #[arg(short, long, default_value = "8091")]
-        port: u16,
-
-        /// Request timeout in seconds
-        #[arg(short, long, default_value = "10")]
-        timeout: u64,
-
         #[arg(long, default_value = "note.json")]
         note: String,
     },
@@ -127,12 +128,12 @@ async fn handle_spend(name: &str, amount: u64) -> Result<()> {
         .build()?;
 
     // Check health
-    let chain = 5655 as u64; // Citrea chain
+    let chain = 5115 as u64; // Citrea chain
 
     let token =
         H160::from_slice(&hex::decode("52f74a8f9bdd29f77a5efd7f6cb44dcf6906a4b6").unwrap()); // Token Contract
 
-    let note = client.get_wallet().new_note(amount, chain, token);
+    let note = client.get_wallet().new_input_note(amount, chain, token);
     let json_str = serde_json::to_string_pretty(&note)?;
 
     std::fs::write("note.json", &json_str)?;
@@ -191,7 +192,7 @@ async fn handle_send(name: &str, host: &str, port: u16, timeout_secs: u64, note:
         let input_note: InputNote = serde_json::from_str(&json_str)?;
 
         // Check health
-        let chain = 5655 as u64; // Citrea chain        let token =
+        let chain = 5115 as u64; // Citrea chain        let token =
             H160::from_slice(&hex::decode("52f74a8f9bdd29f77a5efd7f6cb44dcf6906a4b6").unwrap()); // Token Contract
 
 
@@ -227,6 +228,24 @@ async fn handle_send(name: &str, host: &str, port: u16, timeout_secs: u64, note:
     }
 }
 
+async fn handle_mint(name: &str, geth_rpc: &str, secret: &str, amount: u64, recipient: &str) -> Result<()> {
+    // Build client with fluent API
+    let client = NodeClient::builder()
+        .name(name)
+        .build()?;
+
+    // Check health
+    let chain = 5115 as u64; // Citrea chain
+    let token =
+        H160::from_slice(&hex::decode("52f74a8f9bdd29f77a5efd7f6cb44dcf6906a4b6").unwrap()); // Token Contract
+    let rollup = "b26db42b0cb837010752d7c371ec727141045438";
+
+
+    client.admin_mint(geth_rpc, chain, secret, rollup, token, amount).await?;
+
+    Ok(())
+}
+
 /// Initialize logging based on verbosity level
 fn init_logging(verbose: bool) {
     let log_level = if verbose { "debug" } else { "info" };
@@ -257,25 +276,17 @@ async fn main() -> Result<()> {
 
     // Execute command
     match cli.command {
-        Commands::Connect {
-            host,
-            port,
-            timeout,
-        } => {
-            handle_connect(&cli.name, &host, port, timeout).await?;
+        Commands::Connect {} => {
+            handle_connect(&cli.name, &cli.host, cli.port, cli.timeout).await?;
         }
-        Commands::Spend {
-            amount,
-        } => {
+        Commands::Spend { amount } => {
             handle_spend(&cli.name, amount).await?;
         }
-        Commands::Send {
-            host,
-            port,
-            timeout,
-            note
-        } => {
-            handle_send(&cli.name, &host, port, timeout, &note).await?;
+        Commands::Send { note } => {
+            handle_send(&cli.name, &cli.host, cli.port, cli.timeout, &note).await?;
+        }
+        Commands::Mint { geth_rpc, secret, amount, recipient } => {
+            handle_mint(&cli.name, &geth_rpc, &secret, amount, &recipient).await?;
         }
     }
 
