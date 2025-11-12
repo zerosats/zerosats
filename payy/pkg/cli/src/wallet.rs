@@ -45,52 +45,14 @@ impl Wallet {
             value: Element::new(amount),
             address: self.address(),
             contract,
-            psi: Element::new(0),
+            psi: Element::secure_random(rand::thread_rng()),
         }, self.pk)
     }
 
     pub fn new_note_to_self(&self, amount: u64) -> Note {
         let alice_address = hash_merge([self.pk, Element::ZERO]);
-        Note::new_with_psi(alice_address, Element::from(amount), Element::ZERO)
+        Note::new_with_psi(alice_address, Element::from(amount), Element::secure_random(rand::thread_rng()))
     }
-
-/*    #[expect(unused)]
-    fn mint_with_note<'m, 't>(
-        rollup: &'m RollupContract,
-        _usdc: &'m USDCContract,
-        server: &'t Server,
-        note: Note,
-    ) -> (
-        impl Future<Output = Result<(), contracts::Error>> + 'm,
-        impl Future<Output = Result<TransactionResp, Error>> + 't,
-    ) {
-        let output_notes = [note.clone(), Note::padding_note()];
-        let utxo = zk_primitives::Utxo::new_mint(output_notes.clone());
-        let proof = utxo.prove().unwrap();
-
-        (
-            async move {
-                let tx = rollup
-                    .mint(&utxo.mint_hash(), &note.value, &note.contract)
-                    .await?;
-
-                while rollup
-                    .client
-                    .client()
-                    .eth()
-                    .transaction_receipt(tx)
-                    .await
-                    .unwrap()
-                    .is_none_or(|r| r.block_number.is_none())
-                {
-                    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-                }
-
-                Ok(())
-            },
-            async move { server.transaction(&proof).await },
-        )
-    }*/
 }
 
 // =====================================================================

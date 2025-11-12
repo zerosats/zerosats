@@ -57,6 +57,9 @@ enum Commands {
 
         #[arg(required = true, long, short)]
         recipient: String,
+
+        #[arg(required = false, long, short, action=clap::ArgAction::SetTrue)]
+        only_snark: bool,
     },
     Spend {
         /// Request amount to spend
@@ -228,10 +231,13 @@ async fn handle_send(name: &str, host: &str, port: u16, timeout_secs: u64, note:
     }
 }
 
-async fn handle_mint(name: &str, geth_rpc: &str, secret: &str, amount: u64, recipient: &str) -> Result<()> {
+async fn handle_mint(name: &str, host: &str, port: u16, timeout_secs: u64, geth_rpc: &str, secret: &str, amount: u64, recipient: &str, only_snark: bool) -> Result<()> {
     // Build client with fluent API
     let client = NodeClient::builder()
         .name(name)
+        .host(host)
+        .port(port)
+        .timeout_secs(timeout_secs)
         .build()?;
 
     // Check health
@@ -239,17 +245,28 @@ async fn handle_mint(name: &str, geth_rpc: &str, secret: &str, amount: u64, reci
     let token = "0x52f74a8f9bdd29f77a5efd7f6cb44dcf6906a4b6"; // Token Contract
     let rollup = "0xb26db42b0cb837010752d7c371ec727141045438";
 
-    //let note = Note::new_with_psi(address, value, psi);
-    //let (eth_tx, rpc_tx) = mint_with_note(rollup, usdc, server, note.clone());
-
     let note: Note = client.get_wallet().new_note_to_self(amount);
     let output_notes = [note.clone(), Note::padding_note()];
     let utxo = zk_primitives::Utxo::new_mint(output_notes.clone());
+
     let snark = utxo.prove().unwrap();
 
-    client.admin_mint(geth_rpc, chain, secret, rollup, token, &note, &snark).await?;
+    if !only_snark {
+        client.admin_mint(geth_rpc, chain, secret, rollup, token, &note, &snark).await?;
+    }
 
-    Ok(())
+    match client.transaction(&snark).await {
+        Ok(tx) => {
+            println!("\n✅ Transaction {} has been sent!", tx.txn_hash);
+            println!("   Height: {}", tx.height);
+            println!("   Root hash: {}", tx.root_hash);
+            Ok(())
+        }
+        Err(e) => {
+            eprintln!("\n❌ Could not send transaction!");
+            return Err(e);
+        }
+    }
 }
 
 /// Initialize logging based on verbosity level
@@ -291,8 +308,8 @@ async fn main() -> Result<()> {
         Commands::Send { note } => {
             handle_send(&cli.name, &cli.host, cli.port, cli.timeout, &note).await?;
         }
-        Commands::Mint { geth_rpc, secret, amount, recipient } => {
-            handle_mint(&cli.name, &geth_rpc, &secret, amount, &recipient).await?;
+        Commands::Mint { geth_rpc, secret, amount, recipient, only_snark } => {
+            handle_mint(&cli.name, &cli.host, cli.port, cli.timeout, &geth_rpc, &secret, amount, &recipient, only_snark).await?;
         }
     }
 

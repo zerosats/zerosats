@@ -27,6 +27,7 @@ use web3::{
 };
 use web3::types::U256;
 use contracts::ConfirmationType;
+use hash::hash_merge;
 
 /// Singleton HTTP client shared across all NodeClient instances
 /// Provides connection pooling and efficient resource reuse
@@ -353,9 +354,17 @@ impl NodeClient {
             sk,
         ).await?;
 
+        println!("Calling mint method in Rollup for note hash {}", utxo.hash());
+
+        let mint_hash = hash_merge([note.psi, Note::padding_note().psi]);
+
+        println!("Calling mint method in Rollup for note hash {}", mint_hash);
+
         let tx = rollup
-            .mint(&utxo.hash(), &note.value, &note.contract)
+            .mint(&mint_hash, &note.value, &note.contract)
             .await?;
+
+        println!("Submitted tx {:?}", tx);
 
         while rollup
             .client
@@ -366,7 +375,7 @@ impl NodeClient {
             .unwrap()
             .is_none_or(|r| r.block_number.is_none())
         {
-            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+            tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
         }
 
         Ok(())
