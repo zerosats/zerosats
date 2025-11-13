@@ -1,17 +1,17 @@
 use clap::{Parser, Subcommand};
 use color_eyre::Result;
-use tracing::{error, debug};
+use tracing::{debug, error};
 use web3::types::H160;
 
 use cli::NodeClient;
 use cli::Wallet;
 
+use barretenberg::Prove;
+use element::Element;
 use std::fs;
 use std::path::Path;
-use zk_primitives::{Utxo, Note};
 use zk_primitives::InputNote;
-use element::Element;
-use barretenberg::Prove;
+use zk_primitives::{Note, NoteURLPayload, Utxo};
 
 #[derive(Parser, Debug)]
 #[command(name = "pay-cli")]
@@ -55,9 +55,6 @@ enum Commands {
         #[arg(required = true, short, long)]
         amount: u64,
 
-        #[arg(required = true, long, short)]
-        recipient: String,
-
         #[arg(required = false, long, short, action=clap::ArgAction::SetTrue)]
         only_snark: bool,
     },
@@ -66,7 +63,7 @@ enum Commands {
         #[arg(required = true, short, long)]
         amount: u64,
     },
-    Send {
+    Receive {
         #[arg(long, default_value = "note.json")]
         note: String,
     },
@@ -76,15 +73,30 @@ use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum AppError {
+    #[error("IO error: {0}")]
+    IoError(#[from] std::io::Error),
+    #[error("Serialization error: {0}")]
+    SerializationError(#[from] serde_json::Error),
+    #[error("Builder error")]
+    CantBuildClient(),
+    #[error("Wallet error: {0}")]
+    WalletError(#[from] cli::wallet::WalletError),
     #[error("File not found: {0}")]
     FileNotFound(String),
+    #[error("Not enough balance")]
+    NotEnoughBalance(),
+    #[error("Feature is not implemented")]
+    NotSupportedYet(),
 }
 
 /// Handle the connect command
 ///
 /// Connects to a Pay node and performs health checks
 async fn handle_connect(name: &str, host: &str, port: u16, timeout_secs: u64) -> Result<()> {
-    debug!("Connecting wallet {} to Payy node at {}:{}", name, host, port);
+    debug!(
+        "Connecting wallet {} to Payy node at {}:{}",
+        name, host, port
+    );
 
     // Build client with fluent API
     let client = NodeClient::builder()
@@ -120,37 +132,82 @@ async fn handle_connect(name: &str, host: &str, port: u16, timeout_secs: u64) ->
         }
     }
 
-    println!("\n✨ Successfully connected to Pay node at {}:{}", host, port);
+    println!(
+        "\n✨ Successfully connected to Pay node at {}:{}",
+        host, port
+    );
     Ok(())
 }
 
-async fn handle_spend(name: &str, amount: u64) -> Result<()> {
+async fn handle_spend(name: &str, amount: u64) -> Result<(), AppError> {
     // Build client with fluent API
-    let client = NodeClient::builder()
+    let mut client = NodeClient::builder()
         .name(name)
-        .build()?;
+        .build()
+        .map_err(|_| AppError::CantBuildClient())?;
 
     // Check health
     let chain = 5115 as u64; // Citrea chain
+    let token = H160::from_slice(&hex::decode("52f74a8f9bdd29f77a5efd7f6cb44dcf6906a4b6").unwrap()); // Token Contract
 
-    let token =
-        H160::from_slice(&hex::decode("52f74a8f9bdd29f77a5efd7f6cb44dcf6906a4b6").unwrap()); // Token Contract
+    let wallet = Wallet::init(name)?;
+    let balance = client.get_wallet().balance;
 
-    let note = client.get_wallet().new_input_note(amount, chain, token);
-    let json_str = serde_json::to_string_pretty(&note)?;
+    if amount == balance {
+        let input_note = client.get_wallet_mut().spend_note()?;
+        let payload: NoteURLPayload = (&input_note).into();
 
-    std::fs::write("note.json", &json_str)?;
+        // Encode
+        let encoded = payload.encode_activity_url_payload();
+        let json_str = serde_json::to_string_pretty(&input_note)?;
 
-    println!("\nSaved {:?}", note);
+        std::fs::write(format!("{}-note.json", name), &json_str)?;
 
-    Ok(())
+        println!("\nSaved {:?}", input_note);
+        println!("\nEncoded: {encoded}");
+
+        Ok(())
+    } else if amount < balance {
+        /*
+
+        let self_address = hash_merge([self.pk, Element::ZERO]);
+        let change = Note::new(
+            self_address,
+            Element::from(1_u64)
+        );
+        let payee = Note::new(
+            //Element::from(address),
+            self_address,
+            Element::from(1_u64)
+        );
+
+        Ok(Utxo::new_send(
+            [input_note.clone(), InputNote::padding_note()],
+            [payee, change],
+        ))
+
+        */
+
+        Err(AppError::NotSupportedYet())
+    } else {
+        Err(AppError::NotEnoughBalance())
+    }
 }
 
-async fn handle_send(name: &str, host: &str, port: u16, timeout_secs: u64, note: &str) -> Result<()> {
-    debug!("Connecting wallet {} to Payy node at {}:{}", name, host, port);
+async fn handle_receive(
+    name: &str,
+    host: &str,
+    port: u16,
+    timeout_secs: u64,
+    note: &str,
+) -> Result<()> {
+    debug!(
+        "Connecting wallet {} to Payy node at {}:{}",
+        name, host, port
+    );
 
     // Build client with fluent API
-    let client = NodeClient::builder()
+    let mut client = NodeClient::builder()
         .name(name)
         .host(host)
         .port(port)
@@ -183,7 +240,10 @@ async fn handle_send(name: &str, host: &str, port: u16, timeout_secs: u64, note:
         }
     }
 
-    println!("\n✨ Successfully connected to Pay node at {}:{}", host, port);
+    println!(
+        "\n✨ Successfully connected to Pay node at {}:{}",
+        host, port
+    );
 
     let file = format!("{}", note);
     let notefile_path = Path::new(&file);
@@ -196,9 +256,11 @@ async fn handle_send(name: &str, host: &str, port: u16, timeout_secs: u64, note:
 
         // Check health
         let chain = 5115 as u64; // Citrea chain
-            H160::from_slice(&hex::decode("52f74a8f9bdd29f77a5efd7f6cb44dcf6906a4b6").unwrap()); // Token Contract
+        H160::from_slice(&hex::decode("52f74a8f9bdd29f77a5efd7f6cb44dcf6906a4b6").unwrap()); // Token Contract
 
+        let note: Note = client.get_wallet_mut().receive_note(1 as u64);
 
+        /*
         let note = Note {
             kind: input_note.note.kind,
             contract: input_note.note.contract,
@@ -206,6 +268,7 @@ async fn handle_send(name: &str, host: &str, port: u16, timeout_secs: u64, note:
             psi: Element::new(0),
             value: input_note.note.value,
         };
+        */
 
         let utxo = Utxo::new_send(
             [input_note.clone(), InputNote::padding_note()],
@@ -231,9 +294,18 @@ async fn handle_send(name: &str, host: &str, port: u16, timeout_secs: u64, note:
     }
 }
 
-async fn handle_mint(name: &str, host: &str, port: u16, timeout_secs: u64, geth_rpc: &str, secret: &str, amount: u64, recipient: &str, only_snark: bool) -> Result<()> {
+async fn handle_mint(
+    name: &str,
+    host: &str,
+    port: u16,
+    timeout_secs: u64,
+    geth_rpc: &str,
+    secret: &str,
+    amount: u64,
+    only_snark: bool,
+) -> Result<()> {
     // Build client with fluent API
-    let client = NodeClient::builder()
+    let mut client = NodeClient::builder()
         .name(name)
         .host(host)
         .port(port)
@@ -245,14 +317,18 @@ async fn handle_mint(name: &str, host: &str, port: u16, timeout_secs: u64, geth_
     let token = "0x52f74a8f9bdd29f77a5efd7f6cb44dcf6906a4b6"; // Token Contract
     let rollup = "0xb26db42b0cb837010752d7c371ec727141045438";
 
-    let note: Note = client.get_wallet().new_note_to_self(amount);
+    let note: Note = client.get_wallet_mut().receive_note(amount);
     let output_notes = [note.clone(), Note::padding_note()];
     let utxo = zk_primitives::Utxo::new_mint(output_notes.clone());
 
     let snark = utxo.prove().unwrap();
 
+    let _ = client.get_wallet().save();
+
     if !only_snark {
-        client.admin_mint(geth_rpc, chain, secret, rollup, token, &note, &snark).await?;
+        client
+            .admin_mint(geth_rpc, chain, secret, rollup, token, &note, &snark)
+            .await?;
     }
 
     match client.transaction(&snark).await {
@@ -273,9 +349,7 @@ async fn handle_mint(name: &str, host: &str, port: u16, timeout_secs: u64, geth_
 fn init_logging(verbose: bool) {
     let log_level = if verbose { "debug" } else { "info" };
 
-    tracing_subscriber::fmt()
-        .with_env_filter(log_level)
-        .init();
+    tracing_subscriber::fmt().with_env_filter(log_level).init();
 }
 
 /// Initialize error handling with color-eyre
@@ -303,13 +377,28 @@ async fn main() -> Result<()> {
             handle_connect(&cli.name, &cli.host, cli.port, cli.timeout).await?;
         }
         Commands::Spend { amount } => {
-            handle_spend(&cli.name, amount).await?;
+            handle_spend(&cli.name, amount ).await?;
         }
-        Commands::Send { note } => {
-            handle_send(&cli.name, &cli.host, cli.port, cli.timeout, &note).await?;
+        Commands::Receive { note } => {
+            handle_receive(&cli.name, &cli.host, cli.port, cli.timeout, &note).await?;
         }
-        Commands::Mint { geth_rpc, secret, amount, recipient, only_snark } => {
-            handle_mint(&cli.name, &cli.host, cli.port, cli.timeout, &geth_rpc, &secret, amount, &recipient, only_snark).await?;
+        Commands::Mint {
+            geth_rpc,
+            secret,
+            amount,
+            only_snark,
+        } => {
+            handle_mint(
+                &cli.name,
+                &cli.host,
+                cli.port,
+                cli.timeout,
+                &geth_rpc,
+                &secret,
+                amount,
+                only_snark,
+            )
+            .await?;
         }
     }
 

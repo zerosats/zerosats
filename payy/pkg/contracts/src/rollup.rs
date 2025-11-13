@@ -4,7 +4,7 @@ use std::time::Duration;
 use crate::constants::{UTXO_INPUTS, UTXO_N};
 use crate::error::Result;
 use crate::util::{calculate_domain_separator, convert_element_to_h256, convert_fr_to_u256};
-use crate::{Client, client::retry_on_network_failure};
+use crate::{Client};
 use element::Element;
 use eth_util::Eth;
 use ethereum_types::{H160, H256, U64, U256};
@@ -24,6 +24,7 @@ use web3::{
     signing::{Key, SecretKey},
     types::Address,
 };
+use tokio::time::{interval_at, Instant};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ValidatorSet {
@@ -293,7 +294,6 @@ impl RollupContract {
     pub async fn from_eth_node(eth_node: &EthNode, secret_key: SecretKey) -> Result<Self> {
         let rollup_addr = "b26db42b0cb837010752d7c371ec727141045438";
         let client = Client::from_eth_node(eth_node);
-        Self::load(client, 5655, rollup_addr, secret_key).await
         let chain_id = 5655 as u64;
         Self::load(client, &chain_id, rollup_addr, secret_key).await
     }
@@ -1030,9 +1030,23 @@ impl RollupContract {
     pub async fn listen_for_validator_set_added(
         &self,
         interval: Duration,
-    ) -> Result<impl Stream<Item = web3::error::Result<web3::types::Log>> + use<>, web3::Error>
+    ) -> Result<impl Stream<Item = web3::error::Result<web3::types::Log>> +  use<'_>, web3::Error>
     {
-        let filter = FilterBuilder::default()
+        let mut from = self.client.client().eth().block_number().await?;
+        let start = Instant::now() + interval;
+        let mut ticker = interval_at(start, interval);
+
+        let stream = async_stream::try_stream! {
+        loop {
+            ticker.tick().await;
+
+            let latest =  self.client.client().eth().block_number().await?;
+
+            if latest < from {
+                continue;
+            }
+
+            let filter = FilterBuilder::default()
             .address(vec![self.contract.address()])
             .topics(
                 Some(vec![web3::types::H256::from_slice(&Keccak256::digest(
@@ -1042,15 +1056,22 @@ impl RollupContract {
                 None,
                 None,
             )
+                .from_block(BlockNumber::Number(from))
+                .to_block(BlockNumber::Number(latest))
             .build();
 
-        let sub = retry_on_network_failure({
-            let filter = filter.clone();
-            move || self.client.client().eth_filter().create_logs_filter(filter)
-        })
-        .await?;
+            let logs =  self.client.client().eth().logs(filter).await?;
 
-        Ok(sub.stream(interval))
+            for log in logs {
+                yield log;
+            }
+
+            // next polling window
+            from = latest.saturating_add(U64::one());
+        }
+    };
+
+        Ok(stream)
     }
 
     pub fn validators_for_height(&self, height: u64) -> Vec<Address> {

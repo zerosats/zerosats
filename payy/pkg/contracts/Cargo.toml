@@ -26,6 +26,7 @@ web3 = { workspace = true }
 clap = { workspace = true }
 tracing = { workspace = true }
 rlp = "0.5"
+async-stream.workspace = true
 
 [dev-dependencies]
 barretenberg = { workspace = true }

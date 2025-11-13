@@ -675,6 +675,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "async-stream"
+version = "0.3.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0b5a71a6f37880a80d1d7f19efd781e4b5de42c88f0722cc13bcb6cc2cfe8476"
+dependencies = [
+ "async-stream-impl",
+ "futures-core",
+ "pin-project-lite",
+]
+
+[[package]]
+name = "async-stream-impl"
+version = "0.3.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c7c24de15d275a1ecfd47a380fb4d5ec9bfe0933f309ed5e705b775596a3574d"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.104",
+]
+
+[[package]]
 name = "async-trait"
 version = "0.1.74"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1370,6 +1392,33 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b94f61472cee1439c0b966b47e3aca9ae07e45d070759512cd390ea2bebc6675"
 
 [[package]]
+name = "cli"
+version = "0.0.0"
+dependencies = [
+ "barretenberg",
+ "clap",
+ "color-eyre",
+ "contracts",
+ "element",
+ "hash",
+ "hex",
+ "node-interface",
+ "once_cell",
+ "rand 0.8.5",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "smirk",
+ "testutil",
+ "thiserror 1.0.69",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "web3",
+ "zk-primitives",
+]
+
+[[package]]
 name = "cmake"
 version = "0.1.54"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1473,6 +1522,7 @@ version = "0.1.0"
 name = "contracts"
 version = "1.3.0"
 dependencies = [
+ "async-stream",
  "barretenberg",
  "clap",
  "color-eyre",

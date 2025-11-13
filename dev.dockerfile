@@ -1,4 +1,4 @@
-FROM citrea
+FROM rust:1.88-slim-trixie
 
 ENV DEBIAN_FRONTEND=noninteractive
 

@@ -104,7 +104,7 @@ impl NodeShared {
                 .rollup_contract
                 .clone()
                 .at_height(Some(safe_eth_height.as_u64()));
-
+            println!("HERE {}", mint_msgs.mint_hash);
             let Some(get_mint_res) = rollup_contract_at_safe_height
                 .get_mint(&mint_msgs.mint_hash)
                 .await?

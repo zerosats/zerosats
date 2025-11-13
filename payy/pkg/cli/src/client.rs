@@ -3,31 +3,31 @@
 //! Uses a builder pattern with a singleton HTTP client for efficient
 //! connection pooling and session reuse across multiple requests.
 
-use serde_json::json;
-use std::fs;
+use crate::wallet::Wallet;
 use color_eyre::Result;
+use contracts::ConfirmationType;
+use contracts::{RollupContract, USDCContract};
+use element::Element;
+use hash::hash_merge;
+use node_interface::{HeightResponse, TransactionResponse};
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
+use serde_json::json;
+use std::fs;
 use std::path::Path;
+use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
-use std::str::FromStr;
-use tracing::debug;
-use element::Element;
-use crate::wallet::Wallet;
-use node_interface::{HeightResponse, TransactionResponse};
-use zk_primitives::{ Note, UtxoProof};
-use web3::types::H160;
 use testutil::eth::{EthNode, EthNodeOptions};
-use contracts::{ RollupContract, USDCContract } ;
+use tracing::debug;
+use web3::types::H160;
+use web3::types::U256;
 use web3::{
     contract::Contract,
     signing::{Key, SecretKey},
     types::Address,
 };
-use web3::types::U256;
-use contracts::ConfirmationType;
-use hash::hash_merge;
+use zk_primitives::{Note, UtxoProof};
 
 /// Singleton HTTP client shared across all NodeClient instances
 /// Provides connection pooling and efficient resource reuse
@@ -104,42 +104,13 @@ impl NodeClientBuilder {
         let base_url = format!("http://{}:{}/v0", self.host, self.port);
         debug!("Building NodeClient for: {}", base_url);
 
-        let file = format!("{}.json", self.name);
-        let keyfile_path = Path::new(&file);
-
-        let wallet = if keyfile_path.is_file() {
-            println!("\n🗝 Found keyfile!");
-            let json_str = fs::read_to_string(&keyfile_path)?;
-            let json: serde_json::Value = serde_json::from_str(&json_str)?;
-
-            let pk_hex = json["pk"]
-                .as_str()
-                .or_else(|| json["public_key"].as_str())
-                .or_else(|| json["public_key"]["value"].as_str())
-                .ok_or_else(|| color_eyre::eyre::eyre!("PK not found in JSON"))?;
-
-            Wallet::new(Element::from_str(pk_hex)?)
-        } else {
-            println!("\n🎲 Keyfile not found. Generating new secret!");
-            let w = Wallet::random();
-            let json_data = json!({
-                "pk": w.pk.to_string(),
-                "format": "Element hex representation"
-            });
-
-            // Write to file
-            let json_string = serde_json::to_string_pretty(&json_data)?;
-            fs::write(&keyfile_path, json_string)?;
-
-            debug!("Public key dumped to: {}", keyfile_path.display());
-            w
-        };
+        let wallet = Wallet::init(&self.name)?;
 
         Ok(NodeClient {
             base_url,
             timeout: self.timeout,
             http_client: Arc::new(HTTP_CLIENT.clone()),
-            wallet: Arc::new(wallet),
+            wallet,
         })
     }
 }
@@ -159,7 +130,7 @@ pub struct NodeClient {
     base_url: String,
     timeout: Duration,
     http_client: Arc<reqwest::Client>,
-    wallet: Arc<Wallet>
+    wallet: Wallet,
 }
 
 impl NodeClient {
@@ -215,6 +186,10 @@ impl NodeClient {
 
     pub fn get_wallet(&self) -> &Wallet {
         &self.wallet
+    }
+
+    pub fn get_wallet_mut(&mut self) -> &mut Wallet {
+        &mut self.wallet
     }
 
     /// Check the health of the node
@@ -309,26 +284,28 @@ impl NodeClient {
         Ok(tx_resp)
     }
 
-    pub async fn admin_mint(&self, geth_rpc: &str, chain_id: u64, secret: &str, rollup: &str, usdc_contract: &str, note: &Note, utxo: &UtxoProof) -> Result<()> {
+    pub async fn admin_mint(
+        &self,
+        geth_rpc: &str,
+        chain_id: u64,
+        secret: &str,
+        rollup: &str,
+        usdc_contract: &str,
+        note: &Note,
+        utxo: &UtxoProof,
+    ) -> Result<()> {
         //let eth_node = EthNode::default().run_and_deploy().await;
         let sk = SecretKey::from_str(secret)?;
         let client = contracts::Client::new(geth_rpc, None);
         let admin = H160::from_str("687bE257D3590697Da95a264154c71062C701936")?;
 
-        let usdc_contract = USDCContract::load(
-            client.clone(),
-            &chain_id,
-            &usdc_contract,
-            sk.clone(),
-        )
-            .await?;
+        let usdc_contract =
+            USDCContract::load(client.clone(), &chain_id, &usdc_contract, sk.clone()).await?;
 
+        let rollup = RollupContract::load(client, &chain_id, &rollup, sk).await?;
         /*
         let tx_mint_erc20 = usdc_contract
-            .mint(H160::from_str("687bE257D3590697Da95a264154c71062C701936")?, 1000)
-            .await?;
-        let tx_approve = usdc_contract
-            .approve(, 1000)
+            .mint(H160::from_str("687bE257D3590697Da95a264154c71062C701936")?, 10000000)
             .await?;
 
         if usdc_contract
@@ -346,23 +323,16 @@ impl NodeClient {
                 .await?;
         }
         */
-
-        let rollup = RollupContract::load(
-            client,
-            &chain_id,
-            &rollup,
-            sk,
-        ).await?;
-
-        println!("Calling mint method in Rollup for note hash {}", utxo.hash());
+        println!(
+            "Calling mint method in Rollup for note hash {}",
+            utxo.hash()
+        );
 
         let mint_hash = hash_merge([note.psi, Note::padding_note().psi]);
 
         println!("Calling mint method in Rollup for note hash {}", mint_hash);
 
-        let tx = rollup
-            .mint(&mint_hash, &note.value, &note.contract)
-            .await?;
+        let tx = rollup.mint(&mint_hash, &note.value, &note.contract).await?;
 
         println!("Submitted tx {:?}", tx);
 
