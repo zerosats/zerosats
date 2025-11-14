@@ -28,7 +28,7 @@ struct Env {
     evm_secret_key: SecretKey,
     evm_address: Address,
     rollup_contract: RollupContract,
-    usdc_contract: USDCContract,
+    erc20_contract: ERC20Contract,
 }
 
 async fn make_env(options: EthNodeOptions) -> Env {
@@ -40,7 +40,7 @@ async fn make_env(options: EthNodeOptions) -> Env {
     let rollup_contract = RollupContract::from_eth_node(&eth_node, evm_secret_key)
         .await
         .unwrap();
-    let usdc_contract = USDCContract::from_eth_node(&eth_node, evm_secret_key)
+    let erc20_contract = ERC20Contract::from_eth_node(&eth_node, evm_secret_key)
         .await
         .unwrap();
 
@@ -49,7 +49,7 @@ async fn make_env(options: EthNodeOptions) -> Env {
         evm_secret_key,
         evm_address,
         rollup_contract,
-        usdc_contract,
+        erc20_contract,
     }
 }
 
@@ -349,62 +349,6 @@ async fn verify_transfers() {
 }
 
 #[tokio::test]
-async fn mint_with_authorization() {
-    let env = make_env(EthNodeOptions::default()).await;
-    let rollup = Rollup::new();
-    let bob = rollup.new_wallet();
-
-    let amount = 10 * 10u64.pow(6);
-    let note = bob.new_note(amount, bridged_polygon_usdc_note_kind());
-
-    let secret_key = secp256k1::SecretKey::from_slice(&env.evm_secret_key.secret_bytes()).unwrap();
-
-    let nonce = Element::secure_random(rand::thread_rng());
-    let valid_after = U256::from(0);
-    let valid_before = U256::from(u64::MAX);
-
-    let mint_hash = hash_merge([note.psi, Note::padding_note().psi]);
-
-    // Sig for the USDC function
-    let sig_bytes = env.usdc_contract.signature_for_receive(
-        env.evm_address,
-        env.rollup_contract.address(),
-        amount.into(),
-        valid_after,
-        valid_before,
-        H256::from(nonce.to_be_bytes()),
-        secret_key,
-    );
-
-    // Sig for our mint function
-    let mint_sig_bytes = env.rollup_contract.signature_for_mint(
-        mint_hash,
-        amount.into(),
-        note.contract,
-        env.evm_address,
-        valid_after,
-        valid_before,
-        H256::from(nonce.to_be_bytes()),
-        secret_key,
-    );
-
-    env.rollup_contract
-        .mint_with_authorization(
-            &mint_hash,
-            &note.value,
-            &note.contract,
-            &env.evm_address,
-            U256::from(0),
-            U256::from(u64::MAX),
-            H256::from(nonce.to_be_bytes()),
-            &sig_bytes,
-            &mint_sig_bytes,
-        )
-        .await
-        .unwrap();
-}
-
-#[tokio::test]
 async fn mint_from() {
     let env = make_env(EthNodeOptions::default()).await;
     let rollup = Rollup::new();
@@ -415,7 +359,7 @@ async fn mint_from() {
 
     let mint_hash = hash_merge([note.psi, Note::padding_note().psi]);
 
-    env.usdc_contract
+    env.erc20_contract
         .approve_max(env.rollup_contract.address())
         .await
         .unwrap();
@@ -433,7 +377,7 @@ async fn mint_from() {
 async fn burn_to() {
     // Set up the environment
     let env = make_env(EthNodeOptions::default()).await;
-    env.usdc_contract
+    env.erc20_contract
         .transfer(env.rollup_contract.address(), 100)
         .await
         .unwrap();
@@ -509,7 +453,7 @@ async fn burn_to() {
     let sig = sign_block(&env, &agg_agg.new_root(), height, other_hash).await;
 
     // Get the initial balance of the EVM address
-    let initial_balance = env.usdc_contract.balance(env.evm_address).await.unwrap();
+    let initial_balance = env.erc20_contract.balance(env.evm_address).await.unwrap();
 
     env.rollup_contract
         .set_root(&agg_agg.old_root())
@@ -534,7 +478,7 @@ async fn burn_to() {
         .unwrap();
 
     // Verify the balance increased by the burnt amount
-    let new_balance = env.usdc_contract.balance(env.evm_address).await.unwrap();
+    let new_balance = env.erc20_contract.balance(env.evm_address).await.unwrap();
     let burnt_value = U256::from(100);
     assert_eq!(new_balance, initial_balance + burnt_value);
 }
@@ -544,7 +488,7 @@ async fn substitute_burn() {
     // Set up the environment
     let env = make_env(EthNodeOptions::default()).await;
 
-    env.usdc_contract
+    env.erc20_contract
         .transfer(env.rollup_contract.address(), 100)
         .await
         .unwrap();
@@ -625,8 +569,8 @@ async fn substitute_burn() {
     let sig = sign_block(&env, &agg_agg.new_root(), height, other_hash).await;
 
     // Get the initial balance of the EVM address
-    let initial_caller_balance = env.usdc_contract.balance(env.evm_address).await.unwrap();
-    let initial_burn_address_balance = env.usdc_contract.balance(burn_address).await.unwrap();
+    let initial_caller_balance = env.erc20_contract.balance(env.evm_address).await.unwrap();
+    let initial_burn_address_balance = env.erc20_contract.balance(burn_address).await.unwrap();
 
     env.rollup_contract
         .set_root(&agg_agg.old_root())
@@ -648,7 +592,7 @@ async fn substitute_burn() {
 
     tokio::time::sleep(Duration::from_secs(1)).await;
 
-    let balance_after_substitute = env.usdc_contract.balance(env.evm_address).await.unwrap();
+    let balance_after_substitute = env.erc20_contract.balance(env.evm_address).await.unwrap();
     assert_eq!(balance_after_substitute, initial_caller_balance - 100);
 
     // Submit the proof to the contract
@@ -671,11 +615,11 @@ async fn substitute_burn() {
     tokio::time::sleep(Duration::from_secs(2)).await;
 
     // Verify the balance increased by the burnt amount
-    let new_balance = env.usdc_contract.balance(burn_address).await.unwrap();
+    let new_balance = env.erc20_contract.balance(burn_address).await.unwrap();
     let burnt_value = U256::from(100);
     assert_eq!(new_balance, initial_burn_address_balance + burnt_value);
 
-    let new_caller_balance = env.usdc_contract.balance(env.evm_address).await.unwrap();
+    let new_caller_balance = env.erc20_contract.balance(env.evm_address).await.unwrap();
     assert_eq!(new_caller_balance, initial_caller_balance);
 }
 
@@ -706,7 +650,7 @@ async fn substitute_burn() {
 
 //     let mut router_calldata = keccak256(b"burnToAddress(address,address,uint256)")[0..4].to_vec();
 //     router_calldata.extend_from_slice(&web3::ethabi::encode(&[
-//         env.usdc_contract.address().into_token(),
+//         env.erc20_contract.address().into_token(),
 //         owner.into_token(),
 //         convert_element_to_h256(&bob_note.note().value).into_token(),
 //     ]));
@@ -748,19 +692,19 @@ async fn substitute_burn() {
 //         .await
 //         .unwrap();
 
-//     let owner_balance_pre_substitute = env.usdc_contract.balance(owner).await.unwrap();
+//     let owner_balance_pre_substitute = env.erc20_contract.balance(owner).await.unwrap();
 //     assert_eq!(owner_balance_pre_substitute, U256::from(0));
 
 //     let substitutor_balance_pre_substitute =
-//         env.usdc_contract.balance(env.evm_address).await.unwrap();
+//         env.erc20_contract.balance(env.evm_address).await.unwrap();
 
 //     let rollup_balance_pre_substitute = env
-//         .usdc_contract
+//         .erc20_contract
 //         .balance(env.rollup_contract.address())
 //         .await
 //         .unwrap();
 
-//     env.usdc_contract
+//     env.erc20_contract
 //         .approve_max(env.rollup_contract.address())
 //         .await
 //         .unwrap();
@@ -791,16 +735,16 @@ async fn substitute_burn() {
 //     }
 
 //     assert_eq!(
-//         env.usdc_contract.balance(owner).await.unwrap(),
+//         env.erc20_contract.balance(owner).await.unwrap(),
 //         U256::from(100)
 //     );
 //     assert_eq!(
-//         env.usdc_contract.balance(env.evm_address).await.unwrap(),
+//         env.erc20_contract.balance(env.evm_address).await.unwrap(),
 //         substitutor_balance_pre_substitute - U256::from(100)
 //     );
 
 //     assert_eq!(
-//         env.usdc_contract
+//         env.erc20_contract
 //             .balance(env.rollup_contract.address())
 //             .await
 //             .unwrap(),
@@ -899,20 +843,6 @@ fn test_domain_separator_calculation() {
     assert_eq!(
         usdc_domain_separator, expected_usdc,
         "USDC domain separator mismatch"
-    );
-
-    // Test AcrossWithAuthorization contract
-    let across_address: Address = "0xf5bf1a6a83029503157bb3761488bb75d64002e7"
-        .parse()
-        .unwrap();
-    let across_domain_separator =
-        calculate_domain_separator("AcrossWithAuthorization", "1", chain_id, across_address);
-    let expected_across = H256::from_slice(
-        &hex::decode("c0db9d13ac268c870ccb743fd1078a25b4c98ff3ba232167b02aff4340f8c8cc").unwrap(),
-    );
-    assert_eq!(
-        across_domain_separator, expected_across,
-        "AcrossWithAuthorization domain separator mismatch"
     );
 
     // Test Rollup contract

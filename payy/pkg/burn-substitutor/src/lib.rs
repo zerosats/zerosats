@@ -1,4 +1,4 @@
-use contracts::{Address, ConfirmationType, RollupContract, USDCContract};
+use contracts::{Address, ConfirmationType, RollupContract, ERC20Contract};
 use element::Element;
 use eth_util::Eth;
 use eyre::{Context, ContextCompat};
@@ -12,7 +12,7 @@ use zk_primitives::{UtxoKindMessages, UtxoProof};
 
 pub struct BurnSubstitutor {
     rollup_contract: RollupContract,
-    usdc_contract: USDCContract,
+    erc20_contract: ERC20Contract,
     node_rpc_url: String,
     eth_txn_confirm_wait_interval: Duration,
     cursor: Option<OpaqueCursorChoice<ListTxnsPosition>>,
@@ -21,13 +21,13 @@ pub struct BurnSubstitutor {
 impl BurnSubstitutor {
     pub fn new(
         rollup_contract: RollupContract,
-        usdc_contract: USDCContract,
+        erc20_contract: ERC20Contract,
         node_rpc_url: String,
         eth_txn_confirm_wait_interval: Duration,
     ) -> Self {
         BurnSubstitutor {
             rollup_contract,
-            usdc_contract,
+            erc20_contract,
             node_rpc_url,
             eth_txn_confirm_wait_interval,
             cursor: None,
@@ -85,7 +85,7 @@ impl BurnSubstitutor {
 
                 // Check USDC balance and optionally skip if burn exceeds available balance
                 let usdc_balance = self
-                    .usdc_contract
+                    .erc20_contract
                     .balance(self.rollup_contract.signer_address)
                     .await
                     .context("Failed to fetch USDC balance for burn substitution")?;

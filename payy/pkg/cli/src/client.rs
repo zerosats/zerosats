@@ -5,7 +5,7 @@
 
 use crate::wallet::Wallet;
 use color_eyre::Result;
-use contracts::{RollupContract, USDCContract};
+use contracts::{RollupContract, ERC20Contract};
 use hash::hash_merge;
 use node_interface::{HeightResponse, TransactionResponse};
 use once_cell::sync::Lazy;
@@ -280,7 +280,7 @@ impl NodeClient {
         chain_id: u64,
         secret: &str,
         rollup: &str,
-        usdc_contract: &str,
+        erc20_contract: &str,
         note: &Note,
         utxo: &UtxoProof,
     ) -> Result<()> {
@@ -289,21 +289,21 @@ impl NodeClient {
         let client = contracts::Client::new(geth_rpc, None);
         let admin = H160::from_str("687bE257D3590697Da95a264154c71062C701936")?;
 
-        let usdc_contract =
-            USDCContract::load(client.clone(), &chain_id, usdc_contract, sk).await?;
+        let erc20_contract =
+            ERC20Contract::load(client.clone(), &chain_id, erc20_contract, sk).await?;
 
         let rollup = RollupContract::load(client, &chain_id, rollup, sk).await?;
         /*
-        let tx_mint_erc20 = usdc_contract
+        let tx_mint_erc20 = erc20_contract
             .mint(H160::from_str("687bE257D3590697Da95a264154c71062C701936")?, 10000000)
             .await?;
 
-        if usdc_contract
+        if erc20_contract
             .allowance(rollup.signer_address, admin)
             .await?
             != U256::MAX
         {
-            let approve_txn = usdc_contract.approve_max(rollup.address()).await?;
+            let approve_txn = erc20_contract.approve_max(rollup.address()).await?;
             rollup.client
                 .wait_for_confirm(
                     approve_txn,

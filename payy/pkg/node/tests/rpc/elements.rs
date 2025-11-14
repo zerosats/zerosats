@@ -4,7 +4,7 @@ use element::Element;
 use hash::hash_merge;
 use zk_primitives::{InputNote, Note, Utxo};
 
-use super::{Server, ServerConfig, mint, rollup_contract, usdc_contract};
+use super::{Server, ServerConfig, mint, rollup_contract, erc20_contract};
 use barretenberg::Prove;
 use testutil::eth::EthNode;
 
@@ -14,7 +14,7 @@ async fn list_elements_unspent_default() {
     let server_config = ServerConfig::single_node(false);
     let server = Server::setup_and_wait(server_config, Arc::clone(&eth_node)).await;
     let rollup = rollup_contract(server.rollup_contract_addr, &eth_node).await;
-    let usdc = usdc_contract(&rollup, &eth_node).await;
+    let usdc = erc20_contract(&rollup, &eth_node).await;
 
     let alice_pk = Element::new(0xA11CE);
     let alice_address = hash_merge([alice_pk, Element::ZERO]);
@@ -48,7 +48,7 @@ async fn list_elements_include_spent() {
     let server =
         Server::setup_and_wait(ServerConfig::single_node(false), Arc::clone(&eth_node)).await;
     let rollup = rollup_contract(server.rollup_contract_addr, &eth_node).await;
-    let usdc = usdc_contract(&rollup, &eth_node).await;
+    let usdc = erc20_contract(&rollup, &eth_node).await;
 
     let alice_pk = Element::new(0xA11CE);
     let alice_address = hash_merge([alice_pk, Element::ZERO]);

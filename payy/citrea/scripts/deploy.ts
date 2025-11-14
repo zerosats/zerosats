@@ -1,4 +1,4 @@
-import rollupV1Artifact from "../artifacts/contracts/rollup2/RollupV1.sol/RollupV1.json";
+import rollupV1Artifact from "../artifacts/contracts/rollup/RollupV1.sol/RollupV1.json";
 import proxyArtifact
     from "../openzeppelin-contracts/contracts/proxy/transparent/TransparentUpgradeableProxy.sol/TransparentUpgradeableProxy.json";
 

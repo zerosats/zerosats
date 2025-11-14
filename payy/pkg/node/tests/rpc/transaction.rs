@@ -15,7 +15,7 @@ use zk_primitives::{InputNote, Note, Utxo, bridged_polygon_usdc_note_kind};
 
 use crate::rpc::{
     ElementResponse, ListBlocksOrder, ListBlocksQuery, ListTxnOrder, ListTxnsQuery, ServerConfig,
-    burn, mint, mint_with_note, rollup_contract, usdc_contract,
+    burn, mint, mint_with_note, rollup_contract, erc20_contract,
 };
 
 use super::Server;
@@ -84,7 +84,7 @@ async fn mint_transaction_not_in_contract() {
     server_config.safe_eth_height_offset = 1;
     let server = Server::setup_and_wait(server_config, Arc::clone(&eth_node)).await;
     let rollup = rollup_contract(server.rollup_contract_addr, &eth_node).await;
-    let usdc = usdc_contract(&rollup, &eth_node).await;
+    let usdc = erc20_contract(&rollup, &eth_node).await;
 
     let root_hash_before = server.height().await.unwrap().root_hash;
     let alice_pk = Element::new(0xA11CE);
@@ -160,7 +160,7 @@ async fn mint_transaction_only() {
     server_config.safe_eth_height_offset = 1;
     let server = Server::setup_and_wait(server_config, Arc::clone(&eth_node)).await;
     let rollup = rollup_contract(server.rollup_contract_addr, &eth_node).await;
-    let usdc = usdc_contract(&rollup, &eth_node).await;
+    let usdc = erc20_contract(&rollup, &eth_node).await;
 
     let root_hash_before = server.height().await.unwrap().root_hash;
     let alice_pk = Element::new(0xA11CE);
@@ -220,7 +220,7 @@ async fn mint_and_transfer_alice_to_bob() {
     let server =
         Server::setup_and_wait(ServerConfig::single_node(false), Arc::clone(&eth_node)).await;
     let rollup = rollup_contract(server.rollup_contract_addr, &eth_node).await;
-    let usdc = usdc_contract(&rollup, &eth_node).await;
+    let usdc = erc20_contract(&rollup, &eth_node).await;
 
     let alice_pk = Element::new(0xA11CE);
     let alice_address = hash_merge([alice_pk, Element::ZERO]);
@@ -270,7 +270,7 @@ async fn double_spend() {
     let server =
         Server::setup_and_wait(ServerConfig::single_node(false), Arc::clone(&eth_node)).await;
     let rollup = rollup_contract(server.rollup_contract_addr, &eth_node).await;
-    let usdc = usdc_contract(&rollup, &eth_node).await;
+    let usdc = erc20_contract(&rollup, &eth_node).await;
 
     let alice_pk = Element::new(0xA11CE);
     let alice_address = hash_merge([alice_pk, Element::ZERO]);
@@ -357,7 +357,7 @@ async fn send_transaction_with_duplicate_inputs_is_rejected() {
     let server =
         Server::setup_and_wait(ServerConfig::single_node(false), Arc::clone(&eth_node)).await;
     let rollup = rollup_contract(server.rollup_contract_addr, &eth_node).await;
-    let usdc = usdc_contract(&rollup, &eth_node).await;
+    let usdc = erc20_contract(&rollup, &eth_node).await;
 
     let alice_pk = Element::new(0xA11CE);
     let alice_address = hash_merge([alice_pk, Element::ZERO]);
@@ -398,7 +398,7 @@ async fn two_transactions_with_duplicate_output_should_conflict() {
     let server =
         Server::setup_and_wait(ServerConfig::single_node(false), Arc::clone(&eth_node)).await;
     let rollup = rollup_contract(server.rollup_contract_addr, &eth_node).await;
-    let usdc = usdc_contract(&rollup, &eth_node).await;
+    let usdc = erc20_contract(&rollup, &eth_node).await;
 
     let alice_pk = Element::new(0xA11CE);
     let alice_address = hash_merge([alice_pk, Element::ZERO]);
@@ -473,7 +473,7 @@ async fn two_transactions_with_duplicate_input_should_conflict() {
     let server =
         Server::setup_and_wait(ServerConfig::single_node(false), Arc::clone(&eth_node)).await;
     let rollup = rollup_contract(server.rollup_contract_addr, &eth_node).await;
-    let usdc = usdc_contract(&rollup, &eth_node).await;
+    let usdc = erc20_contract(&rollup, &eth_node).await;
 
     let alice_pk = Element::new(0xA11CE);
     let alice_address = hash_merge([alice_pk, Element::ZERO]);
@@ -547,7 +547,7 @@ async fn burn_tx() {
     prover_server.wait().await.unwrap();
 
     let rollup = rollup_contract(server.rollup_contract_addr, &eth_node).await;
-    let usdc = usdc_contract(&rollup, &eth_node).await;
+    let usdc = erc20_contract(&rollup, &eth_node).await;
 
     let alice_pk = Element::new(0xA11CE);
     let alice_address = hash_merge([alice_pk, Element::ZERO]);
@@ -611,7 +611,7 @@ async fn substitute_burn_to_address() {
     prover_server.wait().await.unwrap();
 
     let rollup = rollup_contract(server.rollup_contract_addr, &eth_node).await;
-    let usdc = usdc_contract(&rollup, &eth_node).await;
+    let usdc = erc20_contract(&rollup, &eth_node).await;
 
     let mut burn_substitutor = BurnSubstitutor::new(
         rollup.clone(),
@@ -694,7 +694,7 @@ async fn double_mint() {
     let server =
         Server::setup_and_wait(ServerConfig::single_node(false), Arc::clone(&eth_node)).await;
     let rollup = rollup_contract(server.rollup_contract_addr, &eth_node).await;
-    let usdc = usdc_contract(&rollup, &eth_node).await;
+    let usdc = erc20_contract(&rollup, &eth_node).await;
 
     let alice_pk = Element::new(0xA11CE);
     let alice_address = hash_merge([alice_pk, Element::ZERO]);
@@ -785,7 +785,7 @@ async fn query_transactions() {
         Server::setup_and_wait(ServerConfig::single_node(false), Arc::clone(&eth_node)).await,
     );
     let rollup = rollup_contract(server.rollup_contract_addr, &eth_node).await;
-    let usdc = usdc_contract(&rollup, &eth_node).await;
+    let usdc = erc20_contract(&rollup, &eth_node).await;
 
     let alice_pk = Element::new(0xA11CE);
     let alice_address = hash_merge([alice_pk, Element::ZERO]);
@@ -1008,7 +1008,7 @@ async fn query_blocks() {
     let server =
         Server::setup_and_wait(ServerConfig::single_node(false), Arc::clone(&eth_node)).await;
     let rollup = rollup_contract(server.rollup_contract_addr, &eth_node).await;
-    let usdc = usdc_contract(&rollup, &eth_node).await;
+    let usdc = erc20_contract(&rollup, &eth_node).await;
 
     let alice_pk = Element::new(0xA11CE);
     let alice_address = hash_merge([alice_pk, Element::ZERO]);

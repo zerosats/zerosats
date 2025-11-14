@@ -14,7 +14,7 @@ use web3::{
 };
 
 #[derive(Debug, Clone)]
-pub struct USDCContract {
+pub struct ERC20Contract {
     client: Client,
     contract: Contract<Http>,
     signer: SecretKey,
@@ -26,7 +26,7 @@ pub struct USDCContract {
     block_height: Option<U64>,
 }
 
-impl USDCContract {
+impl ERC20Contract {
     pub fn new(
         client: Client,
         contract: Contract<Http>,
@@ -65,24 +65,24 @@ impl USDCContract {
     pub async fn load(
         client: Client,
         chain_id: &u64,
-        usdc_contract_addr: &str,
+        erc20_contract_addr: &str,
         signer: SecretKey,
     ) -> Result<Self> {
         let contract_json =
-            include_str!("../../../citrea/artifacts/contracts/IUSDC.sol/IUSDC.json");
-        let contract = client.load_contract_from_str(usdc_contract_addr, contract_json)?;
+            include_str!("../../../citrea/openzeppelin-contracts/token/ERC20/IERC20.json");
+        let contract = client.load_contract_from_str(erc20_contract_addr, contract_json)?;
         let domain_separator = calculate_domain_separator(
             "USD Coin",
             "2",
             U256::from(chain_id.to_owned()),
-            usdc_contract_addr.parse()?,
+            erc20_contract_addr.parse()?,
         );
         Ok(Self::new(
             client,
             contract,
             signer,
             domain_separator,
-            usdc_contract_addr.parse()?,
+            erc20_contract_addr.parse()?,
         ))
     }
 
@@ -106,57 +106,6 @@ impl USDCContract {
             .await
     }
 
-    #[allow(clippy::too_many_arguments)]
-    pub fn signature_for_receive(
-        &self,
-        from: Address,
-        to: Address,
-        amount: U256,
-        valid_after: U256,
-        valid_before: U256,
-        nonce: H256,
-        signer: secp256k1::SecretKey,
-    ) -> [u8; 65] {
-        let msg_digest = Self::signature_msg_digest_for_receive(
-            self.domain_separator,
-            from,
-            to,
-            amount,
-            valid_after,
-            valid_before,
-            nonce,
-        );
-
-        // Sig for the USDC's receiveWithAuthorization
-        let signature =
-            SECP256K1.sign_ecdsa_recoverable(&Message::from_digest(msg_digest), &signer);
-
-        let (recovery_id, signature) = signature.serialize_compact();
-        let mut sig_bytes = [0u8; 65];
-        sig_bytes[0..64].copy_from_slice(&signature[0..64]);
-        sig_bytes[64] = recovery_id.to_i32() as u8;
-        sig_bytes
-    }
-
-    /// Prepares signature message digest for `receiveWithAuthorization`.
-    /// The digest is computed as follows:
-    /// ```no_compile
-    /// keccak256(
-    ///     b'\x19\x01',
-    ///     DOMAIN_SEPARATOR,
-    ///     keccak256(
-    ///         abi.encode(
-    ///             RECEIVE_WITH_AUTHORIZATION_TYPEHASH,
-    ///             from,
-    ///             to,
-    ///             value,
-    ///             validAfter,
-    ///             validBefore,
-    ///             nonce
-    ///         )
-    ///     )
-    /// )
-    /// ```
     pub fn signature_msg_digest_for_receive(
         domain_separator: H256,
         from: Address,
@@ -290,7 +239,7 @@ impl USDCContract {
 //     async fn test_approve() {
 //         let env = get_env();
 //         let allowance = env
-//             .usdc_contract
+//             .erc20_contract
 //             .allowance(env.evm_address, env.rollup_contract_addr)
 //             .await
 //             .unwrap();

@@ -6,7 +6,7 @@ use testutil::eth::EthNode;
 
 use crate::rpc::{ServerConfig, mint, rollup_contract};
 
-use super::usdc_contract;
+use super::erc20_contract;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn merkle() {
@@ -15,7 +15,7 @@ async fn merkle() {
         super::Server::setup_and_wait(ServerConfig::single_node(false), Arc::clone(&eth_node))
             .await;
     let rollup = rollup_contract(server.rollup_contract_addr, &eth_node).await;
-    let usdc = usdc_contract(&rollup, &eth_node).await;
+    let usdc = erc20_contract(&rollup, &eth_node).await;
 
     let (note, eth_mint_tx, tx) = mint(
         &rollup,
