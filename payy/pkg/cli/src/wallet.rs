@@ -1,19 +1,12 @@
-use contracts::{util::convert_h160_to_element, Address, RollupContract, SecretKey, USDCContract};
 use element::Element;
 use hash::hash_merge;
 use rand::{rngs::OsRng, RngCore};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::num::ParseIntError;
-use std::path::{Path, PathBuf};
-use std::str::FromStr;
-use std::sync::Arc;
-use std::time::Duration;
+use std::path::Path;
 use web3::types::H160;
-use zk_primitives::Utxo;
-use zk_primitives::{
-    generate_note_kind_bridge_evm, get_address_for_private_key, InputNote, MerklePath, Note,
-};
+use zk_primitives::{generate_note_kind_bridge_evm, get_address_for_private_key, InputNote, Note};
 
 // Error types for wallet operations
 #[derive(Debug, thiserror::Error)]
@@ -78,14 +71,14 @@ impl Wallet {
 
     /// Load wallet from JSON file
     pub fn init(name: &str) -> Result<Self, WalletError> {
-        let file = format!("{}.json", name);
+        let file = format!("{name}.json");
         let wallet_file = Path::new(&file);
 
         if wallet_file.is_file() {
-            let json_str = fs::read_to_string(&wallet_file)?;
+            let json_str = fs::read_to_string(wallet_file)?;
             Ok(serde_json::from_str(&json_str)?)
         } else {
-            let mut wallet = Self::random(Some(name.to_string()));
+            let wallet = Self::random(Some(name.to_string()));
             wallet.save()?;
             Ok(wallet)
         }
@@ -94,7 +87,7 @@ impl Wallet {
     /// Save wallet to JSON file (uses configured path or provided path)
     pub fn save(&self) -> Result<(), WalletError> {
         if let Some(name) = &self.name {
-            let file = format!("{}.json", name);
+            let file = format!("{name}.json");
             let path = Path::new(&file);
             self.save_to(path)
         } else {

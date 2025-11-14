@@ -7,7 +7,6 @@ use cli::NodeClient;
 use cli::Wallet;
 
 use barretenberg::Prove;
-use element::Element;
 use std::fs;
 use std::path::Path;
 use zk_primitives::InputNote;
@@ -67,6 +66,16 @@ enum Commands {
         #[arg(long, default_value = "note.json")]
         note: String,
     },
+    Contract {
+        #[arg(required = true, long, short)]
+        geth_rpc: String,
+
+        #[arg(required = true, long, short)]
+        secret: String,
+
+        #[arg(required = true, long, short)]
+        rollup: String,
+    },
 }
 
 use thiserror::Error;
@@ -116,7 +125,7 @@ async fn handle_connect(name: &str, host: &str, port: u16, timeout_secs: u64) ->
         Err(e) => {
             error!("Health check failed: {}", e);
             eprintln!("\n❌ Health Check Failed!");
-            eprintln!("   Error: {}", e);
+            eprintln!("   Error: {e}");
             return Err(e);
         }
     }
@@ -124,18 +133,15 @@ async fn handle_connect(name: &str, host: &str, port: u16, timeout_secs: u64) ->
     // Also fetch height for confirmation
     match client.get_height().await {
         Ok(height) => {
-            println!("   Height (verified): {}", height);
+            println!("   Height (verified): {height}");
         }
         Err(e) => {
-            eprintln!("   Warning: Could not verify height: {}", e);
+            eprintln!("   Warning: Could not verify height: {e}");
             tracing::warn!("Height verification failed: {}", e);
         }
     }
 
-    println!(
-        "\n✨ Successfully connected to Pay node at {}:{}",
-        host, port
-    );
+    println!("\n✨ Successfully connected to Pay node at {host}:{port}");
     Ok(())
 }
 
@@ -147,7 +153,7 @@ async fn handle_spend(name: &str, amount: u64) -> Result<(), AppError> {
         .map_err(|_| AppError::CantBuildClient())?;
 
     // Check health
-    let chain = 5115 as u64; // Citrea chain
+    let chain = 5115_u64; // Citrea chain
     let token = H160::from_slice(&hex::decode("52f74a8f9bdd29f77a5efd7f6cb44dcf6906a4b6").unwrap()); // Token Contract
 
     let wallet = Wallet::init(name)?;
@@ -161,9 +167,9 @@ async fn handle_spend(name: &str, amount: u64) -> Result<(), AppError> {
         let encoded = payload.encode_activity_url_payload();
         let json_str = serde_json::to_string_pretty(&input_note)?;
 
-        std::fs::write(format!("{}-note.json", name), &json_str)?;
+        std::fs::write(format!("{name}-note.json"), &json_str)?;
 
-        println!("\nSaved {:?}", input_note);
+        println!("\nSaved {input_note:?}");
         println!("\nEncoded: {encoded}");
 
         Ok(())
@@ -224,7 +230,7 @@ async fn handle_receive(
         Err(e) => {
             error!("Health check failed: {}", e);
             eprintln!("\n❌ Health Check Failed!");
-            eprintln!("   Error: {}", e);
+            eprintln!("   Error: {e}");
             return Err(e);
         }
     }
@@ -232,33 +238,30 @@ async fn handle_receive(
     // Also fetch height for confirmation
     match client.get_height().await {
         Ok(height) => {
-            println!("   Height (verified): {}", height);
+            println!("   Height (verified): {height}");
         }
         Err(e) => {
-            eprintln!("   Warning: Could not verify height: {}", e);
+            eprintln!("   Warning: Could not verify height: {e}");
             tracing::warn!("Height verification failed: {}", e);
         }
     }
 
-    println!(
-        "\n✨ Successfully connected to Pay node at {}:{}",
-        host, port
-    );
+    println!("\n✨ Successfully connected to Pay node at {host}:{port}");
 
-    let file = format!("{}", note);
+    let file = note.to_string();
     let notefile_path = Path::new(&file);
 
     if notefile_path.is_file() {
         println!("\n🗝 Found note file!");
-        let json_str = fs::read_to_string(&notefile_path)?;
+        let json_str = fs::read_to_string(notefile_path)?;
         let json: serde_json::Value = serde_json::from_str(&json_str)?;
         let input_note: InputNote = serde_json::from_str(&json_str)?;
 
         // Check health
-        let chain = 5115 as u64; // Citrea chain
+        let chain = 5115_u64; // Citrea chain
         H160::from_slice(&hex::decode("52f74a8f9bdd29f77a5efd7f6cb44dcf6906a4b6").unwrap()); // Token Contract
 
-        let note: Note = client.get_wallet_mut().receive_note(1 as u64);
+        let note: Note = client.get_wallet_mut().receive_note(1_u64);
 
         /*
         let note = Note {
@@ -286,7 +289,7 @@ async fn handle_receive(
             }
             Err(e) => {
                 eprintln!("\n❌ Could not send transaction!");
-                return Err(e);
+                Err(e)
             }
         }
     } else {
@@ -313,7 +316,7 @@ async fn handle_mint(
         .build()?;
 
     // Check health
-    let chain = 5115 as u64; // Citrea chain
+    let chain = 5115_u64; // Citrea chain
     let token = "0x52f74a8f9bdd29f77a5efd7f6cb44dcf6906a4b6"; // Token Contract
     let rollup = "0xb26db42b0cb837010752d7c371ec727141045438";
 
@@ -340,9 +343,18 @@ async fn handle_mint(
         }
         Err(e) => {
             eprintln!("\n❌ Could not send transaction!");
-            return Err(e);
+            Err(e)
         }
     }
+}
+
+async fn handle_rollup(geth_rpc: &str, secret: &str, rollup: &str) -> Result<()> {
+    // Build client with fluent API
+    let client = NodeClient::builder().build()?;
+    let chain = 5115_u64; // Citrea chain
+    let _ = client.state(geth_rpc, chain, secret, rollup).await?;
+
+    Ok(())
 }
 
 /// Initialize logging based on verbosity level
@@ -377,7 +389,7 @@ async fn main() -> Result<()> {
             handle_connect(&cli.name, &cli.host, cli.port, cli.timeout).await?;
         }
         Commands::Spend { amount } => {
-            handle_spend(&cli.name, amount ).await?;
+            handle_spend(&cli.name, amount).await?;
         }
         Commands::Receive { note } => {
             handle_receive(&cli.name, &cli.host, cli.port, cli.timeout, &note).await?;
@@ -399,6 +411,9 @@ async fn main() -> Result<()> {
                 only_snark,
             )
             .await?;
+        }
+        Commands::Contract { geth_rpc, secret, rollup } => {
+            handle_rollup(&geth_rpc, &secret, &rollup).await?;
         }
     }
 

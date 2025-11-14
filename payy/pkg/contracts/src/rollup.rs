@@ -1,10 +1,10 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use crate::Client;
 use crate::constants::{UTXO_INPUTS, UTXO_N};
 use crate::error::Result;
 use crate::util::{calculate_domain_separator, convert_element_to_h256, convert_fr_to_u256};
-use crate::{Client};
 use element::Element;
 use eth_util::Eth;
 use ethereum_types::{H160, H256, U64, U256};
@@ -12,7 +12,8 @@ use parking_lot::RwLock;
 use secp256k1::{Message, SECP256K1};
 use sha3::{Digest, Keccak256};
 use testutil::eth::EthNode;
-use tracing::{ info, warn };
+use tokio::time::{Instant, interval_at};
+use tracing::{info, warn};
 use web3::contract::tokens::{Detokenize, Tokenizable, TokenizableItem, Tokenize};
 use web3::ethabi::Token;
 use web3::futures::{Stream, StreamExt};
@@ -24,7 +25,6 @@ use web3::{
     signing::{Key, SecretKey},
     types::Address,
 };
-use tokio::time::{interval_at, Instant};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ValidatorSet {
@@ -270,7 +270,10 @@ impl RollupContract {
         let contract_json =
             include_str!("../../../citrea/artifacts/contracts/rollup2/RollupV1.sol/RollupV1.json");
         let contract = client.load_contract_from_str(rollup_contract_addr, contract_json)?;
-        info!("Starting node instance. ChainId {}, contract {}", chain_id, rollup_contract_addr);
+        info!(
+            "Starting node instance. ChainId {}, contract {}",
+            chain_id, rollup_contract_addr
+        );
         let domain_separator = calculate_domain_separator(
             "Rollup",
             "1",
@@ -1030,46 +1033,46 @@ impl RollupContract {
     pub async fn listen_for_validator_set_added(
         &self,
         interval: Duration,
-    ) -> Result<impl Stream<Item = web3::error::Result<web3::types::Log>> +  use<'_>, web3::Error>
+    ) -> Result<impl Stream<Item = web3::error::Result<web3::types::Log>> + use<'_>, web3::Error>
     {
         let mut from = self.client.client().eth().block_number().await?;
         let start = Instant::now() + interval;
         let mut ticker = interval_at(start, interval);
 
         let stream = async_stream::try_stream! {
-        loop {
-            ticker.tick().await;
+            loop {
+                ticker.tick().await;
 
-            let latest =  self.client.client().eth().block_number().await?;
+                let latest =  self.client.client().eth().block_number().await?;
 
-            if latest < from {
-                continue;
+                if latest < from {
+                    continue;
+                }
+
+                let filter = FilterBuilder::default()
+                .address(vec![self.contract.address()])
+                .topics(
+                    Some(vec![web3::types::H256::from_slice(&Keccak256::digest(
+                        "ValidatorSetAdded(uint256,uint256)",
+                    ))]),
+                    None,
+                    None,
+                    None,
+                )
+                    .from_block(BlockNumber::Number(from))
+                    .to_block(BlockNumber::Number(latest))
+                .build();
+
+                let logs =  self.client.client().eth().logs(filter).await?;
+
+                for log in logs {
+                    yield log;
+                }
+
+                // next polling window
+                from = latest.saturating_add(U64::one());
             }
-
-            let filter = FilterBuilder::default()
-            .address(vec![self.contract.address()])
-            .topics(
-                Some(vec![web3::types::H256::from_slice(&Keccak256::digest(
-                    "ValidatorSetAdded(uint256,uint256)",
-                ))]),
-                None,
-                None,
-                None,
-            )
-                .from_block(BlockNumber::Number(from))
-                .to_block(BlockNumber::Number(latest))
-            .build();
-
-            let logs =  self.client.client().eth().logs(filter).await?;
-
-            for log in logs {
-                yield log;
-            }
-
-            // next polling window
-            from = latest.saturating_add(U64::one());
-        }
-    };
+        };
 
         Ok(stream)
     }
@@ -1135,5 +1138,92 @@ impl RollupContract {
             .await?;
 
         Ok(usdc)
+    }
+
+    #[tracing::instrument(err, ret, skip(self))]
+    pub async fn version(&self) -> Result<u8> {
+        let version = self
+            .client
+            .query(
+                &self.contract,
+                "version",
+                (),
+                None,
+                Default::default(),
+                self.block_height.map(|x| x.into()),
+            )
+            .await?;
+
+        Ok(version)
+    }
+
+    #[tracing::instrument(err, ret, skip(self))]
+    pub async fn zk_verifiers(&self, key_hash: H256) -> Result<(H160, u32, bool)> {
+        let verifier = self
+            .client
+            .query(
+                &self.contract,
+                "zkVerifiers",
+                key_hash,
+                None,
+                Default::default(),
+                self.block_height.map(|x| x.into()),
+            )
+            .await?;
+
+        Ok(verifier)
+    }
+
+    #[tracing::instrument(err, ret, skip(self))]
+    pub async fn mints(&self) -> Result<(H256, U256, bool)> {
+        let mint = self
+            .client
+            .query(
+                &self.contract,
+                "mints",
+                (),
+                None,
+                Default::default(),
+                self.block_height.map(|x| x.into()),
+            )
+            .await?;
+
+        Ok(mint)
+    }
+
+    #[tracing::instrument(err, ret, skip(self))]
+    pub async fn substituted_burns(&self, key: H256) -> Result<H160> {
+        let address = self
+            .client
+            .query(
+                &self.contract,
+                "substitutedBurns",
+                key,
+                None,
+                Default::default(),
+                self.block_height.map(|x| x.into()),
+            )
+            .await?;
+
+        Ok(address)
+    }
+
+    // Array getter (requires index)
+
+    #[tracing::instrument(err, ret, skip(self))]
+    pub async fn zk_verifier_keys(&self, index: U256) -> Result<H256> {
+        let key = self
+            .client
+            .query(
+                &self.contract,
+                "zkVerifierKeys",
+                index,
+                None,
+                Default::default(),
+                self.block_height.map(|x| x.into()),
+            )
+            .await?;
+
+        Ok(key)
     }
 }

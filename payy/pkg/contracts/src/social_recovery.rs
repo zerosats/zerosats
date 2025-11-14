@@ -116,8 +116,9 @@ impl SocialRecoveryContract {
     }
 
     pub async fn load(client: Client, contract_addr: &str, signer: SecretKey) -> Result<Self> {
-        let contract_json =
-            include_str!("../../../citrea/artifacts/contracts/SocialRecovery.sol/SocialRecovery.json");
+        let contract_json = include_str!(
+            "../../../citrea/artifacts/contracts/SocialRecovery.sol/SocialRecovery.json"
+        );
         let contract = client.load_contract_from_str(contract_addr, contract_json)?;
 
         Ok(Self::new(client, contract, signer, contract_addr.parse()?))

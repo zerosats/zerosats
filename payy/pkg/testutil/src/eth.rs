@@ -68,8 +68,12 @@ impl EthNode {
 
         command.arg("--dev");
         command.arg("--da-layer").arg("mock");
-        command.arg("--rollup-config-path").arg("/configs/mock/sequencer_rollup_config.toml");
-        command.arg("--sequencer").arg("/configs/mock/sequencer_config.toml");
+        command
+            .arg("--rollup-config-path")
+            .arg("/configs/mock/sequencer_rollup_config.toml");
+        command
+            .arg("--sequencer")
+            .arg("/configs/mock/sequencer_config.toml");
         command.arg("--genesis-paths").arg("/genesis/mock/");
 
         let should_log = std::env::var("LOG_CITREA_OUTPUT")
@@ -118,18 +122,19 @@ impl EthNode {
             let req = client
                 .post(self.rpc_url())
                 .json(&json!({
-                "jsonrpc": "2.0",
-                "method": "eth_blockNumber",
-                "params": [],
-                "id": 1
-            }))
+                    "jsonrpc": "2.0",
+                    "method": "eth_blockNumber",
+                    "params": [],
+                    "id": 1
+                }))
                 .build()?;
 
             match client.execute(req).await {
                 Ok(res) if res.status().is_success() => {
                     if let Ok(body) = res.json::<serde_json::Value>().await {
                         if let Some(result) = body.get("result").and_then(|r| r.as_str()) {
-                            let block_height = u64::from_str_radix(result.trim_start_matches("0x"), 16)?;
+                            let block_height =
+                                u64::from_str_radix(result.trim_start_matches("0x"), 16)?;
                             return Ok(block_height);
                         }
                     }
@@ -211,7 +216,10 @@ impl EthNode {
         .await
         .unwrap();
 
-        eth_node.wait_for_next_block().await.expect("Failed to wait for Citrea node");
+        eth_node
+            .wait_for_next_block()
+            .await
+            .expect("Failed to wait for Citrea node");
 
         let eth_node = tokio::task::spawn_blocking(move || {
             // Deploy is flaky

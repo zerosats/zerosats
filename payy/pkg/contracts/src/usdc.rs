@@ -68,7 +68,8 @@ impl USDCContract {
         usdc_contract_addr: &str,
         signer: SecretKey,
     ) -> Result<Self> {
-        let contract_json = include_str!("../../../citrea/artifacts/contracts/IUSDC.sol/IUSDC.json");
+        let contract_json =
+            include_str!("../../../citrea/artifacts/contracts/IUSDC.sol/IUSDC.json");
         let contract = client.load_contract_from_str(usdc_contract_addr, contract_json)?;
         let domain_separator = calculate_domain_separator(
             "USD Coin",

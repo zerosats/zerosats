@@ -7,7 +7,7 @@ use element::Element;
 use ethereum_types::{H256, U256};
 use hash::hash_merge;
 use secp256k1::PublicKey;
-use std::{ str::FromStr, sync::Arc, time::Duration };
+use std::{str::FromStr, sync::Arc, time::Duration};
 use test_rollup::rollup::Rollup;
 use testutil::ACCOUNT_1_SK;
 use testutil::eth::{EthNode, EthNodeOptions};

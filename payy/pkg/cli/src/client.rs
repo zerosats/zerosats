@@ -5,28 +5,18 @@
 
 use crate::wallet::Wallet;
 use color_eyre::Result;
-use contracts::ConfirmationType;
 use contracts::{RollupContract, USDCContract};
-use element::Element;
 use hash::hash_merge;
 use node_interface::{HeightResponse, TransactionResponse};
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use std::fs;
-use std::path::Path;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
-use testutil::eth::{EthNode, EthNodeOptions};
 use tracing::debug;
+use web3::signing::SecretKey;
 use web3::types::H160;
-use web3::types::U256;
-use web3::{
-    contract::Contract,
-    signing::{Key, SecretKey},
-    types::Address,
-};
 use zk_primitives::{Note, UtxoProof};
 
 /// Singleton HTTP client shared across all NodeClient instances
@@ -300,9 +290,9 @@ impl NodeClient {
         let admin = H160::from_str("687bE257D3590697Da95a264154c71062C701936")?;
 
         let usdc_contract =
-            USDCContract::load(client.clone(), &chain_id, &usdc_contract, sk.clone()).await?;
+            USDCContract::load(client.clone(), &chain_id, usdc_contract, sk).await?;
 
-        let rollup = RollupContract::load(client, &chain_id, &rollup, sk).await?;
+        let rollup = RollupContract::load(client, &chain_id, rollup, sk).await?;
         /*
         let tx_mint_erc20 = usdc_contract
             .mint(H160::from_str("687bE257D3590697Da95a264154c71062C701936")?, 10000000)
@@ -324,17 +314,17 @@ impl NodeClient {
         }
         */
         println!(
-            "Calling mint method in Rollup for note hash {}",
-            utxo.hash()
+
+
         );
 
         let mint_hash = hash_merge([note.psi, Note::padding_note().psi]);
 
-        println!("Calling mint method in Rollup for note hash {}", mint_hash);
+        println!("Note hash {:#x}, mint hash {:#x}", utxo.hash(), mint_hash);
 
         let tx = rollup.mint(&mint_hash, &note.value, &note.contract).await?;
 
-        println!("Submitted tx {:?}", tx);
+        println!("\nSubmitted MINT tx {:#x}\n", tx);
 
         while rollup
             .client
@@ -347,6 +337,23 @@ impl NodeClient {
         {
             tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
         }
+
+        Ok(())
+    }
+
+    pub async fn state(&self, geth_rpc: &str, chain_id: u64, secret: &str, rollup: &str) -> Result<()> {
+        let sk = SecretKey::from_str(secret)?;
+        let client = contracts::Client::new(geth_rpc, None);
+        let rollup = RollupContract::load(client, &chain_id, rollup, sk).await?;
+        let rh = rollup.root_hash().await?;
+        let b = rollup.block_height().await?;
+        let token = rollup.usdc().await?;
+        println!("\nRollup State Info\n");
+        println!("\tChain      :{} ", chain_id);
+        println!("\tToken      :{:#x} ", token);
+
+        println!("\tBlock      :{} ", b);
+        println!("\tRoot hash  :{:#x} ", rh);
 
         Ok(())
     }
