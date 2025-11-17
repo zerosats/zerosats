@@ -295,7 +295,7 @@ impl RollupContract {
     }
 
     pub async fn from_eth_node(eth_node: &EthNode, secret_key: SecretKey) -> Result<Self> {
-        let rollup_addr = "b26db42b0cb837010752d7c371ec727141045438";
+        let rollup_addr = "cf7ed3acca5a467e9e704c703e8d87f634fb0fc9";
         let client = Client::from_eth_node(eth_node);
         let chain_id = 5655 as u64;
         Self::load(client, &chain_id, rollup_addr, secret_key).await
@@ -1001,12 +1001,12 @@ impl RollupContract {
     }
 
     #[tracing::instrument(err, ret, skip(self))]
-    pub async fn usdc(&self) -> Result<H160> {
-        let usdc = self
+    pub async fn token(&self) -> Result<H160> {
+        let token = self
             .client
             .query(
                 &self.contract,
-                "usdc",
+                "token",
                 (),
                 None,
                 Default::default(),
@@ -1014,7 +1014,7 @@ impl RollupContract {
             )
             .await?;
 
-        Ok(usdc)
+        Ok(token)
     }
 
     #[tracing::instrument(err, ret, skip(self))]

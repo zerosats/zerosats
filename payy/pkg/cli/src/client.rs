@@ -152,7 +152,7 @@ impl NodeClient {
     /// ```no_run
     /// use cli::NodeClient;
     ///
-    /// let client = NodeClient::new("localhost", 8091, 10)?;
+    /// let client = NodeClient::new("alice", "localhost", 10, 8091)?;
     /// # Ok::<(), color_eyre::eyre::Error>(())
     /// ```
     pub fn new(name: &str, host: &str, port: u16, timeout_secs: u64) -> Result<Self> {
@@ -347,7 +347,7 @@ impl NodeClient {
         let rollup = RollupContract::load(client, &chain_id, rollup, sk).await?;
         let rh = rollup.root_hash().await?;
         let b = rollup.block_height().await?;
-        let token = rollup.usdc().await?;
+        let token = rollup.token().await?;
         println!("\nRollup State Info\n");
         println!("\tChain      :{} ", chain_id);
         println!("\tToken      :{:#x} ", token);

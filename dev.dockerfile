@@ -1,4 +1,4 @@
-FROM rust:1.88-slim-trixie
+FROM satsbridge/ciphera:citrea
 
 ENV DEBIAN_FRONTEND=noninteractive
 

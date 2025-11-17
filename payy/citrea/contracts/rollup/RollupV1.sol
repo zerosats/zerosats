@@ -81,7 +81,7 @@ contract RollupV1 is Initializable, OwnableUpgradeable {
     bytes32[] public zkVerifierKeys;
 
     // Contracts
-    IERC20 public erc20_token;
+    IERC20 public token;
 
     // Core rollup values
     uint256 public blockHeight;
@@ -125,7 +125,7 @@ contract RollupV1 is Initializable, OwnableUpgradeable {
 
         __Ownable_init(owner);
 
-        erc20_token = IERC20(_tokenAddress);
+        token = IERC20(_tokenAddress);
 
         // Set the init aggregate verifier
         _setZkVerifierProperties(verifierKeyHash, _verifierAddress, 6 * 5);

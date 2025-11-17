@@ -87,11 +87,11 @@ impl ERC20Contract {
     }
 
     pub async fn from_eth_node(eth_node: &EthNode, signer: SecretKey) -> Result<Self> {
-        let usdc_addr = "5fbdb2315678afecb367f032d93f642f64180aa3";
+        let erc20_addr = "5fbdb2315678afecb367f032d93f642f64180aa3";
 
         let client = Client::from_eth_node(eth_node);
         let chain_id = 5655 as u64;
-        Self::load(client, &chain_id, usdc_addr, signer).await
+        Self::load(client, &chain_id, erc20_addr, signer).await
     }
 
     pub async fn call(&self, func: &str, params: impl Tokenize + Clone) -> Result<H256> {
