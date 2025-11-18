@@ -140,7 +140,7 @@ contract RollupV1 is Initializable, OwnableUpgradeable {
             0x0577b5b4aa3eaba75b2a919d5d7c63b7258aa507d38e346bf2ff1d48790379ff
         );
         tokens[
-            0x000200000000000000893c499c542cef5e3811e1192ce70d8cc03d5c33590000
+            0x000200000000000013fb8d0c9d1c17ae5e40fff9be350f57840e9e66cd930000
         ] = _tokenAddress;
         burnSubstitutors[owner] = true;
     }

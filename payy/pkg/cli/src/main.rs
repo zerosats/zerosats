@@ -38,6 +38,15 @@ struct Cli {
     /// Request timeout in seconds
     #[arg(global = true, short, long, default_value = "10")]
     timeout: u64,
+
+    #[arg(global = true, short, long, default_value = "5115")] // Citrea testnet default
+    chain: u64,
+
+    #[arg(global = true, long, default_value = "0x8d0c9d1c17aE5e40ffF9bE350f57840E9E66Cd93")] // WCBTC Testnet
+    token: String,
+
+    #[arg(global = true, long, default_value = "0x40f811540041401bd07f37fa45ef2d769c9ca977")]
+    rollup: String,
 }
 
 #[derive(Subcommand, Debug)]
@@ -72,9 +81,6 @@ enum Commands {
 
         #[arg(required = true, long, short)]
         secret: String,
-
-        #[arg(required = true, long, short)]
-        rollup: String,
     },
 }
 
@@ -205,6 +211,8 @@ async fn handle_receive(
     host: &str,
     port: u16,
     timeout_secs: u64,
+    chain: u64,
+    token: &str,
     note: &str,
 ) -> Result<()> {
     debug!(
@@ -257,11 +265,7 @@ async fn handle_receive(
         let json: serde_json::Value = serde_json::from_str(&json_str)?;
         let input_note: InputNote = serde_json::from_str(&json_str)?;
 
-        // Check health
-        let chain = 5115_u64; // Citrea chain
-        H160::from_slice(&hex::decode("52f74a8f9bdd29f77a5efd7f6cb44dcf6906a4b6").unwrap()); // Token Contract
-
-        let note: Note = client.get_wallet_mut().receive_note(1_u64);
+        let note: Note = client.get_wallet_mut().receive_note(1_u64, chain, token);
 
         /*
         let note = Note {
@@ -303,6 +307,9 @@ async fn handle_mint(
     port: u16,
     timeout_secs: u64,
     geth_rpc: &str,
+    chain: u64,
+    token: &str,
+    rollup: &str,
     secret: &str,
     amount: u64,
     only_snark: bool,
@@ -315,12 +322,7 @@ async fn handle_mint(
         .timeout_secs(timeout_secs)
         .build()?;
 
-    // Check health
-    let chain = 5115_u64; // Citrea chain
-    let token = "0x52f74a8f9bdd29f77a5efd7f6cb44dcf6906a4b6"; // Token Contract
-    let rollup = "0xb26db42b0cb837010752d7c371ec727141045438";
-
-    let note: Note = client.get_wallet_mut().receive_note(amount);
+    let note: Note = client.get_wallet_mut().receive_note(amount, chain, token);
     let output_notes = [note.clone(), Note::padding_note()];
     let utxo = zk_primitives::Utxo::new_mint(output_notes.clone());
 
@@ -348,10 +350,9 @@ async fn handle_mint(
     }
 }
 
-async fn handle_rollup(geth_rpc: &str, secret: &str, rollup: &str) -> Result<()> {
+async fn handle_rollup(geth_rpc: &str, secret: &str, chain: u64, rollup: &str) -> Result<()> {
     // Build client with fluent API
     let client = NodeClient::builder().build()?;
-    let chain = 5115_u64; // Citrea chain
     let _ = client.state(geth_rpc, chain, secret, rollup).await?;
 
     Ok(())
@@ -392,7 +393,7 @@ async fn main() -> Result<()> {
             handle_spend(&cli.name, amount).await?;
         }
         Commands::Receive { note } => {
-            handle_receive(&cli.name, &cli.host, cli.port, cli.timeout, &note).await?;
+            handle_receive(&cli.name, &cli.host, cli.port, cli.timeout, cli.chain, &cli.token, &note).await?;
         }
         Commands::Mint {
             geth_rpc,
@@ -406,14 +407,17 @@ async fn main() -> Result<()> {
                 cli.port,
                 cli.timeout,
                 &geth_rpc,
+                cli.chain,
+                &cli.token,
+                &cli.rollup,
                 &secret,
                 amount,
                 only_snark,
             )
             .await?;
         }
-        Commands::Contract { geth_rpc, secret, rollup } => {
-            handle_rollup(&geth_rpc, &secret, &rollup).await?;
+        Commands::Contract { geth_rpc, secret } => {
+            handle_rollup(&geth_rpc, &secret, cli.chain, &cli.rollup).await?;
         }
     }
 

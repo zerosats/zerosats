@@ -24,6 +24,7 @@ const AGG_AGG_VERIFICATION_KEY_HASH =
 async function main() {
 
     console.log("Initialization...");
+    let aggregateVerifierAddr = process.env.VERIFIER;
     const isTestnet = process.env.IS_TESTNET === "1";
     let proverAddress = process.env.PROVER_ADDRESS as `0x${string}`;
     let validators = process.env.VALIDATORS?.split(",") ?? ([] as Array<`0x${string}`>);
@@ -31,7 +32,7 @@ async function main() {
     console.log("    Citrea Testnet - ", isTestnet);
     console.log("    Prover Address - ", proverAddress);
     console.log("    Validators - ", validators);
-
+    console.log("    Verifier - ", aggregateVerifierAddr);
 
     const maybeNoopVerifier = (verifier: string) =>
         isTestnet ? verifier : "NoopVerifierHonk.bin";
@@ -140,37 +141,68 @@ async function main() {
 
     console.log("\n🎉 Connection successful!");
 
-    console.log("\n🔍 Deploying ERC20. Looking for binary file...");
+    let erc20Address;
+    let receipt;
 
-    const erc20Tx = await walletClient.deployContract({
-        abi: aliceTokenArtifact.abi,
-        bytecode: aliceTokenArtifact.bytecode,
-        args: [ maxUint256 ],
-    });
+    if (isTestnet) {
+        let seed = process.env.MNEMONIC as string;
+        account = mnemonicToAccount(seed)
+        rpcUrl = "https://rpc.testnet.citrea.xyz";
+        if (proverAddress === undefined)
+            throw new Error("PROVER_ADDRESS is not set");
+        if (validators.length === 0) throw new Error("VALIDATORS is not set");
 
-    let receipt = await publicClient.waitForTransactionReceipt({
-        hash: erc20Tx,
-    });
-
-    if (receipt.status == "success") {
-        console.log(`✅ Transaction confirmed in block`);
+        walletClient = createWalletClient({
+            account,
+            chain: {
+                ...citreaTestChain,
+                rpcUrls: {
+                    default: {http: [rpcUrl]},
+                    public: {http: [rpcUrl]},
+                },
+            },
+            transport: http(rpcUrl, {
+                timeout: 60000,
+                retryCount: 3,
+            }),
+        });
+        erc20Address = "0x8d0c9d1c17aE5e40ffF9bE350f57840E9E66Cd93";
+        console.log(`✅ Using wrapped cBTC token`);
     } else {
-        console.log(`❌ Transaction reverted`);
-    }
+        console.log("\n🔍 Deploying ERC20. Looking for binary file...");
 
-    let erc20Address = receipt.contractAddress;
+        const erc20Tx = await walletClient.deployContract({
+            abi: aliceTokenArtifact.abi,
+            bytecode: aliceTokenArtifact.bytecode,
+            args: [ maxUint256 ],
+        });
+
+        receipt = await publicClient.waitForTransactionReceipt({
+            hash: erc20Tx,
+        });
+
+        if (receipt.status == "success") {
+            console.log(`✅ Transaction confirmed in block`);
+        } else {
+            console.log(`❌ Transaction reverted`);
+        }
+        erc20Address = receipt.contractAddress;
+        console.log(`✅ ERC20 Deployed`);
+    }
 
     console.log(`✅ ERC20 Contract: ${erc20Address}`);
 
-    console.log("\n🔍 Deploying Verifier. Looking for binary file...");
-
-    const aggregateVerifierAddr = await deployBin(
-        maybeNoopVerifier("noir/agg_agg_HonkVerifier.bin"),
-        publicClient,
-        walletClient,
-    );
-
-    console.log(`✅ Aggregate Verifier Contract: ${aggregateVerifierAddr}`);
+    if (!aggregateVerifierAddr) {
+        console.log("\n🔍 Deploying Verifier. Looking for binary file...");
+        aggregateVerifierAddr = await deployBin(
+            maybeNoopVerifier("noir/agg_agg_HonkVerifier.bin"),
+            publicClient,
+            walletClient,
+        );
+        console.log(`✅ Aggregate Verifier Contract: ${aggregateVerifierAddr}`);
+    } else {
+        console.log(`✅ Re-using Aggregate Verifier Contract: ${aggregateVerifierAddr}`);
+    }
 
     console.log("\n🔍 Deploying Rollup");
 

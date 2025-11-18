@@ -287,13 +287,13 @@ impl NodeClient {
         //let eth_node = EthNode::default().run_and_deploy().await;
         let sk = SecretKey::from_str(secret)?;
         let client = contracts::Client::new(geth_rpc, None);
+
+        let rollup = RollupContract::load(client, &chain_id, rollup, sk).await?;
+        /*
         let admin = H160::from_str("687bE257D3590697Da95a264154c71062C701936")?;
 
         let erc20_contract =
             ERC20Contract::load(client.clone(), &chain_id, erc20_contract, sk).await?;
-
-        let rollup = RollupContract::load(client, &chain_id, rollup, sk).await?;
-        /*
         let tx_mint_erc20 = erc20_contract
             .mint(H160::from_str("687bE257D3590697Da95a264154c71062C701936")?, 10000000)
             .await?;
@@ -313,10 +313,6 @@ impl NodeClient {
                 .await?;
         }
         */
-        println!(
-
-
-        );
 
         let mint_hash = hash_merge([note.psi, Note::padding_note().psi]);
 

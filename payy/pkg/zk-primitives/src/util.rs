@@ -284,4 +284,31 @@ mod tests {
         // Check last 2 bytes are zero (padding)
         assert_eq!(&result_bytes[30..32], &[0u8; 2]);
     }
+
+    #[test]
+    fn test_wrapped_citrea_testnet_note_kind() {
+        let chain = 5115 as u64; // Citrea chain
+        let token = H160::from_slice(&hex::decode("8d0c9d1c17aE5e40ffF9bE350f57840E9E66Cd93").unwrap()); // Token Contract
+        let result = generate_note_kind_bridge_evm(chain, token);
+
+        let result_bytes = result.to_be_bytes();
+
+        println!("{:?}", result.to_hex());
+
+        // Check note_kind_format is in bytes 0-2
+        assert_eq!(&result_bytes[0..2], &(2u16).to_be_bytes());
+
+        // Check chain is in bytes 2-10 (big endian)
+        // 137 (Polygon) = 0x89, so as u64 big endian = [0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x89]
+        let expected_chain_bytes = 5115u64.to_be_bytes();
+        assert_eq!(&result_bytes[2..10], &expected_chain_bytes);
+
+        // Check address is in bytes 10-30
+        let expected_address_bytes =
+            hex::decode("8d0c9d1c17aE5e40ffF9bE350f57840E9E66Cd93").unwrap();
+        assert_eq!(&result_bytes[10..30], &expected_address_bytes[..]);
+
+        // Check last 2 bytes are zero (padding)
+        assert_eq!(&result_bytes[30..32], &[0u8; 2]);
+    }
 }

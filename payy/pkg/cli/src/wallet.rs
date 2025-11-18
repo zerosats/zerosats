@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::num::ParseIntError;
 use std::path::Path;
+use std::str::FromStr;
 use web3::types::H160;
 use zk_primitives::{generate_note_kind_bridge_evm, get_address_for_private_key, InputNote, Note};
 
@@ -51,7 +52,7 @@ impl Wallet {
             pk,
             spent: Vec::new(),
             avail: Vec::new(),
-            name: None,
+            name,
             balance: 0,
         }
     }
@@ -120,7 +121,7 @@ impl Wallet {
         }
     }
 
-    pub fn receive_note(&mut self, amount: u64) -> Note {
+    pub fn receive_note(&mut self, amount: u64, chain: u64, token: &str) -> Note {
         //let alice_address = hash_merge([self.pk, Element::ZERO]);
         //Note::new_with_psi(alice_address, Element::from(amount), Element::secure_random(rand::thread_rng()))
 
@@ -130,9 +131,7 @@ impl Wallet {
         //let token =
         //    H160::from_slice(&hex::decode("52f74a8f9bdd29f77a5efd7f6cb44dcf6906a4b6").unwrap()); // Token Contract
 
-        let chain = 137u64; // Polygon chain
-        let token =
-            H160::from_slice(&hex::decode("3c499c542cef5e3811e1192ce70d8cc03d5c3359").unwrap());
+        let token = H160::from_str(token).unwrap(); // TODO: remove unwrap
 
         let note = Note {
             kind: Element::new(2),
