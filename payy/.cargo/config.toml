@@ -1,5 +1,5 @@
 [build]
-rustflags = ["-C", "link-arg=-lstdc++"]
+rustflags = ["-C", "link-arg=-lc++"]
 jobs = 8  # Reduce parallel jobs to avoid memory issues
 
 [env]

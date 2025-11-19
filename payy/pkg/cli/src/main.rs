@@ -265,7 +265,9 @@ async fn handle_receive(
         let json: serde_json::Value = serde_json::from_str(&json_str)?;
         let input_note: InputNote = serde_json::from_str(&json_str)?;
 
-        let note: Note = client.get_wallet_mut().receive_note(1_u64, chain, token);
+        // Extract the actual value from the input note
+        let amount = input_note.note.value.to_u256().as_u64();
+        let note: Note = client.get_wallet_mut().receive_note(amount, chain, token);
 
         /*
         let note = Note {
