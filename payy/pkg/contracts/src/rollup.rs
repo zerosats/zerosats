@@ -492,36 +492,6 @@ impl RollupContract {
 
     #[allow(clippy::too_many_arguments)]
     #[tracing::instrument(err, ret, skip(self, proof))]
-    pub async fn burn(
-        &self,
-        to: &Address,
-        proof: &[u8],
-        nullifier: &Element,
-        value: &Element,
-        source: &Element,
-        sig: &Element,
-    ) -> Result<H256> {
-        let to = H160::from_slice(to.as_bytes());
-
-        let call_tx = self
-            .call(
-                "burn",
-                (
-                    to,
-                    web3::types::Bytes::from(proof),
-                    convert_element_to_h256(nullifier),
-                    convert_element_to_h256(value),
-                    convert_element_to_h256(source),
-                    convert_element_to_h256(sig),
-                ),
-            )
-            .await?;
-
-        Ok(call_tx)
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    #[tracing::instrument(err, ret, skip(self, proof))]
     pub async fn burn_to_address(
         &self,
         kind: &Element,

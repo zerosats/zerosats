@@ -11,6 +11,8 @@ use std::fs;
 use std::path::Path;
 use zk_primitives::InputNote;
 use zk_primitives::{Note, NoteURLPayload, Utxo};
+use contracts::util::convert_h160_to_element;
+use std::str::FromStr;
 
 #[derive(Parser, Debug)]
 #[command(name = "pay-cli")]
@@ -65,6 +67,19 @@ enum Commands {
 
         #[arg(required = false, long, short, action=clap::ArgAction::SetTrue)]
         only_snark: bool,
+    },
+    Burn {
+        #[arg(required = true, long, short)]
+        geth_rpc: String,
+
+        #[arg(required = true, long, short)]
+        secret: String,
+
+        #[arg(required = true, long)]
+        address: String,
+
+        #[arg(required = true, short, long)]
+        amount: u64,
     },
     Spend {
         /// Request amount to spend
@@ -350,6 +365,50 @@ async fn handle_mint(
     }
 }
 
+async fn handle_burn(
+    name: &str,
+    host: &str,
+    port: u16,
+    timeout_secs: u64,
+    geth_rpc: &str,
+    chain: u64,
+    token: &str,
+    rollup: &str,
+    secret: &str,
+    address: &str,
+    amount: u64,
+) -> Result<()> {
+    // Build client with fluent API
+    let mut client = NodeClient::builder()
+        .name(name)
+        .host(host)
+        .port(port)
+        .timeout_secs(timeout_secs)
+        .build()?;
+
+    let note = client.get_wallet_mut().spend_note()?;
+    let evm_address = convert_h160_to_element(&H160::from_str(address).unwrap()); // TODO
+    let input_notes = [note.clone(), InputNote::padding_note()];
+    let utxo = zk_primitives::Utxo::new_burn(input_notes, evm_address);
+
+    let snark = utxo.prove().unwrap();
+
+    let _ = client.get_wallet().save();
+
+    match client.transaction(&snark).await {
+        Ok(tx) => {
+            println!("\n✅ Transaction {} has been sent!", tx.txn_hash);
+            println!("   Height: {}", tx.height);
+            println!("   Root hash: {}", tx.root_hash);
+            Ok(())
+        }
+        Err(e) => {
+            eprintln!("\n❌ Could not send transaction!");
+            Err(e)
+        }
+    }
+}
+
 async fn handle_rollup(geth_rpc: &str, secret: &str, chain: u64, rollup: &str) -> Result<()> {
     // Build client with fluent API
     let client = NodeClient::builder().build()?;
@@ -415,6 +474,27 @@ async fn main() -> Result<()> {
                 only_snark,
             )
             .await?;
+        }
+        Commands::Burn {
+            geth_rpc,
+            secret,
+            address,
+            amount,
+        } => {
+            handle_burn(
+                &cli.name,
+                &cli.host,
+                cli.port,
+                cli.timeout,
+                &geth_rpc,
+                cli.chain,
+                &cli.token,
+                &cli.rollup,
+                &secret,
+                &address,
+                amount,
+            )
+                .await?;
         }
         Commands::Contract { geth_rpc, secret } => {
             handle_rollup(&geth_rpc, &secret, cli.chain, &cli.rollup).await?;
