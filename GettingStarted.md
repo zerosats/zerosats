@@ -2,29 +2,20 @@
 
 A step-by-step guide to building and using the Ciphera private payments CLI wallet.
 
-## 📋 Table of Contents
-
-- [Prerequisites](#prerequisites)
-- [Building the CLI Wallet](#building-the-cli-wallet)
-- [Wallet Operations](#wallet-operations)
-  - [Check Contract State](#1-check-contract-state)
-  - [Mint Tokens](#2-mint-tokens)
-  - [Send Tokens](#3-send-tokens)
-  - [Receive Tokens](#4-receive-tokens)
-- [Querying the Blockchain](#querying-the-blockchain)
-- [Understanding Privacy](#understanding-privacy)
-- [Troubleshooting](#troubleshooting)
-
----
-
-## 🔧 Prerequisites
+## Prerequisites
 
 ### Required Software
 
-1. **Rust** (latest stable)
-   ```bash
+1.  **Rust** (latest stable)
+   
+   # Check if Rust is installed
+   rustc --version && cargo --version
+   
+   # If not installed, or to update to latest:
    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-   ```
+   
+   # If already installed, update with:
+   rustup update
 
 2. **Node.js & npm** (for Solidity compilation)
    ```bash
@@ -42,15 +33,13 @@ A step-by-step guide to building and using the Ciphera private payments CLI wall
    ```
 
 4. **Noir & Barretenberg** (ZK proving system)
-   ```bash
    # Install Noir
    curl -L https://raw.githubusercontent.com/noir-lang/noirup/refs/heads/main/install | bash
    noirup -v 1.0.0-beta.9
    
    # Install Barretenberg
    curl -L https://raw.githubusercontent.com/AztecProtocol/aztec-packages/refs/heads/master/barretenberg/bbup/install | bash
-   bbup
-   ```
+   bbup -v 1.0.0-nightly.20250723
 
 5. **Additional Dependencies** (macOS)
    ```bash
@@ -59,25 +48,25 @@ A step-by-step guide to building and using the Ciphera private payments CLI wall
 
 ---
 
-## 🏗️ Building the CLI Wallet
+## Building the CLI Wallet
 
-### 1. Clone the Repository
+### 1. Clone the Repository (wCBTC Branch)
 
 ```bash
-git clone <repository-url>
+git clone <https://github.com/zerosats/zerosats/tree/wcbtc-janusz-fork>
 cd zerosats/payy
 ```
 
 ### 2. Compile Solidity Contracts
 
 ```bash
-cd citrea
+cd payy/citrea
 npm install
 npx hardhat compile
 cd ..
 ```
 
-### 3. Build the CLI
+### 3. Build the CLI (make sure you're in the Payy directory)
 
 ```bash
 cargo build --release
@@ -87,51 +76,50 @@ The compiled binary will be at: `target/release/payy-cli`
 
 ---
 
-## 💰 Wallet Operations
+## Wallet Operations
 
 ### Connection Details
 
-For this guide, we'll use our fork of Payy as the payments network and Citrea testnet as the parent chain that hosts the rollup contract and bridge contract:
+For this guide, we'll use our fork of Payy as the payments network and Citrea testnet as the parent chain that hosts the rollup contract and bridge contract. Relevant information:
 
 - **Payy Node**: `63.176.138.198:8091`
 - **Citrea Chain ID**: `5115`
 - **Citrea wcBTC Token Contract**: `0x8d0c9d1c17aE5e40ffF9bE350f57840E9E66Cd93`
-- **Citrea Rollup Contract**: `0x1a0E789aa9aE8883C5e55B8E57EFC94F00943d53`
+- **Our Rollup Contract on Citrea**: `0x1a0E789aa9aE8883C5e55B8E57EFC94F00943d53`
 - **Citrea RPC**: `https://rpc.testnet.citrea.xyz`
 
 ---
 
-### 1. Check Contract State
+### 1. Connect to Ciphera Network
 
-Before performing operations, check the current state:
+We are running a node on AWS. You'll need to connect to it before performing operations. This command also creates your wallet:
 
 ```bash
 ./target/release/payy-cli \
   --name alice \
   --host 63.176.138.198 \
   --port 8091 \
-  --chain 5115 \
-  --token 0x8d0c9d1c17aE5e40ffF9bE350f57840E9E66Cd93 \
-  state
+  connect
 ```
 
 **Expected Output:**
 ```
-📊 Contract state:
-   Root hash: <merkle_root>
-   Height: <block_height>
-   Safe citrea height: <citrea_block>
+✅ Node Health Check Passed!
+   Current Height: 149252
+   Height (verified): 149253
+
+✨ Successfully connected to Pay node at 63.176.138.198:8091
 ```
 
 ---
 
 ### 2. Mint Tokens
 
-Minting brings tokens from Citrea into the private rollup.
+Minting brings tokens from Citrea into the private rollup. Your wallet we need to have wcBTC for minting into the contract and cBTC for gas. cBTC faucet is found [here](https://citrea.xyz/faucet). 
 
 #### Step 2a: Approve ERC20 Spending
 
-First, approve the rollup contract to spend your tokens:
+First, approve the rollup contract to spend your wcBTC tokens:
 
 ```bash
 cast send 0x8d0c9d1c17aE5e40ffF9bE350f57840E9E66Cd93 \
@@ -139,7 +127,7 @@ cast send 0x8d0c9d1c17aE5e40ffF9bE350f57840E9E66Cd93 \
   0x1a0E789aa9aE8883C5e55B8E57EFC94F00943d53 \
   100000000000000000000 \
   --rpc-url https://rpc.testnet.citrea.xyz \
-  --private-key <YOUR_ETHEREUM_PRIVATE_KEY>
+  --private-key <YOUR_CITREA_PRIVATE_KEY>
 ```
 
 > **Note:** You need `cast` from [Foundry](https://book.getfoundry.sh/getting-started/installation)
@@ -154,14 +142,13 @@ cast send 0x8d0c9d1c17aE5e40ffF9bE350f57840E9E66Cd93 \
   --chain 5115 \
   --token 0x8d0c9d1c17aE5e40ffF9bE350f57840E9E66Cd93 \
   mint \
-  --secret <YOUR_SECRET_KEY> \
-  --height <CURRENT_HEIGHT> \
+  --secret <YOUR_CITREA_SECRET_KEY> \
+  --geth-rpc https://rpc.testnet.citrea.xyz \
   --amount 100000000000000
 ```
 
 **Parameters:**
 - `--secret`: Your wallet's private key (32-byte hex)
-- `--height`: Current block height from `state` command
 - `--amount`: Token amount in wei (e.g., `100000000000000` = 0.0001 tokens with 18 decimals)
 
 **Expected Output:**
@@ -177,7 +164,7 @@ cast send 0x8d0c9d1c17aE5e40ffF9bE350f57840E9E66Cd93 \
 
 ### 3. Send Tokens
 
-Transfer tokens privately to another user.
+Transfer tokens privately to another user. This is done via creating a note and sending the note to a user via a communication channel (i.e. Signal).
 
 #### Step 3a: Create a Note for the Recipient
 
@@ -186,10 +173,9 @@ Transfer tokens privately to another user.
   --name alice \
   --host 63.176.138.198 \
   --port 8091 \
-  --chain 5115 \
-  --token 0x8d0c9d1c17aE5e40ffF9bE350f57840E9E66Cd93 \
   spend \
-  --out alice-note.json
+  --amount 100000000000000
+  alice-note.json
 ```
 
 **What happens:**
@@ -198,17 +184,22 @@ Transfer tokens privately to another user.
 - A transaction is submitted to the network
 - A note file is created: `alice-note.json`
 
-**Expected Output:**
-```
-💸 Spending 100000000000000 of 100000000000000
-⏳ Generating proof... (this may take 5-10 seconds)
-✅ Transaction <hash> has been sent!
-   Height: <block>
-   Root hash: <new_root>
-📝 Note saved to alice-note.json
-```
+---
 
-#### Step 3b: Share the Note
+#### Step 3b (if needed): Create Bob's wallet
+
+```bash
+./target/release/payy-cli \
+  --name alice \
+  --host 63.176.138.198 \
+  --port 8091 \
+  connect
+```
+---
+
+#### Step 3c: Share the Note
+
+If you are running the test by yourself, simply create a wallet for Bob in another terminal view. If sending to another person, transfer the note file via a messaging application (i.e. Signal).
 
 **Securely share `alice-note.json` with the recipient** (Bob). This file contains:
 - The encrypted note details
@@ -228,17 +219,9 @@ Claim tokens sent to you from a note file.
   --name bob \
   --host 63.176.138.198 \
   --port 8091 \
-  --chain 5115 \
-  --token 0x8d0c9d1c17aE5e40ffF9bE350f57840E9E66Cd93 \
   receive \
   --note alice-note.json
 ```
-
-**What happens:**
-- Bob's wallet loads the note
-- A ZK proof is generated to claim the funds
-- The transaction is submitted
-- Bob now owns the tokens privately
 
 **Expected Output:**
 ```
@@ -251,7 +234,17 @@ Claim tokens sent to you from a note file.
 
 ---
 
-## 🔍 Querying the Blockchain
+### 5. Check balances
+
+In addition to querying the chain (actions below), you can check your wallet balance with:
+
+```bash
+cat <WALLET_NAME>.json
+```
+
+---
+
+## Querying the Blockchain
 
 ### View a Specific Transaction
 
@@ -284,33 +277,3 @@ curl -s http://63.176.138.198:8091/v0/height | jq
 ```
 
 ---
-
-## 🎯 Example Workflow
-
-Here's a complete example of Alice sending tokens to Bob:
-
-```bash
-# 1. Alice mints 0.0001 tokens
-./target/release/payy-cli --name alice --host 63.176.138.198 --port 8091 \
-  --chain 5115 --token 0x8d0c9d1c17aE5e40ffF9bE350f57840E9E66Cd93 \
-  mint --secret <secret> --height 95888 --amount 100000000000000
-
-# 2. Alice creates a note for Bob
-./target/release/payy-cli --name alice --host 63.176.138.198 --port 8091 \
-  --chain 5115 --token 0x8d0c9d1c17aE5e40ffF9bE350f57840E9E66Cd93 \
-  spend --out alice-note.json
-
-# 3. Alice securely shares alice-note.json with Bob
-
-# 4. Bob receives the tokens
-./target/release/payy-cli --name bob --host 63.176.138.198 --port 8091 \
-  --chain 5115 --token 0x8d0c9d1c17aE5e40ffF9bE350f57840E9E66Cd93 \
-  receive --note alice-note.json
-
-# 5. Query the transaction (amounts remain private!)
-curl -s http://63.176.138.198:8091/v0/transactions/<HASH> | jq
-```
-
----
-
-
