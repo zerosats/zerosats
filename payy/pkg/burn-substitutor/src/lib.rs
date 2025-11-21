@@ -38,6 +38,8 @@ impl BurnSubstitutor {
         if self.cursor.is_none() {
             let last_rollup = self.fetch_last_rollup_block().await?;
 
+            tracing::info!("Last rollup height: {}", last_rollup);
+
             self.cursor = Some(
                 CursorChoice::After(CursorChoiceAfter::After(ListTxnsPosition {
                     block: last_rollup,
@@ -56,6 +58,8 @@ impl BurnSubstitutor {
         )
         .await
         .context("Failed to fetch transactions")?;
+
+        tracing::info!("Fetched transactions");
 
         let mut substituted_burns = Vec::new();
         for txn in &txns {
@@ -83,18 +87,18 @@ impl BurnSubstitutor {
                 // Calculate the burn value as an EVM U256
                 let burn_value = burn_msgs.value.to_eth_u256();
 
-                // Check USDC balance and optionally skip if burn exceeds available balance
-                let usdc_balance = self
+                // Check ERC20 balance and optionally skip if burn exceeds available balance
+                let token_balance = self
                     .erc20_contract
                     .balance(self.rollup_contract.signer_address)
                     .await
-                    .context("Failed to fetch USDC balance for burn substitution")?;
+                    .context("Failed to fetch ERC20 balance for burn substitution")?;
 
-                if burn_value > usdc_balance {
+                if burn_value > token_balance {
                     tracing::info!(
                         ?txn.proof.public_inputs,
                         %burn_value,
-                        %usdc_balance,
+                        %token_balance,
                         "Skipping burn: value exceeds substitutor balance"
                     );
                     continue;
@@ -111,6 +115,8 @@ impl BurnSubstitutor {
                     )
                     .await
                     .context("Failed to substitute burn")?;
+
+                tracing::info!("Substitution transaction {:x} has been sent", txn);
 
                 self.rollup_contract
                     .client

@@ -1022,13 +1022,13 @@ impl RollupContract {
     }
 
     #[tracing::instrument(err, ret, skip(self))]
-    pub async fn mints(&self) -> Result<(H256, U256, bool)> {
+    pub async fn mints(&self, key: H256) -> Result<(H256, U256, bool)> {
         let mint = self
             .client
             .query(
                 &self.contract,
                 "mints",
-                (),
+                key,
                 None,
                 Default::default(),
                 self.block_height.map(|x| x.into()),

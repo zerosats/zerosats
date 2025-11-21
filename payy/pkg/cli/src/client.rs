@@ -5,7 +5,7 @@
 
 use crate::wallet::Wallet;
 use color_eyre::Result;
-use contracts::{ERC20Contract, RollupContract};
+use contracts::RollupContract;
 use hash::hash_merge;
 use node_interface::{HeightResponse, TransactionResponse};
 use once_cell::sync::Lazy;
@@ -16,7 +16,6 @@ use std::sync::Arc;
 use std::time::Duration;
 use tracing::debug;
 use web3::signing::SecretKey;
-use web3::types::H160;
 use zk_primitives::{Note, UtxoProof};
 
 /// Singleton HTTP client shared across all NodeClient instances
@@ -350,6 +349,7 @@ impl NodeClient {
         let rh = rollup.root_hash().await?;
         let b = rollup.block_height().await?;
         let token = rollup.token().await?;
+
         println!("\nRollup State Info\n");
         println!("\tChain      :{} ", chain_id);
         println!("\tToken      :{:#x} ", token);

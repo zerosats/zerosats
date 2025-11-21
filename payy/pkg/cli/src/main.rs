@@ -12,7 +12,7 @@ use std::fs;
 use std::path::Path;
 use std::str::FromStr;
 use zk_primitives::InputNote;
-use zk_primitives::{Note, NoteURLPayload, Utxo, decode_activity_url_payload};
+use zk_primitives::{Note, NoteURLPayload, Utxo};
 
 #[derive(Parser, Debug)]
 #[command(name = "pay-cli")]
