@@ -6,18 +6,24 @@ A step-by-step guide to building and using the Ciphera private payments CLI wall
 
 ### Required Software
 
-1.  **Rust** (latest stable)
+### 1.  **Rust** (latest stable)
    
+   ```bash
    # Check if Rust is installed
    rustc --version && cargo --version
+   ```
    
+   ```bash
    # If not installed, or to update to latest:
    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+   ```
    
-   # If already installed, update with:
+   #### If already installed, update with:
+   ```bash
    rustup update
+   ```
 
-2. **Node.js & npm** (for Solidity compilation)
+### 2. **Node.js & npm** (for Solidity compilation)
    ```bash
    # macOS (via Homebrew)
    brew install node
@@ -25,23 +31,27 @@ A step-by-step guide to building and using the Ciphera private payments CLI wall
    # Or download from https://nodejs.org/
    ```
 
-3. **Git LFS** (for large file support)
+### 3. **Git LFS** (for large file support)
    ```bash
    # macOS
    brew install git-lfs
    git lfs install
    ```
 
-4. **Noir & Barretenberg** (ZK proving system)
+### 4. **Noir & Barretenberg** (ZK proving system)
+   ```bash
    # Install Noir
    curl -L https://raw.githubusercontent.com/noir-lang/noirup/refs/heads/main/install | bash
    noirup -v 1.0.0-beta.9
+   ```
    
+   ```bash
    # Install Barretenberg
    curl -L https://raw.githubusercontent.com/AztecProtocol/aztec-packages/refs/heads/master/barretenberg/bbup/install | bash
    bbup -v 1.0.0-nightly.20250723
+   ```
 
-5. **Additional Dependencies** (macOS)
+### 5. **Additional Dependencies** (macOS)
    ```bash
    brew install openssl pkg-config protobuf
    ```
@@ -277,4 +287,5 @@ curl -s http://63.176.138.198:8091/v0/height | jq
 ```
 
 ---
+
 
