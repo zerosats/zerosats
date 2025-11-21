@@ -5,7 +5,7 @@
 
 use crate::wallet::Wallet;
 use color_eyre::Result;
-use contracts::{RollupContract, ERC20Contract};
+use contracts::{ERC20Contract, RollupContract};
 use hash::hash_merge;
 use node_interface::{HeightResponse, TransactionResponse};
 use once_cell::sync::Lazy;
@@ -337,7 +337,13 @@ impl NodeClient {
         Ok(())
     }
 
-    pub async fn state(&self, geth_rpc: &str, chain_id: u64, secret: &str, rollup: &str) -> Result<()> {
+    pub async fn state(
+        &self,
+        geth_rpc: &str,
+        chain_id: u64,
+        secret: &str,
+        rollup: &str,
+    ) -> Result<()> {
         let sk = SecretKey::from_str(secret)?;
         let client = contracts::Client::new(geth_rpc, None);
         let rollup = RollupContract::load(client, &chain_id, rollup, sk).await?;
