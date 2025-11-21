@@ -190,7 +190,7 @@ Transfer tokens privately to another user. This is done via creating a note and 
 
 ```bash
 ./target/release/payy-cli \
-  --name alice \
+  --name bob \
   --host 63.176.138.198 \
   --port 8091 \
   connect
