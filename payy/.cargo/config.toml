@@ -8,6 +8,7 @@ CXX = "clang++"
 CXXFLAGS="-include cstdint"
 
 [target.x86_64-unknown-linux-gnu]
+rustflags = ["-C", "link-arg=-lstdc++"]
 linker = "clang"
 
 [test]
