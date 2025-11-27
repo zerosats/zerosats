@@ -5,7 +5,7 @@
 
 use crate::wallet::Wallet;
 use color_eyre::Result;
-use contracts::RollupContract;
+use contracts::{ERC20Contract, RollupContract};
 use hash::hash_merge;
 use node_interface::{HeightResponse, TransactionResponse};
 use once_cell::sync::Lazy;
@@ -15,8 +15,13 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 use tracing::debug;
-use web3::signing::SecretKey;
 use zk_primitives::{Note, UtxoProof};
+
+use contracts::ConfirmationType;
+use ethereum_types::{H256, U256};
+use secp256k1::PublicKey;
+use web3::signing::{keccak256, SecretKey};
+use web3::types::{Address, H160};
 
 /// Singleton HTTP client shared across all NodeClient instances
 /// Provides connection pooling and efficient resource reuse
@@ -288,30 +293,6 @@ impl NodeClient {
         let client = contracts::Client::new(geth_rpc, None);
 
         let rollup = RollupContract::load(client, &chain_id, rollup, sk).await?;
-        /*
-        let admin = H160::from_str("687bE257D3590697Da95a264154c71062C701936")?;
-
-        let erc20_contract =
-            ERC20Contract::load(client.clone(), &chain_id, erc20_contract, sk).await?;
-        let tx_mint_erc20 = erc20_contract
-            .mint(H160::from_str("687bE257D3590697Da95a264154c71062C701936")?, 10000000)
-            .await?;
-
-        if erc20_contract
-            .allowance(rollup.signer_address, admin)
-            .await?
-            != U256::MAX
-        {
-            let approve_txn = erc20_contract.approve_max(rollup.address()).await?;
-            rollup.client
-                .wait_for_confirm(
-                    approve_txn,
-                    Duration::from_secs(1),
-                    ConfirmationType::Latest,
-                )
-                .await?;
-        }
-        */
 
         let mint_hash = hash_merge([note.psi, Note::padding_note().psi]);
 
@@ -331,6 +312,59 @@ impl NodeClient {
             .is_none_or(|r| r.block_number.is_none())
         {
             tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
+        }
+
+        Ok(())
+    }
+
+    pub async fn admin_approve(
+        &self,
+        geth_rpc: &str,
+        chain_id: u64,
+        secret: &str,
+        rollup: &str,
+        erc20_contract: &str,
+        mint_erc20: bool,
+        note: &Note,
+        utxo: &UtxoProof,
+    ) -> Result<()> {
+        //let eth_node = EthNode::default().run_and_deploy().await;
+        let sk = SecretKey::from_str(secret)?;
+        let client = contracts::Client::new(geth_rpc, None);
+
+        let erc20_contract =
+            ERC20Contract::load(client.clone(), &chain_id, erc20_contract, sk).await?;
+        let rollup = RollupContract::load(client, &chain_id, rollup, sk).await?;
+
+        let secp = secp256k1::Secp256k1::new();
+        let secret_key = secp256k1::SecretKey::from_slice(&sk.secret_bytes()).unwrap();
+        let public_key = PublicKey::from_secret_key(&secp, &secret_key);
+        let serialized_public_key = public_key.serialize_uncompressed();
+        let address_bytes = &keccak256(&serialized_public_key[1..])[12..];
+        let admin = Address::from_slice(address_bytes);
+
+        if mint_erc20 {
+            let tx_mint_erc20 = erc20_contract.mint(admin, 10000000).await?;
+            println!(
+                "\nRequested ERC20 mint {:#x}. Approving next\n",
+                tx_mint_erc20
+            );
+        }
+
+        if erc20_contract
+            .allowance(rollup.signer_address, admin)
+            .await?
+            != U256::MAX
+        {
+            let approve_txn = erc20_contract.approve_max(rollup.address()).await?;
+            rollup
+                .client
+                .wait_for_confirm(
+                    approve_txn,
+                    Duration::from_secs(1),
+                    ConfirmationType::Latest,
+                )
+                .await?;
         }
 
         Ok(())

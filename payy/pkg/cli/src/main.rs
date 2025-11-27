@@ -63,6 +63,7 @@ struct Cli {
 enum Commands {
     /// Connect to a Pay node and check its health
     Connect {},
+    Address {},
     Mint {
         #[arg(required = true, long, short)]
         geth_rpc: String,
@@ -94,12 +95,24 @@ enum Commands {
         #[arg(required = true, short, long)]
         amount: u64,
     },
+    SpendTo {
+        /// Request amount to spend
+        #[arg(required = true, short, long)]
+        amount: u64,
+
+        #[arg(required = true, long)]
+        address: String,
+    },
     Receive {
         #[arg(long, default_value = None)]
         note: Option<String>,
 
         #[arg(long)]
         link: Option<String>,
+    },
+    Import {
+        #[arg(required = true, long)]
+        note: String,
     },
     Contract {
         #[arg(required = true, long, short)]
@@ -128,6 +141,8 @@ pub enum AppError {
     NotEnoughBalance(),
     #[error("Feature is not implemented")]
     NotSupportedYet(),
+    #[error("Cant convert Element")]
+    ConversionError(),
 }
 
 /// Handle the connect command
@@ -177,7 +192,19 @@ async fn handle_connect(name: &str, host: &str, port: u16, timeout_secs: u64) ->
     Ok(())
 }
 
-async fn handle_spend(name: &str, amount: u64) -> Result<(), AppError> {
+async fn handle_address(name: &str) -> Result<()> {
+    let mut wallet = Wallet::init(name)?;
+    let b = wallet.balance;
+    let a = wallet.get_address();
+
+    println!("\nWallet {} has been found:", name);
+    println!("\tBalance: {:?}", b);
+    println!("\tAddress: {:?}", a);
+
+    Ok(())
+}
+
+async fn handle_note_spend(name: &str, amount: u64) -> Result<(), AppError> {
     // Build client with fluent API
     let mut client = NodeClient::builder()
         .name(name)
@@ -185,25 +212,15 @@ async fn handle_spend(name: &str, amount: u64) -> Result<(), AppError> {
         .map_err(|_| AppError::CantBuildClient())?;
 
     let wallet = Wallet::init(name)?;
-    let balance = client.get_wallet().balance;
+    let balance = wallet.balance;
 
-    if amount == balance {
-        let input_note = client.get_wallet_mut().spend_note()?;
+    if amount <= balance {
+        let input_note = client.get_wallet_mut().spend_note(Some(amount))?;
         let payload: NoteURLPayload = (&input_note).into();
+        let v = input_note.note.value.to_u64_array();
 
-        // Encode
-        let encoded = payload.encode_activity_url_payload();
-        let json_str = serde_json::to_string_pretty(&input_note)?;
-
-        std::fs::write(format!("{name}-note.json"), &json_str)?;
-
-        println!("\nSaved {input_note:?}");
-        println!("\nEncoded: {encoded}");
-
-        Ok(())
-    } else if amount < balance {
+        println!("VALUE: {:?}", v);
         /*
-
         let self_address = hash_merge([self.pk, Element::ZERO]);
         let change = Note::new(
             self_address,
@@ -218,13 +235,73 @@ async fn handle_spend(name: &str, amount: u64) -> Result<(), AppError> {
         Ok(Utxo::new_send(
             [input_note.clone(), InputNote::padding_note()],
             [payee, change],
-        ))
-
+        )
         */
 
-        Err(AppError::NotSupportedYet())
+        // Encode
+        let encoded = payload.encode_activity_url_payload();
+        let json_str = serde_json::to_string_pretty(&input_note)?;
+
+        std::fs::write(format!("{name}-note.json"), &json_str)?;
+
+        println!("\nSaved {input_note:?}");
+        println!("\nEncoded: {encoded}");
+
+        Ok(())
     } else {
         Err(AppError::NotEnoughBalance())
+    }
+}
+
+async fn handle_spend_to(
+    name: &str,
+    host: &str,
+    port: u16,
+    timeout_secs: u64,
+    amount: u64,
+    address: &str,
+) -> Result<()> {
+    debug!(
+        "Connecting wallet {} to Payy node at {}:{}",
+        name, host, port
+    );
+
+    // Build client with fluent API
+    let mut client = NodeClient::builder()
+        .name(name)
+        .host(host)
+        .port(port)
+        .timeout_secs(timeout_secs)
+        .build()?;
+
+    let wallet = Wallet::init(name)?;
+    let balance = wallet.balance;
+
+    if amount <= balance {
+        let utxo = client.get_wallet_mut().spend_to(amount, address)?;
+        let snark = utxo.prove().unwrap();
+
+        let receiver_note = utxo.output_notes[0].clone();
+        let json_str = serde_json::to_string_pretty(&receiver_note)?;
+
+        std::fs::write(format!("from-{name}-note.json"), &json_str)?;
+
+        println!("\nSaved {receiver_note:?}");
+
+        match client.transaction(&snark).await {
+            Ok(tx) => {
+                println!("\n✅ Transaction {} has been sent!", tx.txn_hash);
+                println!("   Height: {}", tx.height);
+                println!("   Root hash: {}", tx.root_hash);
+                Ok(())
+            }
+            Err(e) => {
+                eprintln!("\n❌ Could not send transaction!");
+                Err(e)
+            }
+        }
+    } else {
+        Err(AppError::NotEnoughBalance().into())
     }
 }
 
@@ -300,7 +377,14 @@ async fn handle_receive(
         _ => return Err(AppError::NotEnoughBalance().into()),
     };
 
-    let note: Note = client.get_wallet_mut().receive_note(1_u64, chain, token);
+    let values = input_note.note.value.to_u64_array().clone();
+    let Some(amount) = values.first() else {
+        return Err(AppError::ConversionError().into());
+    };
+
+    let note: Note = client
+        .get_wallet_mut()
+        .receive_note(amount.to_owned(), chain, token);
 
     /*
     let note = Note {
@@ -330,6 +414,30 @@ async fn handle_receive(
             eprintln!("\n❌ Could not send transaction!");
             Err(e)
         }
+    }
+}
+
+async fn handle_import(
+    name: &str,
+    notefile: &str,
+) -> Result<()> {
+    let mut client = NodeClient::builder()
+        .name(name)
+        .build()
+        .map_err(|_| AppError::CantBuildClient())?;
+
+    let json_path = Path::new(&notefile);
+    if json_path.is_file() {
+        println!("\n🗝 Found note file!");
+        let json_str = fs::read_to_string(json_path)?;
+        let json: serde_json::Value = serde_json::from_str(&json_str)?;
+        let note: Note = serde_json::from_str(&json_str)?;
+
+        client.get_wallet_mut().import_note(&note)?;
+
+        Ok(())
+    } else {
+        Err(AppError::FileNotFound(notefile.to_owned()).into())
     }
 }
 
@@ -403,7 +511,8 @@ async fn handle_burn(
         .timeout_secs(timeout_secs)
         .build()?;
 
-    let note = client.get_wallet_mut().spend_note()?;
+    let note = client.get_wallet_mut().spend_note(Some(amount))?;
+
     let evm_address = convert_h160_to_element(&H160::from_str(address).unwrap()); // TODO
     let input_notes = [note.clone(), InputNote::padding_note()];
     let utxo = zk_primitives::Utxo::new_burn(input_notes, evm_address);
@@ -465,8 +574,19 @@ async fn main() -> Result<()> {
         Commands::Connect {} => {
             handle_connect(&cli.name, &cli.host, cli.port, cli.timeout).await?;
         }
+        Commands::Address {} => {
+            handle_address(&cli.name).await?;
+        }
         Commands::Spend { amount } => {
-            handle_spend(&cli.name, amount).await?;
+            handle_note_spend(&cli.name, amount).await?;
+        }
+        Commands::SpendTo { amount, address } => {
+            handle_spend_to(
+                &cli.name,
+                &cli.host,
+                cli.port,
+                cli.timeout,
+                amount, &address).await?;
         }
         Commands::Receive { note, link } => {
             handle_receive(
@@ -480,6 +600,13 @@ async fn main() -> Result<()> {
                 link,
             )
             .await?;
+        }
+        Commands::Import { note } => {
+            handle_import(
+                &cli.name,
+                &note,
+            )
+                .await?;
         }
         Commands::Mint {
             geth_rpc,

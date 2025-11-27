@@ -7,7 +7,9 @@ use std::num::ParseIntError;
 use std::path::Path;
 use std::str::FromStr;
 use web3::types::H160;
-use zk_primitives::{generate_note_kind_bridge_evm, get_address_for_private_key, InputNote, Note};
+use zk_primitives::{
+    generate_note_kind_bridge_evm, get_address_for_private_key, InputNote, Note, Utxo,
+};
 
 // Error types for wallet operations
 #[derive(Debug, thiserror::Error)]
@@ -28,7 +30,16 @@ pub enum WalletError {
     CouldNotReadKey(#[from] ParseIntError),
 
     #[error("No coins left in wallet {0}")]
-    ZeroBalance(String),
+    LowBalance(String),
+
+    #[error("Unable to pull note")]
+    CantPullNote(),
+
+    #[error("Unable to convert note value")]
+    CantReadNoteValue(),
+
+    #[error("Unable to find a secret key")]
+    NoKey(),
 }
 
 // =====================================================================
@@ -39,8 +50,8 @@ pub enum WalletError {
 pub struct Wallet {
     /// *Private* key in the zk‑Primitive sense – **NOT** an ECDSA key!
     pub pk: Element,
-    pub spent: Vec<Note>,
-    pub avail: Vec<Note>,
+    pub keys: Vec<Element>,
+    pub avail: Vec<InputNote>,
     pub name: Option<String>,
     pub balance: u64,
 }
@@ -50,7 +61,7 @@ impl Wallet {
     pub fn new(name: Option<String>, pk: Element) -> Self {
         Self {
             pk,
-            spent: Vec::new(),
+            keys: Vec::new(),
             avail: Vec::new(),
             name,
             balance: 0,
@@ -63,11 +74,17 @@ impl Wallet {
         OsRng.fill_bytes(&mut bytes);
         Self {
             pk: Element::from_be_bytes(bytes),
-            spent: Vec::new(),
+            keys: Vec::new(),
             avail: Vec::new(),
             name,
             balance: 0,
         }
+    }
+
+    pub fn gen_pk(&self) -> Element {
+        let mut bytes = [0u8; 32];
+        OsRng.fill_bytes(&mut bytes);
+        Element::from_be_bytes(bytes)
     }
 
     /// Load wallet from JSON file
@@ -105,32 +122,92 @@ impl Wallet {
         Ok(())
     }
 
-    /// Derive the *address* (Poseidon‑hashed) that the circuits use.
-    pub fn address(&self) -> Element {
-        get_address_for_private_key(self.pk)
-    }
-
-    pub fn spend_note(&mut self) -> Result<InputNote, WalletError> {
+    pub fn spend_note(&mut self, delta: Option<u64>) -> Result<InputNote, WalletError> {
         if let Some(note) = self.avail.pop() {
-            self.balance = 0;
-            Ok(InputNote::new(note, self.pk))
+            if let Some(amount) = note.note.value.to_u64_array().first() {
+                self.balance = self.balance - amount;
+                return Ok(note);
+            }
+            Err(WalletError::CantPullNote())
         } else {
-            Err(WalletError::ZeroBalance(
-                self.name.clone().unwrap_or("Noname".to_string()),
-            ))
+            let name = self.name.clone().unwrap_or("Noname".to_string());
+            Err(WalletError::LowBalance(format!(
+                "Wallet {} has only {}",
+                name, self.balance
+            )))
         }
     }
 
+    pub fn spend_to(&mut self, amount: u64, address: &str) -> Result<Utxo, WalletError> {
+        let input_note_1 = self.spend_note(None)?;
+
+        let values = input_note_1.note.value.to_u64_array().clone();
+        let Some(amount_1) = values.first() else {
+            return Err(WalletError::CantPullNote());
+        };
+
+        let delta = amount_1 - amount;
+
+        let pk = self.gen_pk();
+        let self_address = hash_merge([pk, Element::ZERO]);
+
+        let (inputs, change) = if delta < 0 {
+            println!("Pulling additional note. Requested {}, available {}", amount, amount_1);
+            let input_note_2 = self.spend_note(Some(amount - amount_1))?;
+
+            let values = input_note_1.note.value.to_u64_array().clone();
+            let Some(amount_2) = values.first() else {
+                return Err(WalletError::CantPullNote());
+            };
+            let change_amount = delta + amount_2;
+            println!("Pulled {}, change {}", amount_2, change_amount);
+            let change = Note {
+                kind: input_note_1.note.kind,
+                contract: input_note_1.note.contract,
+                address: self_address,
+                psi: Element::secure_random(rand::thread_rng()),
+                value: Element::from(change_amount),
+            };
+
+            self.avail.push(InputNote::new(change.clone(), pk));
+            self.balance = self.balance + change_amount;
+
+            ([input_note_1.clone(), input_note_2.clone()], change)
+        } else if delta == 0 {
+            (
+                [input_note_1.clone(), InputNote::padding_note()],
+                Note::padding_note(),
+            )
+        } else {
+            println!("Pulled note {}, requested {}, change {}", amount_1, amount, delta);
+            let change = Note {
+                kind: input_note_1.note.kind,
+                contract: input_note_1.note.contract,
+                address: self_address,
+                psi: Element::secure_random(rand::thread_rng()),
+                value: Element::from(delta),
+            };
+
+            self.avail.push(InputNote::new(change.clone(), pk));
+            self.balance = self.balance + delta;
+
+            ([input_note_1.clone(), InputNote::padding_note()], change)
+        };
+
+        let note = Note {
+            kind: input_note_1.note.kind,
+            contract: input_note_1.note.contract,
+            address: Element::from_str(address)?,
+            psi: Element::new(0),
+            value: Element::new(amount),
+        };
+
+        Ok(Utxo::new_send(inputs, [note, change]))
+    }
+
     pub fn receive_note(&mut self, amount: u64, chain: u64, token: &str) -> Note {
-        //let alice_address = hash_merge([self.pk, Element::ZERO]);
-        //Note::new_with_psi(alice_address, Element::from(amount), Element::secure_random(rand::thread_rng()))
-
-        let self_address = hash_merge([self.pk, Element::ZERO]);
-
-        //let chain = 5115 as u64; // Citrea chain
-        //let token =
-        //    H160::from_slice(&hex::decode("52f74a8f9bdd29f77a5efd7f6cb44dcf6906a4b6").unwrap()); // Token Contract
-
+        let pk = self.gen_pk();
+        let self_address = hash_merge([pk, Element::ZERO]);
         let token = H160::from_str(token).unwrap(); // TODO: remove unwrap
 
         let note = Note {
@@ -141,9 +218,35 @@ impl Wallet {
             value: Element::from(amount),
         };
 
-        self.avail.push(note.clone());
-        self.balance = amount;
+        self.avail.push(InputNote::new(note.clone(), pk));
+        self.balance = self.balance + amount;
         note
+    }
+
+    pub fn import_note(&mut self, note: &Note) -> Result<(), WalletError> {
+        let mut i = 0;
+        for pk in self.keys.clone() {
+            let self_address = hash_merge([pk, Element::ZERO]);
+            if note.address == self_address {
+                let values = note.value.to_u64_array().clone();
+                let Some(amount) = values.first() else {
+                    return Err(WalletError::CantReadNoteValue());
+                };
+
+                self.avail.push(InputNote::new(note.clone(), pk));
+                self.balance = self.balance + amount;
+                self.keys.remove(i);
+                return Ok(())
+            }
+            i += 1
+        }
+        Err(WalletError::KeyNotFound(format!("Cant import {:?}", note)))
+    }
+
+    pub fn get_address(&mut self) -> Element {
+        let pk = self.gen_pk();
+        self.keys.push(pk.clone());
+        hash_merge([pk, Element::ZERO])
     }
 }
 

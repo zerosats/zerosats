@@ -25,6 +25,8 @@ barretenberg.workspace = true
 node-interface.workspace = true
 testutil.workspace = true
 hash.workspace = true
+secp256k1 = { workspace = true }
+ethereum-types = { workspace = true }
 
 [[bin]]
 name = "payy-cli"
