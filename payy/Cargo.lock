@@ -1396,6 +1396,7 @@ name = "cli"
 version = "0.0.0"
 dependencies = [
  "barretenberg",
+ "bs58 0.5.0",
  "clap",
  "color-eyre",
  "contracts",

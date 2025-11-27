@@ -63,7 +63,10 @@ struct Cli {
 enum Commands {
     /// Connect to a Pay node and check its health
     Connect {},
-    Address {},
+    Address {
+        #[arg(required = true, short, long)]
+        amount: u64,
+    },
     Mint {
         #[arg(required = true, long, short)]
         geth_rpc: String,
@@ -192,14 +195,17 @@ async fn handle_connect(name: &str, host: &str, port: u16, timeout_secs: u64) ->
     Ok(())
 }
 
-async fn handle_address(name: &str) -> Result<()> {
+async fn handle_address(name: &str, amount: u64) -> Result<()> {
     let mut wallet = Wallet::init(name)?;
     let b = wallet.balance;
-    let a = wallet.get_address();
+    let a = wallet.get_address(amount);
 
     println!("\nWallet {} has been found:", name);
     println!("\tBalance: {:?}", b);
     println!("\tAddress: {:?}", a);
+
+    let encoded = a.encode_address();
+    println!("\nEncoded: {encoded}");
 
     Ok(())
 }
@@ -574,8 +580,8 @@ async fn main() -> Result<()> {
         Commands::Connect {} => {
             handle_connect(&cli.name, &cli.host, cli.port, cli.timeout).await?;
         }
-        Commands::Address {} => {
-            handle_address(&cli.name).await?;
+        Commands::Address { amount } => {
+            handle_address(&cli.name, amount).await?;
         }
         Commands::Spend { amount } => {
             handle_note_spend(&cli.name, amount).await?;

@@ -11,6 +11,9 @@ use zk_primitives::{
     generate_note_kind_bridge_evm, get_address_for_private_key, InputNote, Note, Utxo,
 };
 
+use crate::CipheraAddress;
+use crate::address::decode_address;
+
 // Error types for wallet operations
 #[derive(Debug, thiserror::Error)]
 pub enum WalletError {
@@ -194,6 +197,9 @@ impl Wallet {
             ([input_note_1.clone(), InputNote::padding_note()], change)
         };
 
+        let note = Note::from(&decode_address(address));
+
+        /*
         let note = Note {
             kind: input_note_1.note.kind,
             contract: input_note_1.note.contract,
@@ -201,6 +207,7 @@ impl Wallet {
             psi: Element::new(0),
             value: Element::new(amount),
         };
+        */
 
         Ok(Utxo::new_send(inputs, [note, change]))
     }
@@ -243,10 +250,17 @@ impl Wallet {
         Err(WalletError::KeyNotFound(format!("Cant import {:?}", note)))
     }
 
-    pub fn get_address(&mut self) -> Element {
+    pub fn get_address(&mut self, amount: u64) -> CipheraAddress {
         let pk = self.gen_pk();
+        let psi = self.gen_pk();
+
         self.keys.push(pk.clone());
-        hash_merge([pk, Element::ZERO])
+        CipheraAddress {
+            version: 0,
+            public_key: hash_merge([pk, Element::ZERO]),
+            psi: Some(psi),
+            value: Element::new(amount),
+        }
     }
 }
 
