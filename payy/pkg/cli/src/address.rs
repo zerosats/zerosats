@@ -41,27 +41,35 @@ impl From<&CipheraAddress> for Note {
         Note {
             kind: Element::new(2),
             contract: citrea_wcbtc_note_kind(),
-            address: hash_merge([value.public_key, Element::ZERO]),
+            address: value.public_key,
             psi,
             value: value.value,
         }
     }
 }
 
+impl From<&Note> for CipheraAddress {
+    fn from(note: &Note) -> Self {
+        Self {
+            version: 0,
+            public_key: note.address,
+            psi: Some(note.psi),
+            value: note.value,
+        }
+    }
+}
+
 impl CipheraAddress {
-    /// Gets the commitment for the note represented by the URL payload
     #[must_use]
     pub fn address(&self) -> Element {
         Note::from(self).address
     }
 
-    /// Gets the commitment for the note represented by the URL payload
     #[must_use]
     pub fn commitment(&self) -> Element {
         Note::from(self).commitment()
     }
 
-    /// Gets the explicit or derived psi for the note url
     #[must_use]
     pub fn psi(&self) -> Element {
         match self.version {
@@ -70,37 +78,30 @@ impl CipheraAddress {
         }
     }
 
-    /// Encode a note URL payload to a base58-encoded string
     #[must_use]
     pub fn encode_address(&self) -> String {
         let mut bytes = Vec::new();
 
-        // Encode version
         bytes.push(self.version);
 
-        // Encode public_key
         bytes.extend_from_slice(&self.public_key.to_be_bytes());
 
-        // Encode psi if version is 0
         if let Some(psi) = &self.psi {
             if self.version == 0 {
                 bytes.extend_from_slice(&psi.to_be_bytes());
             }
         }
 
-        // Encode value with leading zeros
         let value_bytes = self.value.to_be_bytes();
         let leading_zeros = value_bytes.iter().take_while(|&&b| b == 0).count();
         #[allow(clippy::cast_possible_truncation)]
         bytes.push(leading_zeros as u8);
         bytes.extend_from_slice(&value_bytes[leading_zeros..]);
 
-        // Return Base58-encoded string
         bs58::encode(bytes).into_string()
     }
 }
 
-/// Decode a note URL payload from a base58-encoded string
 #[must_use]
 pub fn decode_address(address: &str) -> CipheraAddress {
     let address_bytes = bs58::decode(address)
@@ -143,5 +144,37 @@ pub fn decode_address(address: &str) -> CipheraAddress {
         public_key,
         psi,
         value,
+    }
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use zk_primitives::Note;
+
+    #[test]
+    fn test_roundtrip_from_note() {
+        let note = Note {
+            kind: Element::new(2),
+            contract: citrea_wcbtc_note_kind(),
+            address: hash_merge([Element::new(101), Element::ZERO]),
+            psi: Element::ZERO,
+            value: Element::new(1),
+        };
+
+        let a: CipheraAddress = (&note).into();
+
+        let encoded = a.encode_address();
+
+        println!("encoded: {encoded}");
+
+        let decoded_note = Note::from(&decode_address(&encoded));
+
+        // Verify
+        assert_eq!(decoded_note.address, note.address);
+        assert_eq!(decoded_note.value, note.value);
+        assert_eq!(decoded_note.address, note.address);
+        assert_eq!(decoded_note.psi, note.psi);
     }
 }

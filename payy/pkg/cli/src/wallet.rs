@@ -12,7 +12,8 @@ use zk_primitives::{
 };
 
 use crate::CipheraAddress;
-use crate::address::decode_address;
+use crate::address::{decode_address, citrea_wcbtc_note_kind};
+use crate::rpc::TxnWithInfo;
 
 // Error types for wallet operations
 #[derive(Debug, thiserror::Error)]
@@ -54,6 +55,7 @@ pub struct Wallet {
     /// *Private* key in the zk‑Primitive sense – **NOT** an ECDSA key!
     pub pk: Element,
     pub keys: Vec<Element>,
+    pub pending: Vec<InputNote>,
     pub avail: Vec<InputNote>,
     pub name: Option<String>,
     pub balance: u64,
@@ -65,6 +67,7 @@ impl Wallet {
         Self {
             pk,
             keys: Vec::new(),
+            pending: Vec::new(),
             avail: Vec::new(),
             name,
             balance: 0,
@@ -78,6 +81,7 @@ impl Wallet {
         Self {
             pk: Element::from_be_bytes(bytes),
             keys: Vec::new(),
+            pending: Vec::new(),
             avail: Vec::new(),
             name,
             balance: 0,
@@ -253,14 +257,48 @@ impl Wallet {
     pub fn get_address(&mut self, amount: u64) -> CipheraAddress {
         let pk = self.gen_pk();
         let psi = self.gen_pk();
+        let address = hash_merge([pk, Element::ZERO]);
+        let kind = Element::new(2);
+        let contract = citrea_wcbtc_note_kind();
 
         self.keys.push(pk.clone());
-        CipheraAddress {
-            version: 0,
-            public_key: hash_merge([pk, Element::ZERO]),
-            psi: Some(psi),
+        let note = Note {
+            kind,
+            contract,
+            address,
+            psi,
             value: Element::new(amount),
-        }
+        };
+        self.pending.push(InputNote::new(note.clone(), pk));
+
+        (&note).into()
+    }
+
+    pub fn sync(&mut self, txns: &Vec<TxnWithInfo>) -> Result<(), WalletError> {
+        for tx in txns {
+            let id = tx.hash;
+            let block = tx.block_height;
+            for c in tx.proof.public_inputs.output_commitments {
+                if c != Element::ZERO {// not a padding note
+                    let mut i = 0;
+                    for p in &self.pending {
+                        if c == p.note.commitment() {
+                            println!("\nFound commitment - {:x} in {}:{}\n", c, block, id);
+                            let values = p.note.value.to_u64_array().clone();
+                            let Some(amount) = values.first() else {
+                                return Err(WalletError::CantReadNoteValue());
+                            };
+                            self.avail.push(p.clone());
+                            self.balance = self.balance + amount;
+                            self.pending.remove(i);
+                            return Ok(())
+                        }
+                        i += 1;
+                    };
+                }
+            }
+        };
+        Ok(())
     }
 }
 

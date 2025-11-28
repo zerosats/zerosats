@@ -23,6 +23,7 @@ use secp256k1::PublicKey;
 use web3::signing::{keccak256, SecretKey};
 use web3::types::{Address, H160};
 
+use crate::rpc::{HealthResponse, ListTransactionsResponse, ListTxnsQuery};
 /// Singleton HTTP client shared across all NodeClient instances
 /// Provides connection pooling and efficient resource reuse
 static HTTP_CLIENT: Lazy<reqwest::Client> = Lazy::new(|| {
@@ -33,11 +34,6 @@ static HTTP_CLIENT: Lazy<reqwest::Client> = Lazy::new(|| {
         .build()
         .expect("Failed to build HTTP client")
 });
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct HealthResponse {
-    pub height: u64,
-}
 
 /// Builder for constructing NodeClient instances with fluent API
 #[derive(Debug, Clone)]
@@ -276,6 +272,37 @@ impl NodeClient {
             .map_err(|e| color_eyre::eyre::eyre!("Failed to parse transaction response: {}", e))?;
 
         Ok(tx_resp)
+    }
+
+    pub async fn list_transactions(
+        &self,
+        query: &ListTxnsQuery,
+    ) -> Result<ListTransactionsResponse> {
+        let url = format!("{}/transactions", self.base_url);
+
+        debug!("Requesting transaction list via {}", url);
+
+        let response = self
+            .http_client
+            .get(&url)
+            .timeout(self.timeout)
+            .send()
+            .await
+            .map_err(|e| color_eyre::eyre::eyre!("Failed to connect to node: {}", e))?;
+
+        if !response.status().is_success() {
+            return Err(color_eyre::eyre::eyre!(
+                "Node returned error status: {}",
+                response.status()
+            ));
+        }
+
+        let list_resp = response
+            .json::<ListTransactionsResponse>()
+            .await
+            .map_err(|e| color_eyre::eyre::eyre!("Failed to parse transaction list: {}", e))?;
+
+        Ok(list_resp)
     }
 
     pub async fn admin_mint(

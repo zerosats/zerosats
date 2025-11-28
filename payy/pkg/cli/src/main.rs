@@ -158,7 +158,7 @@ async fn handle_connect(name: &str, host: &str, port: u16, timeout_secs: u64) ->
     );
 
     // Build client with fluent API
-    let client = NodeClient::builder()
+    let mut client = NodeClient::builder()
         .name(name)
         .host(host)
         .port(port)
@@ -191,6 +191,17 @@ async fn handle_connect(name: &str, host: &str, port: u16, timeout_secs: u64) ->
         }
     }
 
+    match client.list_transactions(&Default::default()).await {
+        Ok(list) => {
+            println!("   Obtained transactions list size: {}", list.txns.len());
+            client.get_wallet_mut().sync(&list.txns)?;
+        }
+        Err(e) => {
+            eprintln!("   Warning: Could not obtain transactions: {e}");
+            tracing::warn!("Failed to request transactions: {}", e);
+        }
+    }
+
     println!("\n✨ Successfully connected to Pay node at {host}:{port}");
     Ok(())
 }
@@ -206,7 +217,8 @@ async fn handle_address(name: &str, amount: u64) -> Result<()> {
 
     let encoded = a.encode_address();
     println!("\nEncoded: {encoded}");
-
+    let id = a.commitment();
+    println!("\nCommitment: {id}");
     Ok(())
 }
 
