@@ -62,7 +62,7 @@ struct Cli {
 #[derive(Subcommand, Debug)]
 enum Commands {
     /// Connect to a Pay node and check its health
-    Connect {},
+    Sync {},
     Address {
         #[arg(required = true, short, long)]
         amount: u64,
@@ -151,7 +151,7 @@ pub enum AppError {
 /// Handle the connect command
 ///
 /// Connects to a Pay node and performs health checks
-async fn handle_connect(name: &str, host: &str, port: u16, timeout_secs: u64) -> Result<()> {
+async fn handle_sync(name: &str, host: &str, port: u16, timeout_secs: u64) -> Result<()> {
     debug!(
         "Connecting wallet {} to Payy node at {}:{}",
         name, host, port
@@ -589,8 +589,8 @@ async fn main() -> Result<()> {
 
     // Execute command
     match cli.command {
-        Commands::Connect {} => {
-            handle_connect(&cli.name, &cli.host, cli.port, cli.timeout).await?;
+        Commands::Sync {} => {
+            handle_sync(&cli.name, &cli.host, cli.port, cli.timeout).await?;
         }
         Commands::Address { amount } => {
             handle_address(&cli.name, amount).await?;
