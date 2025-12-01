@@ -1,10 +1,7 @@
 use element::Element;
 use serde::{Deserialize, Serialize};
-use std::str::FromStr;
-use web3::signing::keccak256;
-use hash::hash_merge;
 use zk_primitives::{
-    InputNote, Note, generate_note_kind_bridge_evm
+    Note, generate_note_kind_bridge_evm
 };
 use rand::rngs::OsRng;
 use rand::RngCore;
@@ -152,6 +149,7 @@ pub fn decode_address(address: &str) -> CipheraAddress {
 mod tests {
     use super::*;
     use zk_primitives::Note;
+    use hash::hash_merge;
 
     #[test]
     fn test_roundtrip_from_note() {

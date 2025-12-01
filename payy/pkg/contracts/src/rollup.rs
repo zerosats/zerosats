@@ -9,7 +9,6 @@ use element::Element;
 use eth_util::Eth;
 use ethereum_types::{H160, H256, U64, U256};
 use parking_lot::RwLock;
-use secp256k1::{Message, SECP256K1};
 use sha3::{Digest, Keccak256};
 use testutil::eth::EthNode;
 use tokio::time::{Instant, interval_at};

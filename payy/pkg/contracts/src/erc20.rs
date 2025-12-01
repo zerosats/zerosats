@@ -1,9 +1,7 @@
 use crate::Client;
 use crate::error::Result;
-use crate::util::calculate_domain_separator;
 use ethereum_types::U64;
 use rustc_hex::FromHex;
-use secp256k1::{Message, SECP256K1};
 use sha3::{Digest, Keccak256};
 use testutil::eth::EthNode;
 use web3::{
@@ -19,7 +17,6 @@ pub struct ERC20Contract {
     contract: Contract<Http>,
     signer: SecretKey,
     signer_address: Address,
-    domain_separator: H256,
     address: Address,
     /// The ethereum block height used for all contract calls.
     /// If None, the latest block is used.
@@ -31,7 +28,6 @@ impl ERC20Contract {
         client: Client,
         contract: Contract<Http>,
         signer: SecretKey,
-        domain_separator: H256,
         address: Address,
     ) -> Self {
         let signer_address = Key::address(&SecretKeyRef::new(&signer));
@@ -41,7 +37,6 @@ impl ERC20Contract {
             contract,
             signer,
             signer_address,
-            domain_separator,
             address,
             block_height: None,
         }
@@ -71,17 +66,11 @@ impl ERC20Contract {
         let contract_json =
             include_str!("../../../citrea/openzeppelin-contracts/token/ERC20/IERC20.json");
         let contract = client.load_contract_from_str(erc20_contract_addr, contract_json)?;
-        let domain_separator = calculate_domain_separator(
-            "USD Coin",
-            "2",
-            U256::from(chain_id.to_owned()),
-            erc20_contract_addr.parse()?,
-        );
+
         Ok(Self::new(
             client,
             contract,
             signer,
-            domain_separator,
             erc20_contract_addr.parse()?,
         ))
     }
@@ -104,44 +93,6 @@ impl ERC20Contract {
                 self.signer_address,
             )
             .await
-    }
-
-    pub fn signature_msg_digest_for_receive(
-        domain_separator: H256,
-        from: Address,
-        to: Address,
-        amount: U256,
-        valid_after: U256,
-        valid_before: U256,
-        nonce: H256,
-    ) -> [u8; 32] {
-        let mut data = Vec::new();
-        // keccak256("ReceiveWithAuthorization(address from,address to,uint256 value,uint256 validAfter,uint256 validBefore,bytes32 nonce)")
-        let receive_with_authorization_typehash =
-            "d099cc98ef71107a616c4f0f941f04c322d8e254fe26b3c6668db87aae413de8"
-                .from_hex::<Vec<_>>()
-                .unwrap();
-        data.extend_from_slice(&receive_with_authorization_typehash);
-        data.extend_from_slice(H256::from(from).as_bytes());
-        data.extend_from_slice(H256::from(to).as_bytes());
-        let mut amount_bytes = [0u8; 32];
-        amount.to_big_endian(&mut amount_bytes);
-        data.extend_from_slice(&amount_bytes);
-        let mut valid_after_bytes = [0u8; 32];
-        valid_after.to_big_endian(&mut valid_after_bytes);
-        data.extend_from_slice(&valid_after_bytes);
-        let mut valid_before_bytes = [0u8; 32];
-        valid_before.to_big_endian(&mut valid_before_bytes);
-        data.extend_from_slice(&valid_before_bytes);
-        data.extend_from_slice(nonce.as_bytes());
-
-        let mut hasher = Keccak256::new();
-        hasher.update([0x19, 0x01]);
-        hasher.update(domain_separator);
-        hasher.update(Keccak256::digest(&data));
-        let msg_hash = hasher.finalize();
-
-        msg_hash.into()
     }
 
     #[tracing::instrument(err, ret, skip(self))]

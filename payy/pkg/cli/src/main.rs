@@ -99,10 +99,6 @@ enum Commands {
         amount: u64,
     },
     SpendTo {
-        /// Request amount to spend
-        #[arg(required = true, short, long)]
-        amount: u64,
-
         #[arg(required = true, long)]
         address: String,
     },
@@ -233,7 +229,7 @@ async fn handle_note_spend(name: &str, amount: u64) -> Result<(), AppError> {
     let balance = wallet.balance;
 
     if amount <= balance {
-        let input_note = client.get_wallet_mut().spend_note(Some(amount))?;
+        let input_note = client.get_wallet_mut().spend_note(amount)?;
         let payload: NoteURLPayload = (&input_note).into();
         let v = input_note.note.value.to_u64_array();
 
@@ -276,7 +272,6 @@ async fn handle_spend_to(
     host: &str,
     port: u16,
     timeout_secs: u64,
-    amount: u64,
     address: &str,
 ) -> Result<()> {
     debug!(
@@ -295,31 +290,27 @@ async fn handle_spend_to(
     let wallet = Wallet::init(name)?;
     let balance = wallet.balance;
 
-    if amount <= balance {
-        let utxo = client.get_wallet_mut().spend_to(amount, address)?;
-        let snark = utxo.prove().unwrap();
+    let utxo = client.get_wallet_mut().spend_to(address)?;
+    let snark = utxo.prove().unwrap();
 
-        let receiver_note = utxo.output_notes[0].clone();
-        let json_str = serde_json::to_string_pretty(&receiver_note)?;
+    let receiver_note = utxo.output_notes[0].clone();
+    let json_str = serde_json::to_string_pretty(&receiver_note)?;
 
-        std::fs::write(format!("from-{name}-note.json"), &json_str)?;
+    std::fs::write(format!("from-{name}-note.json"), &json_str)?;
 
-        println!("\nSaved {receiver_note:?}");
+    println!("\nSaved {receiver_note:?}");
 
-        match client.transaction(&snark).await {
-            Ok(tx) => {
-                println!("\n✅ Transaction {} has been sent!", tx.txn_hash);
-                println!("   Height: {}", tx.height);
-                println!("   Root hash: {}", tx.root_hash);
-                Ok(())
-            }
-            Err(e) => {
-                eprintln!("\n❌ Could not send transaction!");
-                Err(e)
-            }
+    match client.transaction(&snark).await {
+        Ok(tx) => {
+            println!("\n✅ Transaction {} has been sent!", tx.txn_hash);
+            println!("   Height: {}", tx.height);
+            println!("   Root hash: {}", tx.root_hash);
+            Ok(())
         }
-    } else {
-        Err(AppError::NotEnoughBalance().into())
+        Err(e) => {
+            eprintln!("\n❌ Could not send transaction!");
+            Err(e)
+        }
     }
 }
 
@@ -529,7 +520,7 @@ async fn handle_burn(
         .timeout_secs(timeout_secs)
         .build()?;
 
-    let note = client.get_wallet_mut().spend_note(Some(amount))?;
+    let note = client.get_wallet_mut().spend_note(amount)?;
 
     let evm_address = convert_h160_to_element(&H160::from_str(address).unwrap()); // TODO
     let input_notes = [note.clone(), InputNote::padding_note()];
@@ -598,13 +589,13 @@ async fn main() -> Result<()> {
         Commands::Spend { amount } => {
             handle_note_spend(&cli.name, amount).await?;
         }
-        Commands::SpendTo { amount, address } => {
+        Commands::SpendTo { address } => {
             handle_spend_to(
                 &cli.name,
                 &cli.host,
                 cli.port,
                 cli.timeout,
-                amount, &address).await?;
+                &address).await?;
         }
         Commands::Receive { note, link } => {
             handle_receive(

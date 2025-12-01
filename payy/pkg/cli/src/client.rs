@@ -9,7 +9,6 @@ use contracts::{ERC20Contract, RollupContract};
 use hash::hash_merge;
 use node_interface::{HeightResponse, TransactionResponse};
 use once_cell::sync::Lazy;
-use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -18,10 +17,10 @@ use tracing::debug;
 use zk_primitives::{Note, UtxoProof};
 
 use contracts::ConfirmationType;
-use ethereum_types::{H256, U256};
+use ethereum_types::U256;
 use secp256k1::PublicKey;
 use web3::signing::{keccak256, SecretKey};
-use web3::types::{Address, H160};
+use web3::types::Address;
 
 use crate::rpc::{HealthResponse, ListTransactionsResponse, ListTxnsQuery};
 /// Singleton HTTP client shared across all NodeClient instances
