@@ -10,6 +10,7 @@ use web3::types::H160;
 #[derive(Debug, Serialize, Deserialize)]
 pub struct CipheraAddress {
     pub version: u8,
+    pub kind: u8,
     pub public_key: Element,
     pub psi: Option<Element>,
     pub value: Element,
@@ -26,6 +27,15 @@ pub fn citrea_wcbtc_note_kind() -> Element {
     let chain = 5115u64; // Citrea testnet
     let address =
         H160::from_slice(&hex::decode("8d0c9d1c17aE5e40ffF9bE350f57840E9E66Cd93").unwrap());
+
+    generate_note_kind_bridge_evm(chain, address)
+}
+
+#[must_use]
+pub fn citrea_usdc_note_kind() -> Element {
+    let chain = 5115u64; // Citrea testnet
+    let address =
+        H160::from_slice(&hex::decode("52f74a8f9bdd29f77a5efd7f6cb44dcf6906a4b6").unwrap());
 
     generate_note_kind_bridge_evm(chain, address)
 }
