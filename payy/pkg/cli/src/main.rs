@@ -5,7 +5,7 @@ use web3::types::H160;
 
 use cli::NodeClient;
 use cli::Wallet;
-use cli::address::citrea_ticker;
+use cli::address::citrea_ticker_from_kind;
 
 use barretenberg::Prove;
 use contracts::util::convert_h160_to_element;
@@ -396,7 +396,7 @@ async fn handle_receive(
         return Err(AppError::ConversionError().into());
     };
 
-    let ticker = citrea_ticker(&input_note.note.kind);
+    let ticker = citrea_ticker_from_kind(&input_note.note.contract);
 
     let note: Note = client
         .get_wallet_mut()

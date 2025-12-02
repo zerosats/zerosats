@@ -6,11 +6,12 @@ use zk_primitives::{
 use rand::rngs::OsRng;
 use rand::RngCore;
 use web3::types::H160;
+use std::str::FromStr;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct CipheraAddress {
     pub version: u8,
-    pub kind: u8,
+    pub currency: u8,
     pub public_key: Element,
     pub psi: Option<Element>,
     pub value: Element,
@@ -46,21 +47,50 @@ pub fn citrea_token_data(ticker: &str) -> (Element, Element) {
             (Element::new(2), citrea_wcbtc_note_kind())
         },
         "USDC" => {
-            (Element::new(3), citrea_usdc_note_kind())
+            (Element::new(2), citrea_usdc_note_kind())
         },
         _ => unreachable!("only WCBTC and USDC tokens are supported"),
     }
 }
 
-pub fn citrea_ticker(kind: &Element) -> String {
-    let wbtc = Element::new(2);
-    let usdc = Element::new(3);
-
-    match kind {
-        wbtc => {
+pub fn citrea_ticker_from_code(currency: u8) -> String {
+    match currency {
+        1 => {
             "WCBTC".to_string()
         },
-        usdc => {
+        2 => {
+            "USDC".to_string()
+        },
+        _ => unreachable!("only WCBTC and USDC tokens are supported"),
+    }
+}
+
+pub fn citrea_currency_from_kind(contract: Element) -> u8 {
+    let kind_wcbtc = Element::from_str("0x000200000000000013fb8d0c9d1c17ae5e40fff9be350f57840e9e66cd930000").unwrap();
+
+    let kind_usdc = Element::from_str("0x000200000000000013fb52f74a8f9bdd29f77a5efd7f6cb44dcf6906a4b60000").unwrap();
+
+    match contract {
+        kind_wcbtc => {
+            1
+        },
+        kind_usdc => {
+            2
+        },
+        _ => unreachable!("only WCBTC and USDC tokens are supported"),
+    }
+}
+
+pub fn citrea_ticker_from_kind(contract: &Element) -> String {
+    let kind_wcbtc = Element::from_str("0x000200000000000013fb8d0c9d1c17ae5e40fff9be350f57840e9e66cd930000").unwrap();
+
+    let kind_usdc = Element::from_str("0x000200000000000013fb52f74a8f9bdd29f77a5efd7f6cb44dcf6906a4b60000").unwrap();
+
+    match contract {
+        kind_wcbtc => {
+            "WCBTC".to_string()
+        },
+        kind_usdc => {
             "USDC".to_string()
         },
         _ => unreachable!("only WCBTC and USDC tokens are supported"),
@@ -73,14 +103,14 @@ impl From<&CipheraAddress> for Note {
             .psi
             .unwrap_or_else(|| random_element());
 
-        let contract = match value.kind {
-            2 => citrea_wcbtc_note_kind(),
-            3 => citrea_usdc_note_kind(),
-            _ => unreachable!("only version 1, 2 or 3 is supported"),
+        let contract = match value.currency {
+            1 => citrea_wcbtc_note_kind(),
+            2 => citrea_usdc_note_kind(),
+            _ => unreachable!("currency code must be 1 or 2"),
         };
 
         Note {
-            kind: Element::new(value.kind as u64),
+            kind: Element::new(2),
             contract,
             address: value.public_key,
             psi,
@@ -91,16 +121,13 @@ impl From<&CipheraAddress> for Note {
 
 impl From<&Note> for CipheraAddress {
     fn from(note: &Note) -> Self {
-        if let Some(kind) = note.kind.to_le_bytes().first() {
-            Self {
-                version: 0,
-                kind: kind.to_owned(),
-                public_key: note.address,
-                psi: Some(note.psi),
-                value: note.value,
-            }
-        } else {
-            unreachable!("broken kind value")
+
+        Self {
+            version: 0,
+            currency: citrea_currency_from_kind(note.contract),
+            public_key: note.address,
+            psi: Some(note.psi),
+            value: note.value,
         }
     }
 }
@@ -129,7 +156,7 @@ impl CipheraAddress {
         let mut bytes = Vec::new();
 
         bytes.push(self.version);
-        bytes.push(self.kind);
+        bytes.push(self.currency);
 
         bytes.extend_from_slice(&self.public_key.to_be_bytes());
 
@@ -158,7 +185,7 @@ pub fn decode_address(address: &str) -> CipheraAddress {
     let mut rest = &address_bytes[..];
 
     let version = rest[0];
-    let kind = rest[1];
+    let currency = rest[1];
     rest = &rest[2..];
 
     let public_key_bytes: [u8; 32] = rest[..32]
@@ -186,11 +213,12 @@ pub fn decode_address(address: &str) -> CipheraAddress {
 
     let mut value_bytes = [0u8; 32];
     value_bytes[leading_zeros..].copy_from_slice(value_without_leading_zeros);
+    value_bytes[leading_zeros..].copy_from_slice(value_without_leading_zeros);
     let value = Element::from_be_bytes(value_bytes);
 
     CipheraAddress {
         version,
-        kind,
+        currency,
         public_key,
         psi,
         value,
@@ -237,7 +265,7 @@ mod tests {
     #[test]
     fn test_roundtrip_from_usdc_note() {
         let note = Note {
-            kind: Element::new(3),
+            kind: Element::new(2),
             contract: citrea_usdc_note_kind(),
             address: hash_merge([Element::new(101), Element::ZERO]),
             psi: Element::ZERO,
