@@ -45,9 +45,16 @@ impl From<&CipheraAddress> for Note {
         let psi = value
             .psi
             .unwrap_or_else(|| random_element());
+
+        let contract = match value.kind {
+            2 => citrea_wcbtc_note_kind(),
+            3 => citrea_usdc_note_kind(),
+            _ => unreachable!("only version 1, 2 or 3 is supported"),
+        };
+
         Note {
-            kind: Element::new(2),
-            contract: citrea_wcbtc_note_kind(),
+            kind: Element::new(value.kind as u64),
+            contract,
             address: value.public_key,
             psi,
             value: value.value,
@@ -57,11 +64,16 @@ impl From<&CipheraAddress> for Note {
 
 impl From<&Note> for CipheraAddress {
     fn from(note: &Note) -> Self {
-        Self {
-            version: 0,
-            public_key: note.address,
-            psi: Some(note.psi),
-            value: note.value,
+        if let Some(kind) = note.kind.to_le_bytes().first() {
+            Self {
+                version: 0,
+                kind: kind.to_owned(),
+                public_key: note.address,
+                psi: Some(note.psi),
+                value: note.value,
+            }
+        } else {
+            unreachable!("broken kind value")
         }
     }
 }
@@ -90,6 +102,7 @@ impl CipheraAddress {
         let mut bytes = Vec::new();
 
         bytes.push(self.version);
+        bytes.push(self.kind);
 
         bytes.extend_from_slice(&self.public_key.to_be_bytes());
 
@@ -118,11 +131,13 @@ pub fn decode_address(address: &str) -> CipheraAddress {
     let mut rest = &address_bytes[..];
 
     let version = rest[0];
-    rest = &rest[1..];
+    let kind = rest[1];
+    rest = &rest[2..];
 
     let public_key_bytes: [u8; 32] = rest[..32]
         .try_into()
         .expect("Not enough bytes for public_key");
+
     let public_key = Element::from_be_bytes(public_key_bytes);
     rest = &rest[32..];
 
@@ -148,6 +163,7 @@ pub fn decode_address(address: &str) -> CipheraAddress {
 
     CipheraAddress {
         version,
+        kind,
         public_key,
         psi,
         value,
@@ -173,14 +189,19 @@ mod tests {
 
         let a: CipheraAddress = (&note).into();
 
+        println!("to be encoded: {:?}", a);
+
         let encoded = a.encode_address();
 
         println!("encoded: {encoded}");
 
         let decoded_note = Note::from(&decode_address(&encoded));
 
+        println!("decoded: {:?}", decoded_note);
+
         // Verify
-        assert_eq!(decoded_note.address, note.address);
+        assert_eq!(decoded_note.kind, note.kind);
+        assert_eq!(decoded_note.contract, note.contract);
         assert_eq!(decoded_note.value, note.value);
         assert_eq!(decoded_note.address, note.address);
         assert_eq!(decoded_note.psi, note.psi);
