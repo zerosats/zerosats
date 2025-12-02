@@ -66,35 +66,29 @@ pub fn citrea_ticker_from_code(currency: u8) -> String {
 }
 
 pub fn citrea_currency_from_kind(contract: Element) -> u8 {
-    let kind_wcbtc = Element::from_str("0x000200000000000013fb8d0c9d1c17ae5e40fff9be350f57840e9e66cd930000").unwrap();
+    let KIND_USDC = Element::from_str("0x000200000000000013fb52f74a8f9bdd29f77a5efd7f6cb44dcf6906a4b60000").unwrap();
+    let KIND_WCBTC = Element::from_str("0x000200000000000013fb8d0c9d1c17ae5e40fff9be350f57840e9e66cd930000").unwrap();
 
-    let kind_usdc = Element::from_str("0x000200000000000013fb52f74a8f9bdd29f77a5efd7f6cb44dcf6906a4b60000").unwrap();
-
-    match contract {
-        kind_wcbtc => {
-            1
-        },
-        kind_usdc => {
-            2
-        },
-        _ => unreachable!("only WCBTC and USDC tokens are supported"),
+    if contract == KIND_WCBTC {
+        return 1
     }
+    if contract == KIND_USDC {
+        return 2
+    }
+    unreachable!("only WCBTC and USDC tokens are supported")
 }
 
-pub fn citrea_ticker_from_kind(contract: &Element) -> String {
-    let kind_wcbtc = Element::from_str("0x000200000000000013fb8d0c9d1c17ae5e40fff9be350f57840e9e66cd930000").unwrap();
+pub fn citrea_ticker_from_kind(contract: Element) -> String {
+    let KIND_USDC = Element::from_str("0x000200000000000013fb52f74a8f9bdd29f77a5efd7f6cb44dcf6906a4b60000").unwrap();
+    let KIND_WCBTC = Element::from_str("0x000200000000000013fb8d0c9d1c17ae5e40fff9be350f57840e9e66cd930000").unwrap();
 
-    let kind_usdc = Element::from_str("0x000200000000000013fb52f74a8f9bdd29f77a5efd7f6cb44dcf6906a4b60000").unwrap();
-
-    match contract {
-        kind_wcbtc => {
-            "WCBTC".to_string()
-        },
-        kind_usdc => {
-            "USDC".to_string()
-        },
-        _ => unreachable!("only WCBTC and USDC tokens are supported"),
+    if contract == KIND_WCBTC {
+        return "WCBTC".to_string()
     }
+    if contract == KIND_USDC {
+        return "USDC".to_string()
+    }
+    unreachable!("only WCBTC and USDC tokens are supported")
 }
 
 impl From<&CipheraAddress> for Note {
@@ -121,7 +115,6 @@ impl From<&CipheraAddress> for Note {
 
 impl From<&Note> for CipheraAddress {
     fn from(note: &Note) -> Self {
-
         Self {
             version: 0,
             currency: citrea_currency_from_kind(note.contract),

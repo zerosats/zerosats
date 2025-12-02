@@ -396,7 +396,7 @@ async fn handle_receive(
         return Err(AppError::ConversionError().into());
     };
 
-    let ticker = citrea_ticker_from_kind(&input_note.note.contract);
+    let ticker = citrea_ticker_from_kind(input_note.note.contract);
 
     let note: Note = client
         .get_wallet_mut()
