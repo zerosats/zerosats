@@ -970,13 +970,13 @@ impl RollupContract {
     }
 
     #[tracing::instrument(err, ret, skip(self))]
-    pub async fn token(&self) -> Result<H160> {
+    pub async fn token(&self, kind: H256) -> Result<H160> {
         let token = self
             .client
             .query(
                 &self.contract,
-                "token",
-                (),
+                "noteKindTokenAddress",
+                kind,
                 None,
                 Default::default(),
                 self.block_height.map(|x| x.into()),

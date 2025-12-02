@@ -20,7 +20,7 @@ use contracts::ConfirmationType;
 use ethereum_types::U256;
 use secp256k1::PublicKey;
 use web3::signing::{keccak256, SecretKey};
-use web3::types::Address;
+use web3::types::{H256, Address};
 
 use crate::rpc::{HealthResponse, ListTransactionsResponse, ListTxnsQuery};
 /// Singleton HTTP client shared across all NodeClient instances
@@ -408,14 +408,24 @@ impl NodeClient {
         let rollup = RollupContract::load(client, &chain_id, rollup, sk).await?;
         let rh = rollup.root_hash().await?;
         let b = rollup.block_height().await?;
-        let token = rollup.token().await?;
+        let kind_wcbtc = H256::from_slice(
+            &hex::decode("000200000000000013fb8d0c9d1c17ae5e40fff9be350f57840e9e66cd930000").unwrap()
+        );
+
+        let kind_usdc = H256::from_slice(
+            &hex::decode("000200000000000013fb52f74a8f9bdd29f77a5efd7f6cb44dcf6906a4b60000").unwrap()
+        );
+
+        let token_wbtc = rollup.token(kind_wcbtc).await?;
+        let token_usdc = rollup.token(kind_usdc.into()).await?;
 
         println!("\nRollup State Info\n");
-        println!("\tChain      :{} ", chain_id);
-        println!("\tToken      :{:#x} ", token);
+        println!("\tChain                :{} ", chain_id);
+        println!("\tToken kind WBTC      :{:#x} ", token_wbtc);
+        println!("\tToken kind USDC      :{:#x} ", token_usdc);
 
-        println!("\tBlock      :{} ", b);
-        println!("\tRoot hash  :{:#x} ", rh);
+        println!("\tBlock                :{} ", b);
+        println!("\tRoot hash            :{:#x} ", rh);
 
         Ok(())
     }

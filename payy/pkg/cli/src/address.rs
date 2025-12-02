@@ -178,10 +178,40 @@ mod tests {
     use hash::hash_merge;
 
     #[test]
-    fn test_roundtrip_from_note() {
+    fn test_roundtrip_from_wcbtc_note() {
         let note = Note {
             kind: Element::new(2),
             contract: citrea_wcbtc_note_kind(),
+            address: hash_merge([Element::new(101), Element::ZERO]),
+            psi: Element::ZERO,
+            value: Element::new(1),
+        };
+
+        let a: CipheraAddress = (&note).into();
+
+        println!("to be encoded: {:?}", a);
+
+        let encoded = a.encode_address();
+
+        println!("encoded: {encoded}");
+
+        let decoded_note = Note::from(&decode_address(&encoded));
+
+        println!("decoded: {:?}", decoded_note);
+
+        // Verify
+        assert_eq!(decoded_note.kind, note.kind);
+        assert_eq!(decoded_note.contract, note.contract);
+        assert_eq!(decoded_note.value, note.value);
+        assert_eq!(decoded_note.address, note.address);
+        assert_eq!(decoded_note.psi, note.psi);
+    }
+
+    #[test]
+    fn test_roundtrip_from_usdc_note() {
+        let note = Note {
+            kind: Element::new(3),
+            contract: citrea_usdc_note_kind(),
             address: hash_merge([Element::new(101), Element::ZERO]),
             psi: Element::ZERO,
             value: Element::new(1),
