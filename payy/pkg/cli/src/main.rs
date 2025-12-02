@@ -5,6 +5,7 @@ use web3::types::H160;
 
 use cli::NodeClient;
 use cli::Wallet;
+use cli::address::citrea_ticker;
 
 use barretenberg::Prove;
 use contracts::util::convert_h160_to_element;
@@ -38,18 +39,11 @@ struct Cli {
     port: u16,
 
     /// Request timeout in seconds
-    #[arg(global = true, short, long, default_value = "10")]
+    #[arg(global = true, long, default_value = "10")]
     timeout: u64,
 
     #[arg(global = true, short, long, default_value = "5115")] // Citrea testnet default
     chain: u64,
-
-    #[arg(
-        global = true,
-        long,
-        default_value = "0x8d0c9d1c17aE5e40ffF9bE350f57840E9E66Cd93"
-    )] // WCBTC Testnet
-    token: String,
 
     #[arg(
         global = true,
@@ -66,6 +60,9 @@ enum Commands {
     Address {
         #[arg(required = true, short, long)]
         amount: u64,
+
+        #[arg(short, long, default_value="WCBTC")]
+        token: String,
     },
     Mint {
         #[arg(required = true, long, short)]
@@ -76,6 +73,9 @@ enum Commands {
 
         #[arg(required = true, short, long)]
         amount: u64,
+
+        #[arg(short, long, default_value="WCBTC")]
+        token: String,
 
         #[arg(required = false, long, short, action=clap::ArgAction::SetTrue)]
         only_snark: bool,
@@ -92,11 +92,17 @@ enum Commands {
 
         #[arg(required = true, short, long)]
         amount: u64,
+
+        #[arg(short, long, default_value="WCBTC")]
+        token: String,
     },
     Spend {
         /// Request amount to spend
         #[arg(required = true, short, long)]
         amount: u64,
+
+        #[arg(short, long, default_value="WCBTC")]
+        token: String,
     },
     SpendTo {
         #[arg(required = true, long)]
@@ -202,10 +208,10 @@ async fn handle_sync(name: &str, host: &str, port: u16, timeout_secs: u64) -> Re
     Ok(())
 }
 
-async fn handle_address(name: &str, amount: u64) -> Result<()> {
+async fn handle_address(name: &str, amount: u64, token: &str) -> Result<()> {
     let mut wallet = Wallet::init(name)?;
     let b = wallet.balance;
-    let a = wallet.get_address(amount);
+    let a = wallet.get_address(amount, token);
 
     println!("\nWallet {} has been found:", name);
     println!("\tBalance: {:?}", b);
@@ -218,7 +224,7 @@ async fn handle_address(name: &str, amount: u64) -> Result<()> {
     Ok(())
 }
 
-async fn handle_note_spend(name: &str, amount: u64) -> Result<(), AppError> {
+async fn handle_note_spend(name: &str, amount: u64, token: &str) -> Result<(), AppError> {
     // Build client with fluent API
     let mut client = NodeClient::builder()
         .name(name)
@@ -320,7 +326,6 @@ async fn handle_receive(
     port: u16,
     timeout_secs: u64,
     chain: u64,
-    token: &str,
     notefile: Option<String>,
     notelink: Option<String>,
 ) -> Result<()> {
@@ -391,9 +396,11 @@ async fn handle_receive(
         return Err(AppError::ConversionError().into());
     };
 
+    let ticker = citrea_ticker(&input_note.note.kind);
+
     let note: Note = client
         .get_wallet_mut()
-        .receive_note(amount.to_owned(), chain, token);
+        .receive_note(amount.to_owned(), &ticker);
 
     /*
     let note = Note {
@@ -457,10 +464,10 @@ async fn handle_mint(
     timeout_secs: u64,
     geth_rpc: &str,
     chain: u64,
-    token: &str,
     rollup: &str,
     secret: &str,
     amount: u64,
+    token: &str,
     only_snark: bool,
 ) -> Result<()> {
     // Build client with fluent API
@@ -471,7 +478,7 @@ async fn handle_mint(
         .timeout_secs(timeout_secs)
         .build()?;
 
-    let note: Note = client.get_wallet_mut().receive_note(amount, chain, token);
+    let note: Note = client.get_wallet_mut().receive_note(amount, token);
     let output_notes = [note.clone(), Note::padding_note()];
     let utxo = zk_primitives::Utxo::new_mint(output_notes.clone());
 
@@ -506,11 +513,11 @@ async fn handle_burn(
     timeout_secs: u64,
     geth_rpc: &str,
     chain: u64,
-    token: &str,
     rollup: &str,
     secret: &str,
     address: &str,
     amount: u64,
+    token: &str,
 ) -> Result<()> {
     // Build client with fluent API
     let mut client = NodeClient::builder()
@@ -583,11 +590,11 @@ async fn main() -> Result<()> {
         Commands::Sync {} => {
             handle_sync(&cli.name, &cli.host, cli.port, cli.timeout).await?;
         }
-        Commands::Address { amount } => {
-            handle_address(&cli.name, amount).await?;
+        Commands::Address { amount, token } => {
+            handle_address(&cli.name, amount, &token).await?;
         }
-        Commands::Spend { amount } => {
-            handle_note_spend(&cli.name, amount).await?;
+        Commands::Spend { amount, token } => {
+            handle_note_spend(&cli.name, amount, &token).await?;
         }
         Commands::SpendTo { address } => {
             handle_spend_to(
@@ -604,7 +611,6 @@ async fn main() -> Result<()> {
                 cli.port,
                 cli.timeout,
                 cli.chain,
-                &cli.token,
                 note,
                 link,
             )
@@ -621,6 +627,7 @@ async fn main() -> Result<()> {
             geth_rpc,
             secret,
             amount,
+            token,
             only_snark,
         } => {
             handle_mint(
@@ -630,10 +637,10 @@ async fn main() -> Result<()> {
                 cli.timeout,
                 &geth_rpc,
                 cli.chain,
-                &cli.token,
                 &cli.rollup,
                 &secret,
                 amount,
+                &token,
                 only_snark,
             )
             .await?;
@@ -643,6 +650,7 @@ async fn main() -> Result<()> {
             secret,
             address,
             amount,
+            token,
         } => {
             handle_burn(
                 &cli.name,
@@ -651,11 +659,11 @@ async fn main() -> Result<()> {
                 cli.timeout,
                 &geth_rpc,
                 cli.chain,
-                &cli.token,
                 &cli.rollup,
                 &secret,
                 &address,
                 amount,
+                &token
             )
             .await?;
         }

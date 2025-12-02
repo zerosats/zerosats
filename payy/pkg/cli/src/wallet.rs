@@ -12,7 +12,7 @@ use zk_primitives::{
 };
 
 use crate::CipheraAddress;
-use crate::address::{decode_address, citrea_wcbtc_note_kind};
+use crate::address::{decode_address, citrea_token_data};
 use crate::rpc::TxnWithInfo;
 
 // Error types for wallet operations
@@ -243,14 +243,15 @@ impl Wallet {
         Ok(Utxo::new_send(inputs, [note, change]))
     }
 
-    pub fn receive_note(&mut self, amount: u64, chain: u64, token: &str) -> Note {
+    pub fn receive_note(&mut self, amount: u64, ticker: &str) -> Note {
         let pk = self.gen_pk();
         let self_address = hash_merge([pk, Element::ZERO]);
-        let token = H160::from_str(token).unwrap(); // TODO: remove unwrap
+
+        let (kind, contract) = citrea_token_data(ticker);
 
         let note = Note {
-            kind: Element::new(2),
-            contract: generate_note_kind_bridge_evm(chain, token),
+            kind,
+            contract,
             address: self_address,
             psi: Element::secure_random(rand::thread_rng()),
             value: Element::from(amount),
@@ -281,12 +282,11 @@ impl Wallet {
         Err(WalletError::KeyNotFound(format!("Cant import {:?}", note)))
     }
 
-    pub fn get_address(&mut self, amount: u64) -> CipheraAddress {
+    pub fn get_address(&mut self, amount: u64, ticker: &str) -> CipheraAddress {
         let pk = self.gen_pk();
         let psi = self.gen_pk();
         let address = hash_merge([pk, Element::ZERO]);
-        let kind = Element::new(2);
-        let contract = citrea_wcbtc_note_kind();
+        let (kind, contract) = citrea_token_data(ticker);
 
         self.keys.push(pk.clone());
         let note = Note {
@@ -369,9 +369,11 @@ mod wallet_tests {
     }
 
     fn create_note_and_encode_address(amount: u64) -> String {
+        let (kind, contract) = citrea_token_data("WCBTC");
+
         let note = Note {
-            kind: Element::new(2),
-            contract: citrea_wcbtc_note_kind(),
+            kind,
+            contract,
             address: hash_merge([Element::new(101), Element::ZERO]),
             psi: Element::ZERO,
             value: Element::new(amount),

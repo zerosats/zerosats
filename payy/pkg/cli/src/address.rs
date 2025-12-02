@@ -40,6 +40,33 @@ pub fn citrea_usdc_note_kind() -> Element {
     generate_note_kind_bridge_evm(chain, address)
 }
 
+pub fn citrea_token_data(ticker: &str) -> (Element, Element) {
+    match ticker.to_uppercase().as_str() {
+        "WCBTC" => {
+            (Element::new(2), citrea_wcbtc_note_kind())
+        },
+        "USDC" => {
+            (Element::new(3), citrea_usdc_note_kind())
+        },
+        _ => unreachable!("only WCBTC and USDC tokens are supported"),
+    }
+}
+
+pub fn citrea_ticker(kind: &Element) -> String {
+    let wbtc = Element::new(2);
+    let usdc = Element::new(3);
+
+    match kind {
+        wbtc => {
+            "WCBTC".to_string()
+        },
+        usdc => {
+            "USDC".to_string()
+        },
+        _ => unreachable!("only WCBTC and USDC tokens are supported"),
+    }
+}
+
 impl From<&CipheraAddress> for Note {
     fn from(value: &CipheraAddress) -> Self {
         let psi = value
