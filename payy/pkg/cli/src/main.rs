@@ -5,7 +5,7 @@ use web3::types::H160;
 
 use cli::NodeClient;
 use cli::Wallet;
-use cli::address::citrea_ticker_from_kind;
+use cli::address::citrea_ticker_from_contract;
 
 use barretenberg::Prove;
 use contracts::util::convert_h160_to_element;
@@ -62,7 +62,7 @@ enum Commands {
         amount: u64,
 
         #[arg(short, long, default_value="WCBTC")]
-        token: String,
+        ticker: String,
     },
     Mint {
         #[arg(required = true, long, short)]
@@ -75,7 +75,7 @@ enum Commands {
         amount: u64,
 
         #[arg(short, long, default_value="WCBTC")]
-        token: String,
+        ticker: String,
 
         #[arg(required = false, long, short, action=clap::ArgAction::SetTrue)]
         only_snark: bool,
@@ -94,7 +94,7 @@ enum Commands {
         amount: u64,
 
         #[arg(short, long, default_value="WCBTC")]
-        token: String,
+        ticker: String,
     },
     Spend {
         /// Request amount to spend
@@ -102,7 +102,7 @@ enum Commands {
         amount: u64,
 
         #[arg(short, long, default_value="WCBTC")]
-        token: String,
+        ticker: String,
     },
     SpendTo {
         #[arg(required = true, long)]
@@ -208,10 +208,10 @@ async fn handle_sync(name: &str, host: &str, port: u16, timeout_secs: u64) -> Re
     Ok(())
 }
 
-async fn handle_address(name: &str, amount: u64, token: &str) -> Result<()> {
+async fn handle_address(name: &str, amount: u64, ticker: &str) -> Result<()> {
     let mut wallet = Wallet::init(name)?;
     let b = wallet.balance;
-    let a = wallet.get_address(amount, token);
+    let a = wallet.get_address(amount, ticker);
 
     println!("\nWallet {} has been found:", name);
     println!("\tBalance: {:?}", b);
@@ -224,7 +224,7 @@ async fn handle_address(name: &str, amount: u64, token: &str) -> Result<()> {
     Ok(())
 }
 
-async fn handle_note_spend(name: &str, amount: u64, token: &str) -> Result<(), AppError> {
+async fn handle_note_spend(name: &str, amount: u64, ticker: &str) -> Result<(), AppError> {
     // Build client with fluent API
     let mut client = NodeClient::builder()
         .name(name)
@@ -235,7 +235,7 @@ async fn handle_note_spend(name: &str, amount: u64, token: &str) -> Result<(), A
     let balance = wallet.balance;
 
     if amount <= balance {
-        let input_note = client.get_wallet_mut().spend_note(amount)?;
+        let input_note = client.get_wallet_mut().spend_note(amount, ticker)?;
         let payload: NoteURLPayload = (&input_note).into();
         let v = input_note.note.value.to_u64_array();
 
@@ -396,7 +396,7 @@ async fn handle_receive(
         return Err(AppError::ConversionError().into());
     };
 
-    let ticker = citrea_ticker_from_kind(input_note.note.contract);
+    let ticker = citrea_ticker_from_contract(input_note.note.contract);
 
     let note: Note = client
         .get_wallet_mut()
@@ -467,7 +467,7 @@ async fn handle_mint(
     rollup: &str,
     secret: &str,
     amount: u64,
-    token: &str,
+    ticker: &str,
     only_snark: bool,
 ) -> Result<()> {
     // Build client with fluent API
@@ -478,7 +478,7 @@ async fn handle_mint(
         .timeout_secs(timeout_secs)
         .build()?;
 
-    let note: Note = client.get_wallet_mut().receive_note(amount, token);
+    let note: Note = client.get_wallet_mut().receive_note(amount, ticker);
     let output_notes = [note.clone(), Note::padding_note()];
     let utxo = zk_primitives::Utxo::new_mint(output_notes.clone());
 
@@ -488,7 +488,7 @@ async fn handle_mint(
 
     if !only_snark {
         client
-            .admin_mint(geth_rpc, chain, secret, rollup, token, &note, &snark)
+            .admin_mint(geth_rpc, chain, secret, rollup, ticker, &note, &snark)
             .await?;
     }
 
@@ -517,7 +517,7 @@ async fn handle_burn(
     secret: &str,
     address: &str,
     amount: u64,
-    token: &str,
+    ticker: &str,
 ) -> Result<()> {
     // Build client with fluent API
     let mut client = NodeClient::builder()
@@ -527,7 +527,7 @@ async fn handle_burn(
         .timeout_secs(timeout_secs)
         .build()?;
 
-    let note = client.get_wallet_mut().spend_note(amount)?;
+    let note = client.get_wallet_mut().spend_note(amount, ticker)?;
 
     let evm_address = convert_h160_to_element(&H160::from_str(address).unwrap()); // TODO
     let input_notes = [note.clone(), InputNote::padding_note()];
@@ -590,11 +590,13 @@ async fn main() -> Result<()> {
         Commands::Sync {} => {
             handle_sync(&cli.name, &cli.host, cli.port, cli.timeout).await?;
         }
-        Commands::Address { amount, token } => {
-            handle_address(&cli.name, amount, &token).await?;
+        Commands::Address { amount, ticker } => {
+            let ticker_normalized = ticker.to_uppercase();
+            handle_address(&cli.name, amount, &ticker_normalized).await?;
         }
-        Commands::Spend { amount, token } => {
-            handle_note_spend(&cli.name, amount, &token).await?;
+        Commands::Spend { amount, ticker } => {
+            let ticker_normalized = ticker.to_uppercase();
+            handle_note_spend(&cli.name, amount, &ticker_normalized).await?;
         }
         Commands::SpendTo { address } => {
             handle_spend_to(
@@ -627,9 +629,10 @@ async fn main() -> Result<()> {
             geth_rpc,
             secret,
             amount,
-            token,
+            ticker,
             only_snark,
         } => {
+            let ticker_normalized = ticker.to_uppercase();
             handle_mint(
                 &cli.name,
                 &cli.host,
@@ -640,7 +643,7 @@ async fn main() -> Result<()> {
                 &cli.rollup,
                 &secret,
                 amount,
-                &token,
+                &ticker_normalized,
                 only_snark,
             )
             .await?;
@@ -650,8 +653,9 @@ async fn main() -> Result<()> {
             secret,
             address,
             amount,
-            token,
+            ticker,
         } => {
+            let ticker_normalized = ticker.to_uppercase();
             handle_burn(
                 &cli.name,
                 &cli.host,
@@ -663,7 +667,7 @@ async fn main() -> Result<()> {
                 &secret,
                 &address,
                 amount,
-                &token
+                &ticker_normalized
             )
             .await?;
         }

@@ -12,8 +12,9 @@ use zk_primitives::{
 };
 
 use crate::CipheraAddress;
-use crate::address::{decode_address, citrea_token_data};
+use crate::address::{decode_address, citrea_token_data, citrea_currency_from_contract, citrea_ticker_from_contract};
 use crate::rpc::TxnWithInfo;
+use std::collections::HashMap;
 
 // Error types for wallet operations
 #[derive(Debug, thiserror::Error)]
@@ -55,8 +56,8 @@ pub struct Wallet {
     /// *Private* key in the zk‑Primitive sense – **NOT** an ECDSA key!
     pub pk: Element,
     pub keys: Vec<Element>,
-    pub pending: Vec<InputNote>,
-    pub avail: Vec<InputNote>,
+    pub pending: HashMap<String, Vec<InputNote>>,
+    pub avail: HashMap<String, Vec<InputNote>>,
     pub name: Option<String>,
     pub balance: u64,
 }
@@ -67,8 +68,8 @@ impl Wallet {
         Self {
             pk,
             keys: Vec::new(),
-            pending: Vec::new(),
-            avail: Vec::new(),
+            pending: HashMap::new(),
+            avail: HashMap::new(),
             name,
             balance: 0,
         }
@@ -81,8 +82,8 @@ impl Wallet {
         Self {
             pk: Element::from_be_bytes(bytes),
             keys: Vec::new(),
-            pending: Vec::new(),
-            avail: Vec::new(),
+            pending: HashMap::new(),
+            avail: HashMap::new(),
             name,
             balance: 0,
         }
@@ -129,47 +130,56 @@ impl Wallet {
         Ok(())
     }
 
-    pub fn spend_note(&mut self, amount: u64) -> Result<InputNote, WalletError> {
-        if self.avail.len() == 0 {
+    pub fn spend_note(&mut self, amount: u64, ticker: &str) -> Result<InputNote, WalletError> {
+
+        if let Some(asset_notes) = self.avail.get_mut(ticker) {
+            if asset_notes.len() == 0 {
+                let name = self.name.clone().unwrap_or("Noname".to_string());
+                return Err(WalletError::LowBalance(format!(
+                    "Wallet {name} has 0 balance")));
+            }
+
+            let mut delta = 0_u64;
+
+            let mut i = 0;
+            let mut i_min = 0;
+
+            for n in asset_notes.clone() {
+                if let Some(note_amount) = n.note.value.to_u64_array().first() {
+                    let delta_new: u64 = if note_amount.to_owned() > amount {
+                        note_amount.to_owned() - amount
+                    } else {
+                        amount - note_amount.to_owned()
+                    };
+                    if delta_new <= delta {
+                        delta = delta_new;
+                        i_min = i;
+                    }
+                }
+                i += 1;
+            }
+
+            if let input_note = asset_notes.remove(i_min) {
+                let values = input_note.note.value.to_u64_array().clone();
+                let Some(note_amount) = values.first() else {
+                    return Err(WalletError::CantPullNote());
+                };
+                self.balance = self.balance - note_amount.to_owned();
+                Ok(input_note)
+            } else {
+                Err(WalletError::CantPullNote())
+            }
+
+        } else {
             let name = self.name.clone().unwrap_or("Noname".to_string());
             return Err(WalletError::LowBalance(format!(
                 "Wallet {name} has 0 balance")));
-        }
-
-        let mut delta = 0_u64;
-
-        let mut i = 0;
-        let mut i_min = 0;
-
-        for n in self.avail.clone() {
-            if let Some(note_amount) = n.note.value.to_u64_array().first() {
-                let delta_new: u64 = if note_amount.to_owned() > amount {
-                    note_amount.to_owned() - amount
-                } else {
-                    amount - note_amount.to_owned()
-                };
-                if delta_new <= delta {
-                    delta = delta_new;
-                    i_min = i;
-                }
-            }
-            i += 1;
-        }
-
-        if let input_note = self.avail.remove(i_min) {
-            let values = input_note.note.value.to_u64_array().clone();
-            let Some(note_amount) = values.first() else {
-                return Err(WalletError::CantPullNote());
-            };
-            self.balance = self.balance - note_amount.to_owned();
-            Ok(input_note)
-        } else {
-            Err(WalletError::CantPullNote())
         }
     }
 
     pub fn spend_to(&mut self, address: &str) -> Result<Utxo, WalletError> {
         let note = Note::from(&decode_address(address));
+        let ticker = citrea_ticker_from_contract(note.contract);
         let values = note.value.to_u64_array().clone();
         let Some(amount) = values.first() else {
             return Err(WalletError::CantPullNote());
@@ -183,7 +193,7 @@ impl Wallet {
             )));
         }
 
-        let input_note_1 = self.spend_note(amount.to_owned())?;
+        let input_note_1 = self.spend_note(amount.to_owned(), &ticker)?;
         let values = input_note_1.note.value.to_u64_array().clone();
         let Some(amount_1) = values.first() else {
             return Err(WalletError::CantPullNote());
@@ -200,7 +210,7 @@ impl Wallet {
         } else if  amount_1.to_owned() < amount.to_owned() {
             println!("Pulling additional note. Requested {}, available {}", amount, amount_1);
             let delta = (amount - amount_1) as u64;
-            let input_note_2 = self.spend_note(delta)?;
+            let input_note_2 = self.spend_note(delta, &ticker)?;
 
             let values = input_note_1.note.value.to_u64_array().clone();
             let Some(amount_2) = values.first() else {
@@ -218,8 +228,11 @@ impl Wallet {
                     psi: Element::secure_random(rand::thread_rng()),
                     value: Element::from(change_amount),
                 };
-
-                self.avail.push(InputNote::new(change.clone(), pk));
+                if let Some(asset_notes) = self.avail.get_mut(&ticker) {
+                    asset_notes.push(InputNote::new(change.clone(), pk));
+                } else {
+                    self.avail.insert(ticker, vec![InputNote::new(change.clone(), pk)]);
+                };
                 self.balance = self.balance + change_amount;
 
                 ([input_note_1.clone(), input_note_2.clone()], change)
@@ -234,8 +247,11 @@ impl Wallet {
                 psi: Element::secure_random(rand::thread_rng()),
                 value: Element::from(change_amount),
             };
-
-            self.avail.push(InputNote::new(change.clone(), pk));
+            if let Some(asset_notes) = self.avail.get_mut(&ticker) {
+                asset_notes.push(InputNote::new(change.clone(), pk));
+            } else {
+                self.avail.insert(ticker, vec![InputNote::new(change.clone(), pk)]);
+            };
             self.balance = self.balance + change_amount;
 
             ([input_note_1.clone(), InputNote::padding_note()], change)
@@ -257,7 +273,12 @@ impl Wallet {
             value: Element::from(amount),
         };
 
-        self.avail.push(InputNote::new(note.clone(), pk));
+        if let Some(asset_notes) = self.avail.get_mut(ticker) {
+            asset_notes.push(InputNote::new(note.clone(), pk));
+        } else {
+            self.avail.insert(ticker.to_string(), vec![InputNote::new(note.clone(), pk)]);
+        };
+
         self.balance = self.balance + amount;
         note
     }
@@ -272,7 +293,14 @@ impl Wallet {
                     return Err(WalletError::CantReadNoteValue());
                 };
 
-                self.avail.push(InputNote::new(note.clone(), pk));
+                let ticker = citrea_ticker_from_contract(note.contract);
+
+                if let Some(asset_notes) = self.avail.get_mut(&ticker) {
+                    asset_notes.push(InputNote::new(note.clone(), pk));
+                } else {
+                    self.avail.insert(ticker.to_string(), vec![InputNote::new(note.clone(), pk)]);
+                }
+
                 self.balance = self.balance + amount;
                 self.keys.remove(i);
                 return Ok(())
@@ -296,7 +324,7 @@ impl Wallet {
             psi,
             value: Element::new(amount),
         };
-        self.pending.push(InputNote::new(note.clone(), pk));
+        self.pending.insert(ticker.to_string(), vec![InputNote::new(note.clone(), pk)]);
 
         (&note).into()
     }
@@ -307,23 +335,31 @@ impl Wallet {
             let block = tx.block_height;
             for c in tx.proof.public_inputs.output_commitments {
                 if c != Element::ZERO {// not a padding note
-                    let mut idx = vec![];
-                    let mut i = 0;
-                    for p in &self.pending {
-                        if c == p.note.commitment() {
-                            println!("\nFound commitment - {:x} in {}:{}\n", c, block, id);
-                            let values = p.note.value.to_u64_array().clone();
-                            let Some(amount) = values.first() else {
-                                return Err(WalletError::CantReadNoteValue());
-                            };
-                            self.avail.push(p.clone());
-                            self.balance = self.balance + amount;
-                            idx.push(i);
+                    for (ticker, asset_notes) in &mut self.pending {
+                        let mut idx = vec![];
+                        let mut i = 0;
+                        for p in asset_notes.clone() {
+                            if c == p.note.commitment() {
+                                println!("\nFound commitment - {:x} in {}:{}\n", c, block, id);
+                                let values = p.note.value.to_u64_array().clone();
+                                let Some(amount) = values.first() else {
+                                    return Err(WalletError::CantReadNoteValue());
+                                };
+
+                                if let Some(asset_notes) = self.avail.get_mut(ticker) {
+                                    asset_notes.push(p.clone());
+                                } else {
+                                    self.avail.insert(ticker.to_string(), vec![p.clone()]);
+                                }
+
+                                self.balance = self.balance + amount;
+                                idx.push(i);
+                            }
+                            i += 1;
+                        };
+                        for j in idx {
+                            asset_notes.remove(j);
                         }
-                        i += 1;
-                    };
-                    for j in idx {
-                        self.pending.remove(j);
                     }
                 }
             }
@@ -361,7 +397,8 @@ mod wallet_tests {
                 psi: Element::ZERO,
                 value: Element::from(balance / num_notes as u64),
             };
-            wallet.avail.push(InputNote::new(note, Element::from(i as u64)));
+
+            wallet.avail.insert("WCBTC".to_string(), vec![InputNote::new(note, Element::from(i as u64))]);
         }
 
         wallet.balance = balance;
@@ -403,7 +440,7 @@ mod wallet_tests {
     fn test_spend_note_success_single_note() {
         let mut wallet = create_test_wallet(1000, 1);
 
-        let result = wallet.spend_note(1000);
+        let result = wallet.spend_note(1000, "WCBTC");
         assert!(result.is_ok());
         assert_eq!(wallet.avail.len(), 0); // Note was removed
         assert_eq!(wallet.balance, 0); // Balance updated
@@ -413,7 +450,7 @@ mod wallet_tests {
     fn test_spend_note_success_multiple_notes() {
         let mut wallet = create_test_wallet(1200, 3);
 
-        let result = wallet.spend_note(400);
+        let result = wallet.spend_note(400, "WCBTC");
         assert!(result.is_ok());
         assert_eq!(wallet.avail.len(), 2); // One note removed
         assert_eq!(wallet.balance, 800);
@@ -431,7 +468,7 @@ mod wallet_tests {
         wallet.balance = 1600;
 
         // Request 450 - should select 500 (delta=50) over 1000 (delta=550)
-        let result = wallet.spend_note(450);
+        let result = wallet.spend_note(450, "WCBTC");
         assert!(result.is_ok());
         assert_eq!(wallet.avail.len(), 2);
     }
@@ -440,7 +477,7 @@ mod wallet_tests {
     fn test_spend_note_empty_wallet() {
         let mut wallet = Wallet::random(Some("test".to_string()));
 
-        let result = wallet.spend_note(100);
+        let result = wallet.spend_note(100, "WCBTC");
         assert!(result.is_err());
         match result {
             Err(WalletError::LowBalance(_)) => (),
@@ -452,7 +489,7 @@ mod wallet_tests {
     fn test_spend_note_exact_match() {
         let mut wallet = create_test_wallet(1000, 1);
 
-        let result = wallet.spend_note(1000);
+        let result = wallet.spend_note(1000, "WCBTC");
         assert!(result.is_ok());
         assert_eq!(wallet.balance, 0);
         assert_eq!(wallet.avail.len(), 0);
@@ -463,7 +500,7 @@ mod wallet_tests {
         // Test behavior when None is passed as amount
         let mut wallet = create_test_wallet(1000, 2);
 
-        let result = wallet.spend_note(1);
+        let result = wallet.spend_note(1, "WCBTC");
         assert!(result.is_ok());
         assert_eq!(wallet.avail.len(), 1);
     }
@@ -472,7 +509,7 @@ mod wallet_tests {
     fn test_spend_note_large_request_small_note() {
         let mut wallet = create_test_wallet(100, 1);
 
-        let result = wallet.spend_note(1000);
+        let result = wallet.spend_note(1000, "WCBTC");
         // Should still remove the note even though amount requested > available
         assert!(result.is_ok());
         assert_eq!(wallet.balance, 0);
@@ -581,9 +618,9 @@ mod wallet_tests {
     fn test_consecutive_spend_notes() {
         let mut wallet = create_test_wallet(2000, 2);
 
-        let result1 = wallet.spend_note(1000);
-        let result2 = wallet.spend_note(1000);
-        let result3 = wallet.spend_note(500);
+        let result1 = wallet.spend_note(1000, "WCBTC");
+        let result2 = wallet.spend_note(1000, "WCBTC");
+        let result3 = wallet.spend_note(500, "WCBTC");
 
         assert!(result1.is_ok());
         assert!(result2.is_ok());

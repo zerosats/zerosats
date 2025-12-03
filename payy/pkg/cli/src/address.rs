@@ -65,27 +65,21 @@ pub fn citrea_ticker_from_code(currency: u8) -> String {
     }
 }
 
-pub fn citrea_currency_from_kind(contract: Element) -> u8 {
-    let KIND_USDC = Element::from_str("0x000200000000000013fb52f74a8f9bdd29f77a5efd7f6cb44dcf6906a4b60000").unwrap();
-    let KIND_WCBTC = Element::from_str("0x000200000000000013fb8d0c9d1c17ae5e40fff9be350f57840e9e66cd930000").unwrap();
-
-    if contract == KIND_WCBTC {
+pub fn citrea_currency_from_contract(contract: Element) -> u8 {
+    if contract == citrea_wcbtc_note_kind() {
         return 1
     }
-    if contract == KIND_USDC {
+    if contract == citrea_usdc_note_kind() {
         return 2
     }
     unreachable!("only WCBTC and USDC tokens are supported")
 }
 
-pub fn citrea_ticker_from_kind(contract: Element) -> String {
-    let KIND_USDC = Element::from_str("0x000200000000000013fb52f74a8f9bdd29f77a5efd7f6cb44dcf6906a4b60000").unwrap();
-    let KIND_WCBTC = Element::from_str("0x000200000000000013fb8d0c9d1c17ae5e40fff9be350f57840e9e66cd930000").unwrap();
-
-    if contract == KIND_WCBTC {
+pub fn citrea_ticker_from_contract(contract: Element) -> String {
+    if contract == citrea_wcbtc_note_kind() {
         return "WCBTC".to_string()
     }
-    if contract == KIND_USDC {
+    if contract == citrea_usdc_note_kind() {
         return "USDC".to_string()
     }
     unreachable!("only WCBTC and USDC tokens are supported")
@@ -117,7 +111,7 @@ impl From<&Note> for CipheraAddress {
     fn from(note: &Note) -> Self {
         Self {
             version: 0,
-            currency: citrea_currency_from_kind(note.contract),
+            currency: citrea_currency_from_contract(note.contract),
             public_key: note.address,
             psi: Some(note.psi),
             value: note.value,
