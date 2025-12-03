@@ -6,6 +6,7 @@ use web3::types::H160;
 use cli::NodeClient;
 use cli::Wallet;
 use cli::address::citrea_ticker_from_contract;
+use cli::note_url::{CipheraURL,decode_url};
 
 use barretenberg::Prove;
 use contracts::util::convert_h160_to_element;
@@ -13,7 +14,7 @@ use std::fs;
 use std::path::Path;
 use std::str::FromStr;
 use zk_primitives::InputNote;
-use zk_primitives::{Note, NoteURLPayload, Utxo};
+use zk_primitives::{Note, Utxo};
 
 #[derive(Parser, Debug)]
 #[command(name = "pay-cli")]
@@ -236,30 +237,10 @@ async fn handle_note_spend(name: &str, amount: u64, ticker: &str) -> Result<(), 
 
     if amount <= balance {
         let input_note = client.get_wallet_mut().spend_note(amount, ticker)?;
-        let payload: NoteURLPayload = (&input_note).into();
-        let v = input_note.note.value.to_u64_array();
-
-        println!("VALUE: {:?}", v);
-        /*
-        let self_address = hash_merge([self.pk, Element::ZERO]);
-        let change = Note::new(
-            self_address,
-            Element::from(1_u64)
-        );
-        let payee = Note::new(
-            //Element::from(address),
-            self_address,
-            Element::from(1_u64)
-        );
-
-        Ok(Utxo::new_send(
-            [input_note.clone(), InputNote::padding_note()],
-            [payee, change],
-        )
-        */
+        let payload: CipheraURL = (&input_note).into();
 
         // Encode
-        let encoded = payload.encode_activity_url_payload();
+        let encoded = payload.encode_url();
         let json_str = serde_json::to_string_pretty(&input_note)?;
 
         std::fs::write(format!("{name}-note.json"), &json_str)?;
@@ -384,7 +365,7 @@ async fn handle_receive(
             }
         }
         (None, Some(link)) => {
-            let input_note = InputNote::new_from_link(&link);
+            let input_note = InputNote::from(&decode_url(&link));
             println!("\n🗝 Decoded note: {:?}", input_note);
             input_note
         }

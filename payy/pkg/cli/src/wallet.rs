@@ -225,7 +225,8 @@ impl Wallet {
                     kind: input_note_1.note.kind,
                     contract: input_note_1.note.contract,
                     address: self_address,
-                    psi: Element::secure_random(rand::thread_rng()),
+                    psi: hash_merge([pk, pk]),
+                    //psi: Element::secure_random(rand::thread_rng()),
                     value: Element::from(change_amount),
                 };
                 if let Some(asset_notes) = self.avail.get_mut(&ticker) {
@@ -244,7 +245,8 @@ impl Wallet {
                 kind: input_note_1.note.kind,
                 contract: input_note_1.note.contract,
                 address: self_address,
-                psi: Element::secure_random(rand::thread_rng()),
+                psi: hash_merge([pk, pk]),
+                //psi: Element::secure_random(rand::thread_rng()),
                 value: Element::from(change_amount),
             };
             if let Some(asset_notes) = self.avail.get_mut(&ticker) {
@@ -269,7 +271,8 @@ impl Wallet {
             kind,
             contract,
             address: self_address,
-            psi: Element::secure_random(rand::thread_rng()),
+            psi: hash_merge([pk, pk]),
+            //psi: Element::secure_random(rand::thread_rng()),
             value: Element::from(amount),
         };
 
