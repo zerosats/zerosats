@@ -398,7 +398,11 @@ mod wallet_tests {
                 value: Element::from(balance / num_notes as u64),
             };
 
-            wallet.avail.insert("WCBTC".to_string(), vec![InputNote::new(note, Element::from(i as u64))]);
+            if let Some(asset_notes) = wallet.avail.get_mut("WCBTC") {
+                asset_notes.push(InputNote::new(note, Element::from(i as u64))); // Note was removed
+            } else {
+                wallet.avail.insert("WCBTC".to_string(), vec![InputNote::new(note, Element::from(i as u64))]);
+            };
         }
 
         wallet.balance = balance;
@@ -442,7 +446,11 @@ mod wallet_tests {
 
         let result = wallet.spend_note(1000, "WCBTC");
         assert!(result.is_ok());
-        assert_eq!(wallet.avail.len(), 0); // Note was removed
+        if let Some(asset_notes) = wallet.avail.get("WCBTC") {
+            assert_eq!(asset_notes.len(), 0); // Note was removed
+        } else {
+            panic!();
+        };
         assert_eq!(wallet.balance, 0); // Balance updated
     }
 
@@ -452,7 +460,11 @@ mod wallet_tests {
 
         let result = wallet.spend_note(400, "WCBTC");
         assert!(result.is_ok());
-        assert_eq!(wallet.avail.len(), 2); // One note removed
+        if let Some(asset_notes) = wallet.avail.get("WCBTC") {
+            assert_eq!(asset_notes.len(), 2); // One note removed
+        } else {
+            panic!();
+        };
         assert_eq!(wallet.balance, 800);
     }
 
@@ -462,15 +474,17 @@ mod wallet_tests {
         let mut wallet = Wallet::random(Some("test".to_string()));
 
         // Add notes with values: 100, 500, 1000
-        wallet.avail.push(create_input_note(100));
-        wallet.avail.push(create_input_note(500));
-        wallet.avail.push(create_input_note(1000));
+        wallet.avail.insert("WCBTC".to_string(), vec![create_input_note(100), create_input_note(500), create_input_note(1000)]);
         wallet.balance = 1600;
 
         // Request 450 - should select 500 (delta=50) over 1000 (delta=550)
         let result = wallet.spend_note(450, "WCBTC");
         assert!(result.is_ok());
-        assert_eq!(wallet.avail.len(), 2);
+        if let Some(asset_notes) = wallet.avail.get("WCBTC") {
+            assert_eq!(asset_notes.len(), 2);
+        } else {
+            panic!();
+        };
     }
 
     #[test]
@@ -492,7 +506,11 @@ mod wallet_tests {
         let result = wallet.spend_note(1000, "WCBTC");
         assert!(result.is_ok());
         assert_eq!(wallet.balance, 0);
-        assert_eq!(wallet.avail.len(), 0);
+        if let Some(asset_notes) = wallet.avail.get("WCBTC") {
+            assert_eq!(asset_notes.len(), 0);
+        } else {
+            panic!();
+        };
     }
 
     #[test]
@@ -502,7 +520,11 @@ mod wallet_tests {
 
         let result = wallet.spend_note(1, "WCBTC");
         assert!(result.is_ok());
-        assert_eq!(wallet.avail.len(), 1);
+        if let Some(asset_notes) = wallet.avail.get("WCBTC") {
+            assert_eq!(asset_notes.len(), 1); // One note removed
+        } else {
+            panic!();
+        };
     }
 
     #[test]
@@ -528,7 +550,11 @@ mod wallet_tests {
         assert!(result.is_ok());
 
         let utxo = result.unwrap();
-        assert_eq!(wallet.avail.len(), 0); // Note consumed
+        if let Some(asset_notes) = wallet.avail.get("WCBTC") {
+            assert_eq!(asset_notes.len(), 0); // Note consumed
+        } else {
+            panic!();
+        };
     }
 
     #[test]
@@ -542,7 +568,11 @@ mod wallet_tests {
         // Balance should be updated with change
         assert!(wallet.balance == 900);
         // Change Note should be added immidiately
-        assert_eq!(wallet.avail.len(), 1);
+        if let Some(asset_notes) = wallet.avail.get("WCBTC") {
+            assert_eq!(asset_notes.len(), 1);
+        } else {
+            panic!();
+        };
     }
 
     #[test]
@@ -569,7 +599,11 @@ mod wallet_tests {
         // Balance should be updated with change
         assert!(wallet.balance == 200);
         // Change Note should be added immidiately
-        assert_eq!(wallet.avail.len(), 1);
+        if let Some(asset_notes) = wallet.avail.get("WCBTC") {
+            assert_eq!(asset_notes.len(), 1);
+        } else {
+            panic!();
+        };
     }
 
     #[test]
@@ -582,7 +616,11 @@ mod wallet_tests {
         // Balance should be updated with change
         assert!(wallet.balance == 500);
         // Change Note should be added immidiately
-        assert_eq!(wallet.avail.len(), 2);
+        if let Some(asset_notes) = wallet.avail.get("WCBTC") {
+            assert_eq!(asset_notes.len(), 2); // One note removed
+        } else {
+            panic!();
+        };
     }
 
     #[test]
