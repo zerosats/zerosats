@@ -107,18 +107,16 @@ jobs:
       - name: Copy CLI binary for Electron packaging (macOS/Linux)
         working-directory: ./payy
         run: |
-          mkdir -p target/release
-          rm -f target/release/${{ matrix.artifact_name }}
           cp target/${{ matrix.target }}/release/${{ matrix.artifact_name }} payy/target/release/${{ matrix.artifact_name }}
           chmod +x target/release/${{ matrix.artifact_name }}
         shell: bash
 
       - name: Build Electron app (macOS)
         if: runner.os == 'macOS'
-        working-directory: web
+        working-directory: ./payy/web
         run: |
-          tar -xvzf $GITHUB_WORKSPACE/payy/web/binaries/darwin/barretenberg-arm64-darwin.tar.gz -C $GITHUB_WORKSPACE/payy/web/binaries/darwin 
-          chmod +x $GITHUB_WORKSPACE/payy/web/binaries/darwin/bb
+          tar -xvzf binaries/darwin/barretenberg-arm64-darwin.tar.gz -C binaries/darwin 
+          chmod +x binaries/darwin/bb
           npm run electron:build:mac -- --${{ matrix.electron_arch }} --publish never
         env:
           USE_HARD_LINKS: false
@@ -127,8 +125,8 @@ jobs:
         if: runner.os == 'Linux'
         working-directory: ./payy/web
         run: |
-          tar -xvzf $GITHUB_WORKSPACE/payy/web/binaries/linux64/barretenberg-amd64-linux.tar.gz -C $GITHUB_WORKSPACE/payy/web/binaries/linux64          
-          chmod +x $GITHUB_WORKSPACE/payy/web/binaries/linux64/bb
+          tar -xvzf binaries/linux64/barretenberg-amd64-linux.tar.gz -C binaries/linux64          
+          chmod +x binaries/linux64/bb
           npm run electron:build:linux -- --publish never
         env:
           USE_HARD_LINKS: false
