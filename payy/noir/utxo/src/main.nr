@@ -97,12 +97,6 @@ fn main(
         assert(input_value == output_value + msg_value, "Burn output must match value message");
         // Assert burn kind
         assert(input_notes[0].note.kind == msg_note_kind, "Burn note kind must match message")
-    } else if (kind == 4) {
-        //SEND
-        assert(input_value == output_value, "Input and output totals do not match");
-
-        check_input_note_hashlock(input_notes[0]);
-        check_input_note_hashlock(input_notes[1]);
     } else {
         assert(false, "Invalid kind");
     }
