@@ -98,13 +98,14 @@ jobs:
         with:
           node-version: '20'
           cache: 'npm'
-          cache-dependency-path: web/package-lock.json
+          cache-dependency-path: payy/web/package-lock.json
 
       - name: Install npm dependencies
         working-directory: ./payy/web
         run: npm ci
 
       - name: Clean Electron release directory (macOS/Linux)
+        working-directory: ./payy
         run: rm -rf web/release
         shell: bash
 
@@ -129,7 +130,7 @@ jobs:
 
       - name: Build Electron app (Linux)
         if: runner.os == 'Linux'
-        working-directory: web
+        working-directory: ./payy/web
         run: |
           tar -xvzf $GITHUB_WORKSPACE/payy/web/binaries/linux64/barretenberg-amd64-linux.tar.gz -C $GITHUB_WORKSPACE/payy/web/binaries/linux64          
           chmod +x $GITHUB_WORKSPACE/payy/web/binaries/linux64/bb
