@@ -1,5 +1,5 @@
 [package]
-name = "cli"
+name = "ciphera-cli"
 version = "0.0.0"
 edition = "2021"
 
@@ -32,5 +32,5 @@ bs58 = { workspace = true }
 
 
 [[bin]]
-name = "payy-cli"
+name = "ciphera-cli"
 path = "src/main.rs"

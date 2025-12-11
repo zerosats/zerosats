@@ -50,7 +50,7 @@ sudo mv ciphera-cli /usr/local/bin/
 git clone https://github.com/zerosats/ciphera-cli
 cd ciphera-cli
 cargo build --release
-sudo cp target/release/payy-cli /usr/local/bin/ciphera-cli
+sudo cp target/release/ciphera-cli /usr/local/bin/ciphera-cli
 ```
 
 #### Option 3: Using Cargo
