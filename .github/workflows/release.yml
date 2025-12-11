@@ -104,11 +104,6 @@ jobs:
         working-directory: ./payy/web
         run: npm ci
 
-      - name: Clean Electron release directory (macOS/Linux)
-        working-directory: ./payy
-        run: rm -rf web/release
-        shell: bash
-
       - name: Copy CLI binary for Electron packaging (macOS/Linux)
         working-directory: ./payy
         run: |
