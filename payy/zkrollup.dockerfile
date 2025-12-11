@@ -133,6 +133,7 @@ RUN sed 's|, "app/packages/react-native-rust-bridge/cpp/rustbridge"||g' Cargo.to
 
 # Add fixtures
 COPY citrea/artifacts/contracts ./citrea/artifacts/contracts
+COPY citrea/openzeppelin-contracts ./citrea/openzeppelin-contracts
 COPY fixtures/params ./fixtures/params
 COPY fixtures/programs ./fixtures/programs
 COPY fixtures/keys ./fixtures/keys
@@ -141,22 +142,23 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     build_flags=$([ "$RELEASE" = "1" ] && echo "--release"); \
     if [ -f /gcs_key.json ]; then \
     echo "Using sccache with GCS"; \
-    if RUSTC_WRAPPER=/usr/local/cargo/bin/sccache cargo build --bin node --bin payy-cli ${build_flags}; then \
+    if RUSTC_WRAPPER=/usr/local/cargo/bin/sccache cargo build --bin node --bin ciphera-cli --bin burn-substitutor ${build_flags}; then \
     sccache --show-stats && \
     sccache --stop-server; \
     else \
     status=$?; \
     echo "sccache-backed build failed (exit ${status}); retrying without sccache"; \
     sccache --stop-server || true; \
-    cargo build --bin node --bin payy-cli ${build_flags}; \
+    cargo build --bin node --bin ciphera-cli --bin burn-substitutor ${build_flags}; \
     fi; \
     else \
     echo "Skipping sccache (missing required vars)"; \
-    cargo build --bin node --bin payy-cli ${build_flags}; \
+    cargo build --bin node --bin ciphera-cli --bin burn-substitutor ${build_flags}; \
     fi
 
 RUN cp /build/target/$([ "$RELEASE" = "1" ] && echo "release" || echo "debug")/node /build/target
-RUN cp /build/target/$([ "$RELEASE" = "1" ] && echo "release" || echo "debug")/payy-cli /build/target
+RUN cp /build/target/$([ "$RELEASE" = "1" ] && echo "release" || echo "debug")/ciphera-cli /build/target
+RUN cp /build/target/$([ "$RELEASE" = "1" ] && echo "release" || echo "debug")/burn-substitutor /build/target
 
 
 # Runtime stage - can be used for both node and prover mode
@@ -210,7 +212,8 @@ RUN echo '#!/bin/bash\n\
 USER spaceman
 
 COPY --from=builder /build/target/node /usr/bin/node
-COPY --from=builder /build/target/payy-cli /usr/bin/payy-cli
+COPY --from=builder /build/target/ciphera-cli /usr/bin/ciphera-cli
+COPY --from=builder /build/target/burn-substitutor /usr/bin/burn-substitutor
 
 COPY config-prod.toml ./config.toml
 

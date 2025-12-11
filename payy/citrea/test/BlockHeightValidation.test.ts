@@ -30,7 +30,7 @@ describe('RollupV1 Block Height Validation', function () {
     mockVerifier = await MockVerifier.deploy()
 
     // Deploy RollupV1 (rollup2 version) - skip initialization for now
-    const RollupV1Factory = await ethers.getContractFactory('contracts/rollup2/RollupV1.sol:RollupV1')
+    const RollupV1Factory = await ethers.getContractFactory('contracts/rollup/RollupV1.sol:RollupV1')
     const rollupImpl = await RollupV1Factory.deploy()
     
     // Deploy proxy and initialize through proxy

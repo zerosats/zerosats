@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.20;
 
-import "../rollup2/RollupV1.sol";
+import "../rollup/RollupV1.sol";
 
 // Test version of RollupV1 that allows initialization without proxy pattern
 // We bypass the parent constructor by not calling super constructor

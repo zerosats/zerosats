@@ -1,0 +1,10 @@
+# Electron/Vite build output
+release/
+dist/
+
+# Test artifacts
+*.log
+
+# Backend binaries
+bb
+

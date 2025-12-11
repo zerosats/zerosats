@@ -1,5 +1,25 @@
-# zerosats
+# Zerosats
+
 A privacy-preserving appchain built on top of Citrea.
+
+Payy services:
+
+1) Citrea node + 2TB storage (\$150-\$200 USD)
+2) Testnet4 BTC full node (currently free, should be \$12)
+3) Payy Validator + Burner (currently free, should be \$12)
+4) Payy Prover (\$44, but we have to try \$84 instance with 4vCPU)
+
+A plan for mainnet:
+
+- [ ] Bump Nargo & Barretenberg backend version
+- [ ] Check up network monitoring tools for nodes (Prometheus, Grafana)
+- [ ] Prepare complete network setup deployment scripts
+  - [ ] Possibly re-use from Zk-rollup codebase
+  - [ ]  Redeploy on AWS according to guidelines & test services
+- [ ] Security audits:
+- [ ] Noir programs
+- [ ] Rollup contract
+
 
 ## Running Citrea Dev node
 

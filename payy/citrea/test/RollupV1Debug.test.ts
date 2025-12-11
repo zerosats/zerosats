@@ -25,7 +25,7 @@ describe("RollupV1 Debug Tests", function () {
     mockVerifier = await MockVerifier.deploy();
 
     // Deploy RollupV1 (specify the rollup2 version)
-    const RollupV1Factory = await ethers.getContractFactory("contracts/rollup2/RollupV1.sol:RollupV1");
+    const RollupV1Factory = await ethers.getContractFactory("contracts/rollup/RollupV1.sol:RollupV1");
     rollup = await RollupV1Factory.deploy();
   });
 

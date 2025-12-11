@@ -15,7 +15,7 @@ use zk_primitives::{InputNote, Note, Utxo, bridged_polygon_usdc_note_kind};
 
 use crate::rpc::{
     ElementResponse, ListBlocksOrder, ListBlocksQuery, ListTxnOrder, ListTxnsQuery, ServerConfig,
-    burn, mint, mint_with_note, rollup_contract, usdc_contract,
+    burn, mint, mint_with_note, rollup_contract, erc20_contract,
 };
 
 use super::Server;
@@ -84,14 +84,14 @@ async fn mint_transaction_not_in_contract() {
     server_config.safe_eth_height_offset = 1;
     let server = Server::setup_and_wait(server_config, Arc::clone(&eth_node)).await;
     let rollup = rollup_contract(server.rollup_contract_addr, &eth_node).await;
-    let usdc = usdc_contract(&rollup, &eth_node).await;
+    let erc20 = erc20_contract(&rollup, &eth_node).await;
 
     let root_hash_before = server.height().await.unwrap().root_hash;
     let alice_pk = Element::new(0xA11CE);
 
     let (_note, _eth_tx, node_tx) = mint(
         &rollup,
-        &usdc,
+        &erc20,
         &server,
         alice_pk,
         Element::from(100u64),
@@ -99,7 +99,7 @@ async fn mint_transaction_not_in_contract() {
     );
     let time_before_sending_node_txn = Instant::now();
     tokio::spawn({
-        let usdc = usdc.clone();
+        let erc20 = erc20.clone();
         let client = Client::from_eth_node(&eth_node);
 
         async move {
@@ -108,7 +108,7 @@ async fn mint_transaction_not_in_contract() {
             // progress the eth chain by 2 blocks by sending transactions
             client
                 .wait_for_confirm(
-                    usdc.approve(H160::from_low_u64_be(1), 1).await.unwrap(),
+                    erc20.approve(H160::from_low_u64_be(1), 1).await.unwrap(),
                     Duration::from_secs(1),
                     ConfirmationType::Latest,
                 )
@@ -116,7 +116,7 @@ async fn mint_transaction_not_in_contract() {
                 .unwrap();
             client
                 .wait_for_confirm(
-                    usdc.approve(H160::from_low_u64_be(1), 1).await.unwrap(),
+                    erc20.approve(H160::from_low_u64_be(1), 1).await.unwrap(),
                     Duration::from_secs(1),
                     ConfirmationType::Latest,
                 )
@@ -160,14 +160,14 @@ async fn mint_transaction_only() {
     server_config.safe_eth_height_offset = 1;
     let server = Server::setup_and_wait(server_config, Arc::clone(&eth_node)).await;
     let rollup = rollup_contract(server.rollup_contract_addr, &eth_node).await;
-    let usdc = usdc_contract(&rollup, &eth_node).await;
+    let erc20 = erc20_contract(&rollup, &eth_node).await;
 
     let root_hash_before = server.height().await.unwrap().root_hash;
     let alice_pk = Element::new(0xA11CE);
     let alice_address = hash_merge([alice_pk, Element::ZERO]);
     let (alice_note, eth_tx, node_tx) = mint(
         &rollup,
-        &usdc,
+        &erc20,
         &server,
         alice_address,
         Element::from(100u64),
@@ -179,7 +179,7 @@ async fn mint_transaction_only() {
         // wait for node to receive the txn
         tokio::time::sleep(Duration::from_secs(2)).await;
         // progress the eth chain by 1 block by sending a transaction
-        usdc.approve(H160::from_low_u64_be(2), 1).await.unwrap();
+        erc20.approve(H160::from_low_u64_be(2), 1).await.unwrap();
     });
     let tx = node_tx.await.unwrap();
     assert!(
@@ -220,13 +220,13 @@ async fn mint_and_transfer_alice_to_bob() {
     let server =
         Server::setup_and_wait(ServerConfig::single_node(false), Arc::clone(&eth_node)).await;
     let rollup = rollup_contract(server.rollup_contract_addr, &eth_node).await;
-    let usdc = usdc_contract(&rollup, &eth_node).await;
+    let erc20 = erc20_contract(&rollup, &eth_node).await;
 
     let alice_pk = Element::new(0xA11CE);
     let alice_address = hash_merge([alice_pk, Element::ZERO]);
     let (alice_note, eth_tx, tx) = mint(
         &rollup,
-        &usdc,
+        &erc20,
         &server,
         alice_address,
         Element::from(100u64),
@@ -270,13 +270,13 @@ async fn double_spend() {
     let server =
         Server::setup_and_wait(ServerConfig::single_node(false), Arc::clone(&eth_node)).await;
     let rollup = rollup_contract(server.rollup_contract_addr, &eth_node).await;
-    let usdc = usdc_contract(&rollup, &eth_node).await;
+    let erc20 = erc20_contract(&rollup, &eth_node).await;
 
     let alice_pk = Element::new(0xA11CE);
     let alice_address = hash_merge([alice_pk, Element::ZERO]);
     let (alice_note, eth_tx, tx) = mint(
         &rollup,
-        &usdc,
+        &erc20,
         &server,
         alice_address,
         Element::from(100u64),
@@ -357,13 +357,13 @@ async fn send_transaction_with_duplicate_inputs_is_rejected() {
     let server =
         Server::setup_and_wait(ServerConfig::single_node(false), Arc::clone(&eth_node)).await;
     let rollup = rollup_contract(server.rollup_contract_addr, &eth_node).await;
-    let usdc = usdc_contract(&rollup, &eth_node).await;
+    let erc20 = erc20_contract(&rollup, &eth_node).await;
 
     let alice_pk = Element::new(0xA11CE);
     let alice_address = hash_merge([alice_pk, Element::ZERO]);
     let (alice_note, eth_tx, rpc_tx) = mint(
         &rollup,
-        &usdc,
+        &erc20,
         &server,
         alice_address,
         Element::from(100u64),
@@ -398,13 +398,13 @@ async fn two_transactions_with_duplicate_output_should_conflict() {
     let server =
         Server::setup_and_wait(ServerConfig::single_node(false), Arc::clone(&eth_node)).await;
     let rollup = rollup_contract(server.rollup_contract_addr, &eth_node).await;
-    let usdc = usdc_contract(&rollup, &eth_node).await;
+    let erc20 = erc20_contract(&rollup, &eth_node).await;
 
     let alice_pk = Element::new(0xA11CE);
     let alice_address = hash_merge([alice_pk, Element::ZERO]);
     let (alice_note, alice_eth_tx, alice_rpc_tx) = mint(
         &rollup,
-        &usdc,
+        &erc20,
         &server,
         alice_address,
         Element::from(100u64),
@@ -415,7 +415,7 @@ async fn two_transactions_with_duplicate_output_should_conflict() {
     let charlie_address = hash_merge([charlie_pk, Element::ZERO]);
     let (charlie_note, charlie_eth_tx, charlie_rpc_tx) = mint(
         &rollup,
-        &usdc,
+        &erc20,
         &server,
         charlie_address,
         Element::from(100u64),
@@ -473,13 +473,13 @@ async fn two_transactions_with_duplicate_input_should_conflict() {
     let server =
         Server::setup_and_wait(ServerConfig::single_node(false), Arc::clone(&eth_node)).await;
     let rollup = rollup_contract(server.rollup_contract_addr, &eth_node).await;
-    let usdc = usdc_contract(&rollup, &eth_node).await;
+    let erc20 = erc20_contract(&rollup, &eth_node).await;
 
     let alice_pk = Element::new(0xA11CE);
     let alice_address = hash_merge([alice_pk, Element::ZERO]);
     let (alice_note, alice_eth_tx, alice_rpc_tx) = mint(
         &rollup,
-        &usdc,
+        &erc20,
         &server,
         alice_address,
         Element::from(100u64),
@@ -547,13 +547,13 @@ async fn burn_tx() {
     prover_server.wait().await.unwrap();
 
     let rollup = rollup_contract(server.rollup_contract_addr, &eth_node).await;
-    let usdc = usdc_contract(&rollup, &eth_node).await;
+    let erc20 = erc20_contract(&rollup, &eth_node).await;
 
     let alice_pk = Element::new(0xA11CE);
     let alice_address = hash_merge([alice_pk, Element::ZERO]);
     let (alice_note, eth_tx, tx) = mint(
         &rollup,
-        &usdc,
+        &erc20,
         &server,
         alice_address,
         Element::from(100u64),
@@ -582,7 +582,7 @@ async fn burn_tx() {
         }
     }
 
-    let balance = usdc.balance(to).await.unwrap();
+    let balance = erc20.balance(to).await.unwrap();
     assert_eq!(balance, U256::from(100));
 
     expect_root_hash!(
@@ -611,11 +611,11 @@ async fn substitute_burn_to_address() {
     prover_server.wait().await.unwrap();
 
     let rollup = rollup_contract(server.rollup_contract_addr, &eth_node).await;
-    let usdc = usdc_contract(&rollup, &eth_node).await;
+    let erc20 = erc20_contract(&rollup, &eth_node).await;
 
     let mut burn_substitutor = BurnSubstitutor::new(
         rollup.clone(),
-        usdc.clone(),
+        erc20.clone(),
         server
             .base_url()
             .to_string()
@@ -628,7 +628,7 @@ async fn substitute_burn_to_address() {
     let alice_address = hash_merge([alice_pk, Element::ZERO]);
     let (alice_note, eth_tx, tx) = mint(
         &rollup,
-        &usdc,
+        &erc20,
         &server,
         alice_address,
         Element::from(100u64),
@@ -637,7 +637,7 @@ async fn substitute_burn_to_address() {
     eth_tx.await.unwrap();
     let _tx = tx.await.unwrap();
 
-    let rollup_balance = usdc.balance(rollup.address()).await.unwrap();
+    let rollup_balance = erc20.balance(rollup.address()).await.unwrap();
     assert_eq!(rollup_balance, U256::from(100));
 
     let input_note = InputNote::new(alice_note.clone(), alice_pk);
@@ -649,20 +649,20 @@ async fn substitute_burn_to_address() {
 
     let tx_resp = tx.await.unwrap();
 
-    let substitutor_balance_before = usdc.balance(rollup.signer_address).await.unwrap();
+    let substitutor_balance_before = erc20.balance(rollup.signer_address).await.unwrap();
 
     let substituted_burns = burn_substitutor.tick().await.unwrap();
     assert_eq!(substituted_burns.len(), 1);
 
-    let balance = usdc.balance(to).await.unwrap();
+    let balance = erc20.balance(to).await.unwrap();
     assert_eq!(balance, U256::from(100));
 
     assert_eq!(
-        usdc.balance(rollup.signer_address).await.unwrap(),
+        erc20.balance(rollup.signer_address).await.unwrap(),
         substitutor_balance_before - U256::from(100),
     );
 
-    let rollup_balance = usdc.balance(rollup.address()).await.unwrap();
+    let rollup_balance = erc20.balance(rollup.address()).await.unwrap();
     assert_eq!(rollup_balance, U256::from(100));
 
     for i in 0.. {
@@ -676,14 +676,14 @@ async fn substitute_burn_to_address() {
         }
     }
 
-    let balance = usdc.balance(to).await.unwrap();
+    let balance = erc20.balance(to).await.unwrap();
     assert_eq!(balance, U256::from(100));
 
-    let rollup_balance = usdc.balance(rollup.address()).await.unwrap();
+    let rollup_balance = erc20.balance(rollup.address()).await.unwrap();
     assert_eq!(rollup_balance, U256::from(0));
 
     assert_eq!(
-        usdc.balance(rollup.signer_address).await.unwrap(),
+        erc20.balance(rollup.signer_address).await.unwrap(),
         substitutor_balance_before,
     );
 }
@@ -694,13 +694,13 @@ async fn double_mint() {
     let server =
         Server::setup_and_wait(ServerConfig::single_node(false), Arc::clone(&eth_node)).await;
     let rollup = rollup_contract(server.rollup_contract_addr, &eth_node).await;
-    let usdc = usdc_contract(&rollup, &eth_node).await;
+    let erc20 = erc20_contract(&rollup, &eth_node).await;
 
     let alice_pk = Element::new(0xA11CE);
     let alice_address = hash_merge([alice_pk, Element::ZERO]);
     let (alice_note, eth_tx, tx) = mint(
         &rollup,
-        &usdc,
+        &erc20,
         &server,
         alice_address,
         Element::from(100u64),
@@ -709,7 +709,7 @@ async fn double_mint() {
     eth_tx.await.unwrap();
     let _tx = tx.await.unwrap();
 
-    let (_eth_tx, tx) = mint_with_note(&rollup, &usdc, &server, alice_note.clone());
+    let (_eth_tx, tx) = mint_with_note(&rollup, &erc20, &server, alice_note.clone());
 
     let err = tx.await.unwrap_err();
     assert_eq!(
@@ -785,7 +785,7 @@ async fn query_transactions() {
         Server::setup_and_wait(ServerConfig::single_node(false), Arc::clone(&eth_node)).await,
     );
     let rollup = rollup_contract(server.rollup_contract_addr, &eth_node).await;
-    let usdc = usdc_contract(&rollup, &eth_node).await;
+    let erc20 = erc20_contract(&rollup, &eth_node).await;
 
     let alice_pk = Element::new(0xA11CE);
     let alice_address = hash_merge([alice_pk, Element::ZERO]);
@@ -793,7 +793,7 @@ async fn query_transactions() {
     for value in [50u64, 100] {
         let (alice_note, eth_tx, tx) = mint(
             &rollup,
-            &usdc,
+            &erc20,
             &server,
             alice_address,
             Element::from(value),
@@ -965,7 +965,7 @@ async fn query_transactions() {
         let mint = local_set.spawn_local(async move {
             let (new_note, eth_tx, tx) = mint(
                 &rollup,
-                &usdc,
+                &erc20,
                 &server,
                 alice_address,
                 Element::from(150u64),
@@ -1008,7 +1008,7 @@ async fn query_blocks() {
     let server =
         Server::setup_and_wait(ServerConfig::single_node(false), Arc::clone(&eth_node)).await;
     let rollup = rollup_contract(server.rollup_contract_addr, &eth_node).await;
-    let usdc = usdc_contract(&rollup, &eth_node).await;
+    let erc20 = erc20_contract(&rollup, &eth_node).await;
 
     let alice_pk = Element::new(0xA11CE);
     let alice_address = hash_merge([alice_pk, Element::ZERO]);
@@ -1016,7 +1016,7 @@ async fn query_blocks() {
     for value in [50u64, 100] {
         let (alice_note, eth_tx, tx) = mint(
             &rollup,
-            &usdc,
+            &erc20,
             &server,
             alice_address,
             Element::from(value),
@@ -1188,7 +1188,7 @@ async fn query_blocks() {
         // If we add a transaction and try again, we should get the new transaction
         let (_new_note, eth_tx, tx) = mint(
             &rollup,
-            &usdc,
+            &erc20,
             &server,
             alice_address,
             Element::from(150u64),

@@ -175,6 +175,16 @@ mod tests {
     use super::*;
     use crate::InputNote;
 
+    //TODO more tests. Nov 2025: psi is changing, notekind changes
+    /*
+     Saved InputNote { note: Note { kind: 2, contract: 200000000000013fb8d0c9d1c17ae5e40fff9be350f57840e9e66cd930000, address: 210b4bc5fce1cca1abce8dc35ea94dee924f5bca07451fb0e4afebac65ea27bb, psi: 562ec5a0757e267bb8ead7193dff002d2f229f754ee656df530c3a3bedc04e74, value: 1 }, secret_key: 30540c6bdefc9bdd83a6660aa1210df66c9ebb6319a74af0b735cf255582fbee }
+
+     Encoded: DfgnRDVn9Ywk2R5ZyuY7J4qHMGUZU2kJaKHNRE5xRG25wkU
+
+
+    🗝 Decoded note: InputNote { note: Note { kind: 2, contract: 200000000000000893c499c542cef5e3811e1192ce70d8cc03d5c33590000, address: 22d68b303a6a3d416959fb363795548966049a655418ebd9eb6a818fd6d2e27b, psi: 7044a950217d34691a90c50b9d9a45c9c88d81bee8f6844eaab82dabd5feebb2, value: 1 }, secret_key: 65 }
+     */
+
     #[test]
     fn test_roundtrip_from_input_note() {
         // Create an InputNote

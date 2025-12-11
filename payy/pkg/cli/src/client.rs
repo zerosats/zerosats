@@ -5,20 +5,24 @@
 
 use crate::wallet::Wallet;
 use color_eyre::Result;
-use contracts::{RollupContract, USDCContract};
+use contracts::{ERC20Contract, RollupContract};
 use hash::hash_merge;
 use node_interface::{HeightResponse, TransactionResponse};
 use once_cell::sync::Lazy;
-use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 use tracing::debug;
-use web3::signing::SecretKey;
-use web3::types::H160;
 use zk_primitives::{Note, UtxoProof};
 
+use contracts::ConfirmationType;
+use ethereum_types::U256;
+use secp256k1::PublicKey;
+use web3::signing::{keccak256, SecretKey};
+use web3::types::{H256, Address};
+
+use crate::rpc::{HealthResponse, ListTransactionsResponse, ListTxnsQuery};
 /// Singleton HTTP client shared across all NodeClient instances
 /// Provides connection pooling and efficient resource reuse
 static HTTP_CLIENT: Lazy<reqwest::Client> = Lazy::new(|| {
@@ -29,11 +33,6 @@ static HTTP_CLIENT: Lazy<reqwest::Client> = Lazy::new(|| {
         .build()
         .expect("Failed to build HTTP client")
 });
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct HealthResponse {
-    pub height: u64,
-}
 
 /// Builder for constructing NodeClient instances with fluent API
 #[derive(Debug, Clone)]
@@ -152,7 +151,7 @@ impl NodeClient {
     /// ```no_run
     /// use cli::NodeClient;
     ///
-    /// let client = NodeClient::new("localhost", 8091, 10)?;
+    /// let client = NodeClient::new("alice", "localhost", 10, 8091)?;
     /// # Ok::<(), color_eyre::eyre::Error>(())
     /// ```
     pub fn new(name: &str, host: &str, port: u16, timeout_secs: u64) -> Result<Self> {
@@ -274,49 +273,52 @@ impl NodeClient {
         Ok(tx_resp)
     }
 
+    pub async fn list_transactions(
+        &self,
+        query: &ListTxnsQuery,
+    ) -> Result<ListTransactionsResponse> {
+        let url = format!("{}/transactions", self.base_url);
+
+        debug!("Requesting transaction list via {}", url);
+
+        let response = self
+            .http_client
+            .get(&url)
+            .timeout(self.timeout)
+            .send()
+            .await
+            .map_err(|e| color_eyre::eyre::eyre!("Failed to connect to node: {}", e))?;
+
+        if !response.status().is_success() {
+            return Err(color_eyre::eyre::eyre!(
+                "Node returned error status: {}",
+                response.status()
+            ));
+        }
+
+        let list_resp = response
+            .json::<ListTransactionsResponse>()
+            .await
+            .map_err(|e| color_eyre::eyre::eyre!("Failed to parse transaction list: {}", e))?;
+
+        Ok(list_resp)
+    }
+
     pub async fn admin_mint(
         &self,
         geth_rpc: &str,
         chain_id: u64,
         secret: &str,
         rollup: &str,
-        usdc_contract: &str,
+        erc20_contract: &str,
         note: &Note,
         utxo: &UtxoProof,
     ) -> Result<()> {
         //let eth_node = EthNode::default().run_and_deploy().await;
         let sk = SecretKey::from_str(secret)?;
         let client = contracts::Client::new(geth_rpc, None);
-        let admin = H160::from_str("687bE257D3590697Da95a264154c71062C701936")?;
-
-        let usdc_contract =
-            USDCContract::load(client.clone(), &chain_id, usdc_contract, sk).await?;
 
         let rollup = RollupContract::load(client, &chain_id, rollup, sk).await?;
-        /*
-        let tx_mint_erc20 = usdc_contract
-            .mint(H160::from_str("687bE257D3590697Da95a264154c71062C701936")?, 10000000)
-            .await?;
-
-        if usdc_contract
-            .allowance(rollup.signer_address, admin)
-            .await?
-            != U256::MAX
-        {
-            let approve_txn = usdc_contract.approve_max(rollup.address()).await?;
-            rollup.client
-                .wait_for_confirm(
-                    approve_txn,
-                    Duration::from_secs(1),
-                    ConfirmationType::Latest,
-                )
-                .await?;
-        }
-        */
-        println!(
-
-
-        );
 
         let mint_hash = hash_merge([note.psi, Note::padding_note().psi]);
 
@@ -341,19 +343,89 @@ impl NodeClient {
         Ok(())
     }
 
-    pub async fn state(&self, geth_rpc: &str, chain_id: u64, secret: &str, rollup: &str) -> Result<()> {
+    pub async fn admin_approve(
+        &self,
+        geth_rpc: &str,
+        chain_id: u64,
+        secret: &str,
+        rollup: &str,
+        erc20_contract: &str,
+        mint_erc20: bool,
+        note: &Note,
+        utxo: &UtxoProof,
+    ) -> Result<()> {
+        //let eth_node = EthNode::default().run_and_deploy().await;
+        let sk = SecretKey::from_str(secret)?;
+        let client = contracts::Client::new(geth_rpc, None);
+
+        let erc20_contract =
+            ERC20Contract::load(client.clone(), &chain_id, erc20_contract, sk).await?;
+        let rollup = RollupContract::load(client, &chain_id, rollup, sk).await?;
+
+        let secp = secp256k1::Secp256k1::new();
+        let secret_key = secp256k1::SecretKey::from_slice(&sk.secret_bytes()).unwrap();
+        let public_key = PublicKey::from_secret_key(&secp, &secret_key);
+        let serialized_public_key = public_key.serialize_uncompressed();
+        let address_bytes = &keccak256(&serialized_public_key[1..])[12..];
+        let admin = Address::from_slice(address_bytes);
+
+        if mint_erc20 {
+            let tx_mint_erc20 = erc20_contract.mint(admin, 10000000).await?;
+            println!(
+                "\nRequested ERC20 mint {:#x}. Approving next\n",
+                tx_mint_erc20
+            );
+        }
+
+        if erc20_contract
+            .allowance(rollup.signer_address, admin)
+            .await?
+            != U256::MAX
+        {
+            let approve_txn = erc20_contract.approve_max(rollup.address()).await?;
+            rollup
+                .client
+                .wait_for_confirm(
+                    approve_txn,
+                    Duration::from_secs(1),
+                    ConfirmationType::Latest,
+                )
+                .await?;
+        }
+
+        Ok(())
+    }
+
+    pub async fn state(
+        &self,
+        geth_rpc: &str,
+        chain_id: u64,
+        secret: &str,
+        rollup: &str,
+    ) -> Result<()> {
         let sk = SecretKey::from_str(secret)?;
         let client = contracts::Client::new(geth_rpc, None);
         let rollup = RollupContract::load(client, &chain_id, rollup, sk).await?;
         let rh = rollup.root_hash().await?;
         let b = rollup.block_height().await?;
-        let token = rollup.usdc().await?;
-        println!("\nRollup State Info\n");
-        println!("\tChain      :{} ", chain_id);
-        println!("\tToken      :{:#x} ", token);
+        let kind_wcbtc = H256::from_slice(
+            &hex::decode("000200000000000013fb8d0c9d1c17ae5e40fff9be350f57840e9e66cd930000").unwrap()
+        );
 
-        println!("\tBlock      :{} ", b);
-        println!("\tRoot hash  :{:#x} ", rh);
+        let kind_usdc = H256::from_slice(
+            &hex::decode("000200000000000013fb52f74a8f9bdd29f77a5efd7f6cb44dcf6906a4b60000").unwrap()
+        );
+
+        let token_wbtc = rollup.token(kind_wcbtc).await?;
+        let token_usdc = rollup.token(kind_usdc.into()).await?;
+
+        println!("\nRollup State Info\n");
+        println!("\tChain                :{} ", chain_id);
+        println!("\tToken kind WBTC      :{:#x} ", token_wbtc);
+        println!("\tToken kind USDC      :{:#x} ", token_usdc);
+
+        println!("\tBlock                :{} ", b);
+        println!("\tRoot hash            :{:#x} ", rh);
 
         Ok(())
     }

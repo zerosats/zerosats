@@ -5,7 +5,7 @@ use testutil::eth::EthNode;
 
 use crate::rpc::{ServerConfig, mint, rollup_contract};
 
-use super::usdc_contract;
+use super::erc20_contract;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn smirk_elements_export() {
@@ -14,11 +14,11 @@ async fn smirk_elements_export() {
         super::Server::setup_and_wait(ServerConfig::single_node(false), Arc::clone(&eth_node))
             .await;
     let rollup = rollup_contract(server.rollup_contract_addr, &eth_node).await;
-    let usdc = usdc_contract(&rollup, &eth_node).await;
+    let erc20 = erc20_contract(&rollup, &eth_node).await;
 
     let (note1, eth_mint_tx1, tx1) = mint(
         &rollup,
-        &usdc,
+        &erc20,
         &server,
         Element::new(1),
         Element::from(100u64),

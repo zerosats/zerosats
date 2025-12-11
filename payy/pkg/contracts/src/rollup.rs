@@ -9,7 +9,6 @@ use element::Element;
 use eth_util::Eth;
 use ethereum_types::{H160, H256, U64, U256};
 use parking_lot::RwLock;
-use secp256k1::{Message, SECP256K1};
 use sha3::{Digest, Keccak256};
 use testutil::eth::EthNode;
 use tokio::time::{Instant, interval_at};
@@ -268,7 +267,7 @@ impl RollupContract {
         signer: SecretKey,
     ) -> Result<Self> {
         let contract_json =
-            include_str!("../../../citrea/artifacts/contracts/rollup2/RollupV1.sol/RollupV1.json");
+            include_str!("../../../citrea/artifacts/contracts/rollup/RollupV1.sol/RollupV1.json");
         let contract = client.load_contract_from_str(rollup_contract_addr, contract_json)?;
         info!(
             "Starting node instance. ChainId {}, contract {}",
@@ -295,7 +294,7 @@ impl RollupContract {
     }
 
     pub async fn from_eth_node(eth_node: &EthNode, secret_key: SecretKey) -> Result<Self> {
-        let rollup_addr = "b26db42b0cb837010752d7c371ec727141045438";
+        let rollup_addr = "cf7ed3acca5a467e9e704c703e8d87f634fb0fc9";
         let client = Client::from_eth_node(eth_node);
         let chain_id = 5655 as u64;
         Self::load(client, &chain_id, rollup_addr, secret_key).await
@@ -483,159 +482,6 @@ impl RollupContract {
                     convert_element_to_h256(mint_hash),
                     convert_element_to_h256(value),
                     convert_element_to_h256(note_kind),
-                ),
-            )
-            .await?;
-
-        Ok(call_tx)
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    #[tracing::instrument(err, ret, skip(self))]
-    pub async fn mint_with_authorization(
-        &self,
-        mint_hash: &Element,
-        value: &Element,
-        note_kind: &Element,
-        from: &Address,
-        // unix timestamp
-        valid_after: U256,
-        valid_before: U256,
-        nonce: H256,
-        signature_for_receive: &[u8],
-        signature_for_mint: &[u8],
-    ) -> Result<H256> {
-        let r = &signature_for_receive[0..32];
-        let s = &signature_for_receive[32..64];
-        let v = signature_for_receive[64];
-        let v = if v < 27 { v + 27 } else { v };
-
-        let r2 = &signature_for_mint[0..32];
-        let s2 = &signature_for_mint[32..64];
-        let v2 = signature_for_mint[64];
-        let v2 = if v2 < 27 { v2 + 27 } else { v2 };
-
-        let call_tx = self
-            .call(
-                "mintWithAuthorization",
-                (
-                    mint_hash.to_h256(),
-                    value.to_h256(),
-                    note_kind.to_h256(),
-                    web3::types::H160::from_slice(from.as_bytes()),
-                    valid_after,
-                    valid_before,
-                    nonce,
-                    web3::types::U256::from(v),
-                    web3::types::H256::from_slice(r),
-                    web3::types::H256::from_slice(s),
-                    web3::types::U256::from(v2),
-                    web3::types::H256::from_slice(r2),
-                    web3::types::H256::from_slice(s2),
-                ),
-            )
-            .await?;
-
-        Ok(call_tx)
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    pub fn signature_for_mint(
-        &self,
-        commitment: Element,
-        value: U256,
-        note_kind: Element,
-        from: Address,
-        valid_after: U256,
-        valid_before: U256,
-        nonce: H256,
-        secret_key: secp256k1::SecretKey,
-    ) -> [u8; 65] {
-        // Sig for our mint function
-        let mint_sig_digest = self.signature_msg_digest_for_mint(
-            commitment,
-            value,
-            note_kind,
-            from,
-            valid_after,
-            valid_before,
-            nonce,
-        );
-
-        let signature =
-            SECP256K1.sign_ecdsa_recoverable(&Message::from_digest(mint_sig_digest), &secret_key);
-        let mut mint_sig_bytes = [0u8; 65];
-        let (recovery_id, signature) = signature.serialize_compact();
-        mint_sig_bytes[0..64].copy_from_slice(&signature[0..64]);
-        mint_sig_bytes[64] = recovery_id.to_i32() as u8;
-        mint_sig_bytes
-    }
-
-    /// This signature authorizes another user to call mintWithAuthorization
-    /// on behalf of the signer.
-    #[allow(clippy::too_many_arguments)]
-    pub fn signature_msg_digest_for_mint(
-        &self,
-        commitment: Element,
-        value: U256,
-        note_kind: Element,
-        from: Address,
-        valid_after: U256,
-        valid_before: U256,
-        nonce: H256,
-    ) -> [u8; 32] {
-        let mut data = Vec::new();
-        let mint_with_authorization_typehash = Keccak256::digest(
-            "MintWithAuthorization(bytes32 commitment,bytes32 value,bytes32 kind,address from,uint256 validAfter,uint256 validBefore,bytes32 nonce)"
-                .as_bytes(),
-        );
-        data.extend_from_slice(&mint_with_authorization_typehash);
-        data.extend_from_slice(convert_element_to_h256(&commitment).as_bytes());
-        let mut value_bytes = [0u8; 32];
-        value.to_big_endian(&mut value_bytes);
-        data.extend_from_slice(&value_bytes[..]);
-        data.extend_from_slice(convert_element_to_h256(&note_kind).as_bytes());
-        data.extend_from_slice(H256::from(from).as_bytes());
-        let mut valid_after_bytes = [0u8; 32];
-        valid_after.to_big_endian(&mut valid_after_bytes);
-        data.extend_from_slice(&valid_after_bytes[..]);
-        let mut valid_before_bytes = [0u8; 32];
-        valid_before.to_big_endian(&mut valid_before_bytes);
-        data.extend_from_slice(&valid_before_bytes[..]);
-        data.extend_from_slice(nonce.as_bytes());
-
-        let mut hasher = Keccak256::new();
-        hasher.update([0x19, 0x01]);
-        hasher.update(self.domain_separator);
-        hasher.update(Keccak256::digest(&data));
-        let msg_hash = hasher.finalize();
-
-        msg_hash.into()
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    #[tracing::instrument(err, ret, skip(self, proof))]
-    pub async fn burn(
-        &self,
-        to: &Address,
-        proof: &[u8],
-        nullifier: &Element,
-        value: &Element,
-        source: &Element,
-        sig: &Element,
-    ) -> Result<H256> {
-        let to = H160::from_slice(to.as_bytes());
-
-        let call_tx = self
-            .call(
-                "burn",
-                (
-                    to,
-                    web3::types::Bytes::from(proof),
-                    convert_element_to_h256(nullifier),
-                    convert_element_to_h256(value),
-                    convert_element_to_h256(source),
-                    convert_element_to_h256(sig),
                 ),
             )
             .await?;
@@ -1124,20 +970,20 @@ impl RollupContract {
     }
 
     #[tracing::instrument(err, ret, skip(self))]
-    pub async fn usdc(&self) -> Result<H160> {
-        let usdc = self
+    pub async fn token(&self, kind: H256) -> Result<H160> {
+        let token = self
             .client
             .query(
                 &self.contract,
-                "usdc",
-                (),
+                "noteKindTokenAddress",
+                kind,
                 None,
                 Default::default(),
                 self.block_height.map(|x| x.into()),
             )
             .await?;
 
-        Ok(usdc)
+        Ok(token)
     }
 
     #[tracing::instrument(err, ret, skip(self))]
@@ -1175,13 +1021,13 @@ impl RollupContract {
     }
 
     #[tracing::instrument(err, ret, skip(self))]
-    pub async fn mints(&self) -> Result<(H256, U256, bool)> {
+    pub async fn mints(&self, key: H256) -> Result<(H256, U256, bool)> {
         let mint = self
             .client
             .query(
                 &self.contract,
                 "mints",
-                (),
+                key,
                 None,
                 Default::default(),
                 self.block_height.map(|x| x.into()),

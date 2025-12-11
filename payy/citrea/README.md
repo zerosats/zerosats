@@ -151,7 +151,7 @@ SECRET_KEY=... ROLLUP_CONTRACT_ADDR=<proxy_contract_addr> ROLLUP_PROXY_ADMIN_ADD
 
 ### Block Height Validation (ENG-4064)
 
-The `verifyRollup` function in `contracts/rollup2/RollupV1.sol` now includes validation to ensure new block heights are strictly greater than the current block height. This prevents:
+The `verifyRollup` function in `contracts/rollup/RollupV1.sol` now includes validation to ensure new block heights are strictly greater than the current block height. This prevents:
 
 - **Rollback Attacks**: Malicious actors cannot submit blocks with decreasing heights
 - **Replay Attacks**: Same block height cannot be reused

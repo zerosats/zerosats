@@ -1,4 +1,6 @@
-import rollupV1Artifact from "../artifacts/contracts/rollup2/RollupV1.sol/RollupV1.json";
+import rollupV1Artifact from "../artifacts/contracts/rollup/RollupV1.sol/RollupV1.json";
+import aliceTokenArtifact from "../artifacts/contracts/helper/AliceERC20.sol/AliceERC20.json";
+
 import proxyArtifact
     from "../openzeppelin-contracts/contracts/proxy/transparent/TransparentUpgradeableProxy.sol/TransparentUpgradeableProxy.json";
 
@@ -13,26 +15,16 @@ import {privateKeyToAccount, mnemonicToAccount} from "viem/accounts";
 import {deployBin, citreaDevChain, citreaTestChain} from "./shared";
 import {readFile} from "fs/promises";
 import {join} from "path";
-import IUSDCArtifact from "../artifacts/contracts/IUSDC.sol/IUSDC.json";
+import IERC20Artifact from "../openzeppelin-contracts/token/ERC20/IERC20.json";
 
 // Auto-updated by generate_fixturecs.sh - do not modify manually
 const AGG_AGG_VERIFICATION_KEY_HASH =
     "0x1594fce0e59bc3785292f9ab4f5a1e45f5795b4a616aff5cdc4d32a223f69f0c";
 
-const USDC_ADDRESSES: Record<string, string> = {
-    // Ethereum Mainnet
-    1: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
-    // Ethereum Goerli Testnet
-    // 5: '0x07865c6e87b9f70255377e024ace6630c1eaa37f',
-    // Polygon Mainnet
-    137: "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359",
-    // Polygon Mumbai Testnet
-    // 80001: '0x2058A9D7613eEE744279e3856Ef0eAda5FCbaA7e'
-};
-
 async function main() {
 
     console.log("Initialization...");
+    let aggregateVerifierAddr = process.env.VERIFIER;
     const isTestnet = process.env.IS_TESTNET === "1";
     let proverAddress = process.env.PROVER_ADDRESS as `0x${string}`;
     let validators = process.env.VALIDATORS?.split(",") ?? ([] as Array<`0x${string}`>);
@@ -40,7 +32,7 @@ async function main() {
     console.log("    Citrea Testnet - ", isTestnet);
     console.log("    Prover Address - ", proverAddress);
     console.log("    Validators - ", validators);
-
+    console.log("    Verifier - ", aggregateVerifierAddr);
 
     const maybeNoopVerifier = (verifier: string) =>
         isTestnet ? verifier : "NoopVerifierHonk.bin";
@@ -149,24 +141,68 @@ async function main() {
 
     console.log("\n🎉 Connection successful!");
 
-    console.log("\n🔍 Deploying USDC. Looking for binary file...");
+    let erc20Address;
+    let receipt;
 
-    const usdcAddress = await deployBin(
-        "USDC.bin",
-        publicClient,
-        walletClient,
-    );
-    console.log(`✅ USDC Contract: ${usdcAddress}`);
+    if (isTestnet) {
+        let seed = process.env.MNEMONIC as string;
+        account = mnemonicToAccount(seed)
+        rpcUrl = "https://rpc.testnet.citrea.xyz";
+        if (proverAddress === undefined)
+            throw new Error("PROVER_ADDRESS is not set");
+        if (validators.length === 0) throw new Error("VALIDATORS is not set");
 
-    console.log("\n🔍 Deploying Verifier. Looking for binary file...");
+        walletClient = createWalletClient({
+            account,
+            chain: {
+                ...citreaTestChain,
+                rpcUrls: {
+                    default: {http: [rpcUrl]},
+                    public: {http: [rpcUrl]},
+                },
+            },
+            transport: http(rpcUrl, {
+                timeout: 60000,
+                retryCount: 3,
+            }),
+        });
+        erc20Address = "0x8d0c9d1c17aE5e40ffF9bE350f57840E9E66Cd93";
+        console.log(`✅ Using wrapped cBTC token`);
+    } else {
+        console.log("\n🔍 Deploying ERC20. Looking for binary file...");
 
-    const aggregateVerifierAddr = await deployBin(
-        maybeNoopVerifier("noir/agg_agg_HonkVerifier.bin"),
-        publicClient,
-        walletClient,
-    );
+        const erc20Tx = await walletClient.deployContract({
+            abi: aliceTokenArtifact.abi,
+            bytecode: aliceTokenArtifact.bytecode,
+            args: [ maxUint256 ],
+        });
 
-    console.log(`✅ Aggregate Verifier Contract: ${aggregateVerifierAddr}`);
+        receipt = await publicClient.waitForTransactionReceipt({
+            hash: erc20Tx,
+        });
+
+        if (receipt.status == "success") {
+            console.log(`✅ Transaction confirmed in block`);
+        } else {
+            console.log(`❌ Transaction reverted`);
+        }
+        erc20Address = receipt.contractAddress;
+        console.log(`✅ ERC20 Deployed`);
+    }
+
+    console.log(`✅ ERC20 Contract: ${erc20Address}`);
+
+    if (!aggregateVerifierAddr) {
+        console.log("\n🔍 Deploying Verifier. Looking for binary file...");
+        aggregateVerifierAddr = await deployBin(
+            maybeNoopVerifier("noir/agg_agg_HonkVerifier.bin"),
+            publicClient,
+            walletClient,
+        );
+        console.log(`✅ Aggregate Verifier Contract: ${aggregateVerifierAddr}`);
+    } else {
+        console.log(`✅ Re-using Aggregate Verifier Contract: ${aggregateVerifierAddr}`);
+    }
 
     console.log("\n🔍 Deploying Rollup");
 
@@ -177,7 +213,7 @@ async function main() {
 
     console.log(`📝 Transaction hash: ${rollupV1}`);
 
-    let receipt = await publicClient.waitForTransactionReceipt({
+    receipt = await publicClient.waitForTransactionReceipt({
         hash: rollupV1,
     });
 
@@ -196,7 +232,7 @@ async function main() {
         functionName: "initialize",
         args: [
             ownerAddress,
-            usdcAddress,
+            erc20Address,
             aggregateVerifierAddr,
             proverAddress,
             validators,
@@ -252,76 +288,28 @@ async function main() {
     console.log("Transaction sent successfully");
 */
 
-
-    const usdc = getContract({
-        address: usdcAddress,
-        abi: IUSDCArtifact.abi,
+    const aliceToken = getContract({
+        address: erc20Address,
+        abi: IERC20Artifact.abi,
         client: {public: publicClient, wallet: walletClient},
     });
-    console.log(`✅ Obtained USDC contract: ${usdcAddress}`);
+    console.log(`✅ Obtained ERC20 contract: ${aliceToken}`);
 
+    console.log("\n🔍 Approving ERC20 spending for proxy...");
 
-    if (!isTestnet) {
-        console.log("\n🔍 Testing deployment...");
-
-        let hash = await usdc.write.initialize(
-            [
-                "USD Coin",
-                "USDC",
-                "USD",
-                6,
-                ownerAddress,
-                ownerAddress,
-                ownerAddress,
-                ownerAddress,
-            ],
-            {
-                gas: 1_000_000n,
-            },
-        );
-        await publicClient.waitForTransactionReceipt({hash});
-        console.log(`✅ Sent test USDC: ${hash}`);
-
-        hash = await usdc.write.initializeV2(["USD Coin"], {
-            gas: 1_000_000n,
-        });
-        await publicClient.waitForTransactionReceipt({hash});
-
-        console.log(`✅ V2 initialized: ${hash}`);
-
-        hash = await usdc.write.initializeV2_1([ownerAddress], {
-            gas: 1_000_000n,
-        });
-        await publicClient.waitForTransactionReceipt({hash});
-
-        console.log(`✅ V2.1 initialized: ${hash}`);
-
-        hash = await usdc.write.configureMinter(
-            [ownerAddress, parseUnits("1000000000", 6)],
-            {
-                gas: 1_000_000n,
-            },
-        );
-        await publicClient.waitForTransactionReceipt({hash});
-
-        console.log(`✅ Minter configured: ${hash}`);
-
-        hash = await usdc.write.mint([ownerAddress, parseUnits("1000000000", 6)], {
-            gas: 1_000_000n,
-        });
-        await publicClient.waitForTransactionReceipt({hash});
-
-        console.log(`✅ Minted to ${ownerAddress}: ${hash}`);
-        console.log("All mint (test) transactions executed");
-    }
-
-    console.log("\n🔍 Approving USDC spending for proxy...");
-    let hash = await usdc.write.approve([rollupProxyAddr, maxUint256], {
+    let hash = await aliceToken.write.approve([rollupProxyAddr, maxUint256], {
         gas: 1_000_000n,
     });
-    await publicClient.waitForTransactionReceipt({hash});
-    console.log(`✅ Approved maxUint256 to ${rollupProxyAddr}: ${hash}`);
 
+    receipt = await publicClient.waitForTransactionReceipt({
+        hash: hash,
+    });
+
+    if (receipt.status == "success") {
+        console.log(`✅ Approved maxUint256 to ${rollupProxyAddr}: ${hash}`);
+    } else {
+        console.log(`❌ Transaction reverted`);
+    }
 
     /*
     // Example transaction (uncomment to test)

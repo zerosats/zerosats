@@ -16,6 +16,7 @@ thiserror = { workspace = true }
 once_cell.workspace = true
 element.workspace = true
 rand.workspace = true
+primitives.workspace = true
 zk-primitives.workspace = true
 smirk.workspace = true
 hex.workspace = true
@@ -25,7 +26,11 @@ barretenberg.workspace = true
 node-interface.workspace = true
 testutil.workspace = true
 hash.workspace = true
+secp256k1 = { workspace = true }
+ethereum-types = { workspace = true }
+bs58 = { workspace = true }
+
 
 [[bin]]
-name = "payy-cli"
+name = "ciphera-cli"
 path = "src/main.rs"

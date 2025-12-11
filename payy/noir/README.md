@@ -25,7 +25,7 @@ noirup
 Install the specific `nargo` version, `1.0.0-beta.9`:
 
 ```bash
- noirup -v 1.0.0-beta.9
+noirup -v 1.0.0-beta.9
 ```
 
 Confirm it:

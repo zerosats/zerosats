@@ -31,10 +31,10 @@ pub struct Config {
 
     #[arg(
         long,
-        env = "USDC_CONTRACT_ADDRESS",
+        env = "erc20_contract_addrESS",
         default_value = "0x5fbdb2315678afecb367f032d93f642f64180aa3"
     )]
-    usdc_contract_address: String,
+    erc20_contract_address: String,
 
     #[arg(
         long,
@@ -91,20 +91,20 @@ async fn main() -> Result<(), eyre::Error> {
         secret_key,
     )
     .await?;
-    let usdc_contract = contracts::USDCContract::load(
+    let erc20_contract = contracts::ERC20Contract::load(
         client.clone(),
         &config.chain_id,
-        &config.usdc_contract_address,
+        &config.erc20_contract_address,
         secret_key,
     )
     .await?;
 
-    if usdc_contract
+    if erc20_contract
         .allowance(rollup_contract.signer_address, rollup_contract.address())
         .await?
         != U256::MAX
     {
-        let approve_txn = usdc_contract.approve_max(rollup_contract.address()).await?;
+        let approve_txn = erc20_contract.approve_max(rollup_contract.address()).await?;
         client
             .wait_for_confirm(
                 approve_txn,
@@ -116,7 +116,7 @@ async fn main() -> Result<(), eyre::Error> {
 
     let mut substitutor = burn_substitutor::BurnSubstitutor::new(
         rollup_contract,
-        usdc_contract,
+        erc20_contract,
         config.node_rpc_url,
         Duration::from_secs(1),
     );

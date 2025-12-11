@@ -21,7 +21,7 @@ use std::{
     sync::{Arc, Mutex, mpsc},
 };
 
-use contracts::{Address, RollupContract, SecretKey, USDCContract, util::convert_h160_to_element};
+use contracts::{Address, RollupContract, SecretKey, ERC20Contract, util::convert_h160_to_element};
 use futures::Future;
 use once_cell::sync::Lazy;
 use primitives::hash::CryptoHash;
@@ -607,7 +607,7 @@ impl Server {
 
 fn mint_with_note<'m, 't>(
     rollup: &'m RollupContract,
-    _usdc: &'m USDCContract,
+    _usdc: &'m ERC20Contract,
     server: &'t Server,
     note: Note,
 ) -> (
@@ -644,7 +644,7 @@ fn mint_with_note<'m, 't>(
 
 fn mint<'m, 't>(
     rollup: &'m RollupContract,
-    usdc: &'m USDCContract,
+    usdc: &'m ERC20Contract,
     server: &'t Server,
     address: Element,
     value: Element,
@@ -686,7 +686,7 @@ async fn rollup_contract(addr: Address, eth_node: &EthNode) -> RollupContract {
     let client = contracts::Client::new(&eth_node.rpc_url(), None);
     RollupContract::load(
         client,
-        5655,
+        &5655,
         &hex::encode(addr.as_bytes()),
         SecretKey::from_str("ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80")
             .unwrap(),
@@ -695,13 +695,13 @@ async fn rollup_contract(addr: Address, eth_node: &EthNode) -> RollupContract {
     .unwrap()
 }
 
-async fn usdc_contract(rollup: &RollupContract, eth_node: &EthNode) -> USDCContract {
-    let usdc_addr = rollup.usdc().await.unwrap();
+async fn erc20_contract(rollup: &RollupContract, eth_node: &EthNode) -> ERC20Contract {
+    let usdc_addr = rollup.token().await.unwrap();
 
     let client = contracts::Client::new(&eth_node.rpc_url(), None);
-    USDCContract::load(
+    ERC20Contract::load(
         client,
-        5655,
+        &5655,
         &hex::encode(usdc_addr.as_bytes()),
         SecretKey::from_str("ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80")
             .unwrap(),

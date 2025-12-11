@@ -17,8 +17,8 @@ export const citreaDevChain = {
   },
   // Add default gas configuration
   fees: {
-    defaultPriorityFee: parseGwei("0.5"),
-    baseFeeMultiplier: 1,
+    defaultPriorityFee: parseGwei("10"),
+    baseFeeMultiplier: 10,
   },
 } as const;
 
@@ -38,7 +38,7 @@ export const citreaTestChain = {
   // Add default gas configuration
   fees: {
     defaultPriorityFee: parseGwei("0.5"),
-    baseFeeMultiplier: 1,
+    baseFeeMultiplier: 1.1,
   },
 } as const;
 
@@ -62,6 +62,8 @@ export async function deployBin(
     bytecode: `0x${bin}`,
     abi: [],
     gas: 8000000n,
+    // maxFeePerGas: parseGwei('100000'), // Increase this
+    // maxPriorityFeePerGas: parseGwei('100'), // Increase this
   });
 
   console.log(`📝 Transaction hash: ${verifierTx}`);

@@ -9,4 +9,13 @@ dist
 
 *.service-account.json
 
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Environment files
+.env
 .env.local
+

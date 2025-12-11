@@ -1,42 +1,24 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.20;
 
+import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
-import "../AggregateVerifierV1.sol";
-import "../MintVerifierV1.sol";
-import "../BurnVerifierV1.sol";
-import "../IUSDC.sol";
-// import "hardhat/console.sol";
+import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
+import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {IVerifier} from "../noir/IVerifier.sol";
 
-struct Block {
-    // Sequencer/prover sending the block
-    address sender;
-    // List of txns in the block
-    Transaction[] txns;
-}
-
-struct Transaction {
-    bytes[] hashes;
-}
-
-struct Proof {
-    bytes[] proof;
+struct Mint {
+    bytes32 note_kind;
+    uint256 amount;
+    bool spent;
 }
 
 struct Signature {
     bytes32 r;
     bytes32 s;
     uint v;
-}
-
-struct Mint {
-    uint256 amount;
-}
-
-struct Burn {
-    address to;
-    uint256 amount;
 }
 
 struct ValidatorSet {
@@ -46,44 +28,85 @@ struct ValidatorSet {
     uint256 validFrom;
 }
 
+// We can't return a mapping from a public function, so this struct is used for the public
+// return valjue
 struct PublicValidatorSet {
-    // We can't return a mapping from a public function, so we need an array
     address[] validators;
     uint256 validFrom;
 }
 
-string constant NETWORK = "Polybase";
-uint64 constant NETWORK_LEN = 8;
+// Verifiers
+struct Verifier {
+    IVerifier verifier;
+    uint32 messages_length;
+    bool enabled;
+}
+
+string constant NETWORK = "Payy";
+uint64 constant NETWORK_LEN = 4;
+uint256 constant MAX_FUTURE_BLOCKS = 2_592_000; // 30 days (~1 sec blocks)
 
 contract RollupV1 is Initializable, OwnableUpgradeable {
+    using SafeERC20 for IERC20;
+    event RollupVerified(uint256 indexed height, bytes32 root);
+    event Minted(bytes32 indexed hash, bytes32 value, bytes32 note_kind);
     event ValidatorSetAdded(uint256 index, uint256 validFrom);
+    event Burned(
+        address indexed token,
+        bytes32 indexed burn_hash,
+        address indexed recipient,
+        bool substitute,
+        bool success
+    );
+    event MintAdded(
+        bytes32 indexed mint_hash,
+        uint256 value,
+        bytes32 note_kind
+    );
+    event VerifierAdded(
+        bytes32 verificationKey,
+        address zkVerifierAddress,
+        uint32 messages_length
+    );
+    event VerifierRemoved(bytes32 verificationKey, address zkVerifierAddress);
+    event ProverAdded(address indexed prover);
+    event ProverRemoved(address indexed prover);
+    event RootHashUpdated(bytes32 indexed oldRoot, bytes32 indexed newRoot);
 
     // Since the Initializable._initialized version number is private, we need to keep track of it ourselves
     uint8 public version;
 
-    bytes32 private _DOMAIN_SEPARATOR;
+    // Verifiers
+    mapping(bytes32 => Verifier) public zkVerifiers;
+    bytes32[] public zkVerifierKeys;
 
-    AggregateVerifierV1 public aggregateVerifier;
-    MintVerifierV1 public mintVerifier;
-    BurnVerifierV1 public burnVerifier;
-    IUSDC public usdc;
+    // Contracts
+    IERC20 public token;
 
     // Core rollup values
-    bytes32 public blockHash;
     uint256 public blockHeight;
+    bytes32 public rootHash;
 
-    bytes32[64] public rootHashes;
-    uint public nextRootHashIndex;
+    // Mint - mints are removed after the rollup validates them. Mint hash is hash of commitments.
+    mapping(bytes32 => Mint) public mints;
+
+    // Burn Substitutor - stores a mapping of paid out substituted burns, so they can be refunded
+    // once the rollup completes the original burn
+    // Composite key (hash + burnAddress + noteKind + amount) => substitute address
+    mapping(bytes32 => address) public substitutedBurns;
+
+    // Allowed Tokens
+    mapping(bytes32 => address) tokens;
 
     // Actors
-    // mapping(address => uint) sequencers;
     mapping(address => uint) provers;
-    mapping(bytes32 => uint256) mints;
-    mapping(bytes32 => Burn) burns;
 
-    mapping(uint256 => ValidatorSet) private validatorSets;
-    uint256 private validatorSetsLength;
+    // Validators
+    ValidatorSet[] private validatorSets;
     uint256 private validatorSetIndex;
+
+    // Burn substitutors
+    mapping(address => bool) private burnSubstitutors;
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
@@ -92,39 +115,34 @@ contract RollupV1 is Initializable, OwnableUpgradeable {
 
     function initialize(
         address owner,
-        address _usdcAddress,
-        address _aggregateVerifier,
-        address _mintVerifier,
-        address _burnVerifier,
+        address _tokenAddress,
+        address _verifierAddress,
         address prover,
         address[] calldata initialValidators,
-        bytes32 emptyMerkleTreeRootHash
+        bytes32 verifierKeyHash
     ) public initializer {
         version = 1;
 
         __Ownable_init(owner);
 
-        _DOMAIN_SEPARATOR = keccak256(
-            abi.encode(
-                keccak256(
-                    "EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"
-                ),
-                keccak256(bytes("Rollup")),
-                keccak256(bytes("1")),
-                block.chainid,
-                address(this)
-            )
-        );
+        token = IERC20(_tokenAddress);
 
-        usdc = IUSDC(_usdcAddress);
-        aggregateVerifier = AggregateVerifierV1(_aggregateVerifier);
-        mintVerifier = MintVerifierV1(_mintVerifier);
-        burnVerifier = BurnVerifierV1(_burnVerifier);
+        // Set the init aggregate verifier
+        _setZkVerifierProperties(verifierKeyHash, _verifierAddress, 6 * 5);
+        zkVerifierKeys.push(verifierKeyHash);
+
         provers[prover] = 1;
 
         _setValidators(0, initialValidators);
 
-        addRootHash(emptyMerkleTreeRootHash);
+        // Empty merkle tree root hash constant (from pkg/contracts/src/empty_merkle_tree_root_hash.txt)
+        _setRootHash(
+            0x0577b5b4aa3eaba75b2a919d5d7c63b7258aa507d38e346bf2ff1d48790379ff
+        );
+        tokens[
+            0x000200000000000013fb8d0c9d1c17ae5e40fff9be350f57840e9e66cd930000
+        ] = _tokenAddress;
+        burnSubstitutors[owner] = true;
     }
 
     modifier onlyProver() {
@@ -132,57 +150,561 @@ contract RollupV1 is Initializable, OwnableUpgradeable {
         _;
     }
 
-    function addRootHash(bytes32 rootHash) internal {
-        rootHashes[nextRootHashIndex] = rootHash;
-        nextRootHashIndex = (nextRootHashIndex + 1) % 64;
+    function addProver(address prover) public onlyOwner {
+        provers[prover] = 1;
+        emit ProverAdded(prover);
+    }
+
+    function removeProver(address prover) public onlyOwner {
+        require(provers[prover] == 1, "Address is not a prover");
+        provers[prover] = 0;
+        emit ProverRemoved(prover);
+    }
+
+    modifier onlyBurnSubstitutor() {
+        require(
+            burnSubstitutors[msg.sender] == true,
+            "RollupV1: You are not a burn substitutor"
+        );
+        _;
+    }
+
+    function _setZkVerifierProperties(
+        bytes32 keyHash,
+        address verifierAddress,
+        uint32 messagesLength
+    ) internal {
+        zkVerifiers[keyHash].verifier = IVerifier(verifierAddress);
+        zkVerifiers[keyHash].messages_length = messagesLength;
+        zkVerifiers[keyHash].enabled = true;
+    }
+
+    function addZkVerifier(
+        bytes32 verificationKeyHash,
+        address verifierAddress,
+        uint32 messages_length
+    ) public onlyOwner {
+        require(
+            verifierAddress != address(0),
+            "RollupV1: Invalid zk verifier address"
+        );
+        require(
+            verifierAddress.code.length > 0,
+            "RollupV1: ZK verifier is not a contract"
+        );
+        // Add to verifier keys if not enabled
+        if (!zkVerifiers[verificationKeyHash].enabled) {
+            zkVerifierKeys.push(verificationKeyHash);
+        }
+        _setZkVerifierProperties(
+            verificationKeyHash,
+            verifierAddress,
+            messages_length
+        );
+        emit VerifierAdded(
+            verificationKeyHash,
+            verifierAddress,
+            messages_length
+        );
+    }
+
+    function removeZkVerifier(bytes32 verificationKeyHash) public onlyOwner {
+        require(
+            zkVerifiers[verificationKeyHash].enabled,
+            "RollupV1: ZK verifier does not exist"
+        );
+        address verifierAddress = address(
+            zkVerifiers[verificationKeyHash].verifier
+        );
+        delete zkVerifiers[verificationKeyHash];
+        // Find and remove the verifierKey from verifierKeys array
+        uint256 length = zkVerifierKeys.length;
+        for (uint256 i = 0; i < length; i++) {
+            if (zkVerifierKeys[i] == verificationKeyHash) {
+                // Move the last element to this position and remove the last element
+                zkVerifierKeys[i] = zkVerifierKeys[length - 1];
+                zkVerifierKeys.pop();
+                break;
+            }
+        }
+        emit VerifierRemoved(verificationKeyHash, verifierAddress);
+    }
+
+    function getZkVerifier(
+        bytes32 verificationKeyHash
+    ) public view returns (address, uint32) {
+        require(
+            zkVerifiers[verificationKeyHash].enabled,
+            "RollupV1: ZK verifier does not exist"
+        );
+        return (
+            address(zkVerifiers[verificationKeyHash].verifier),
+            zkVerifiers[verificationKeyHash].messages_length
+        );
+    }
+
+    function addBurnSubstitutor(address burnSubstitutor) public onlyOwner {
+        burnSubstitutors[burnSubstitutor] = true;
+    }
+
+    function removeBurnSubstitutor(address burnSubstitutor) public onlyOwner {
+        burnSubstitutors[burnSubstitutor] = false;
+    }
+
+    function _setRootHash(bytes32 newRoot) internal {
+        bytes32 oldRoot = rootHash;
+        rootHash = newRoot;
+        emit RootHashUpdated(oldRoot, newRoot);
+    }
+
+    function setRoot(bytes32 newRoot) public onlyOwner {
+        _setRootHash(newRoot);
     }
 
     function currentRootHash() public view returns (bytes32) {
-        uint index = 63;
-        if (nextRootHashIndex > 0) {
-            index = nextRootHashIndex - 1;
-        }
-
-        return rootHashes[index];
+        return rootHash;
     }
 
-    function containsRootHashes(
-        bytes32[6] memory hashes
-    ) public view virtual returns (bool) {
-        bool[6] memory results = [false, false, false, false, false, false];
+    function addToken(bytes32 noteKind, address tokenAddress) public onlyOwner {
+        require(
+            tokens[noteKind] == address(0),
+            "RollupV1: Token already exists"
+        );
 
-        for (uint i = 0; i < hashes.length; i++) {
-            for (uint j = 0; j < rootHashes.length; j++) {
-                if (hashes[i] == rootHashes[j]) {
-                    results[i] = true;
-                    break;
-                }
-            }
+        tokens[noteKind] = tokenAddress;
+    }
+
+    function noteKindTokenAddress(
+        bytes32 noteKind
+    ) public view returns (address) {
+        return tokens[noteKind];
+    }
+
+    function DOMAIN_SEPARATOR() public view returns (bytes32) {
+        return
+            keccak256(
+                abi.encode(
+                    keccak256(
+                        "EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"
+                    ),
+                    keccak256(bytes("Rollup")),
+                    keccak256(bytes("1")),
+                    block.chainid,
+                    address(this)
+                )
+            );
+    }
+
+    /////////////////
+    //
+    // VERIFY
+    //
+    ///////////
+
+    // Verify rollup
+    function verifyRollup(
+        uint256 height,
+        bytes32 verificationKeyHash,
+        bytes calldata aggrProof,
+        // oldRoot, newRoot, commitHash, <messages_length>, 16x kzg
+        bytes32[] calldata publicInputs,
+        bytes32 otherHashFromBlockHash,
+        Signature[] calldata signatures
+    ) public onlyProver {
+        require(
+            zkVerifiers[verificationKeyHash].enabled,
+            "RollupV1: ZK verifier not allowed"
+        );
+
+        require(
+            publicInputs.length ==
+                zkVerifiers[verificationKeyHash].messages_length + 3,
+            "RollupV1: Invalid publicInputs length"
+        );
+
+        bytes32 oldRoot = publicInputs[0];
+        bytes32 newRoot = publicInputs[1];
+        bytes32 commitHash = publicInputs[2];
+
+        verifyRootHash(oldRoot);
+
+        verifyCommitHash(commitHash);
+
+        verifyValidatorSignatures(
+            newRoot,
+            height,
+            otherHashFromBlockHash,
+            signatures
+        );
+
+        verifyAllMessages(
+            // Skip the first 3 public inputs as these are never messages
+            3,
+            publicInputs,
+            zkVerifiers[verificationKeyHash].messages_length,
+            height
+        );
+
+        require(
+            zkVerifiers[verificationKeyHash].verifier.verify(
+                aggrProof,
+                publicInputs
+            ),
+            "RollupV1: ZK proof verification failed"
+        );
+
+        rootHash = newRoot;
+        require(
+            height > blockHeight,
+            "RollupV1: New block height must be greater than current"
+        );
+        blockHeight = height;
+
+        emit RollupVerified(height, newRoot);
+    }
+
+    function verifyRootHash(bytes32 expectedRoot) internal view {
+        require(
+            expectedRoot == rootHash,
+            "RollupV1: Root hash verification failed"
+        );
+    }
+
+    // Placeholder for asserting the commit hash is stored on Celestia
+    function verifyCommitHash(bytes32 commitHash) internal {}
+
+    function verifyAllMessages(
+        uint skipCount,
+        bytes32[] calldata publicInputs,
+        uint32 messages_length,
+        uint256 height
+    ) internal {
+        // Skip the first 4 (as they are processed separately)
+        uint i = skipCount;
+        uint end = skipCount + messages_length;
+        while (i < end) {
+            i = verifyMessages(i, publicInputs, height);
+        }
+    }
+
+    function verifyMessages(
+        uint index,
+        bytes32[] calldata publicInputs,
+        uint256 height
+    ) internal returns (uint) {
+        // Get the kind from public input at index
+        uint256 kind = uint256(publicInputs[index]);
+
+        if (kind == 0) {
+            return index + 1;
+        } else if (kind == 2) {
+            // Mint
+            return verifyMint(index, publicInputs);
+        } else if (kind == 3) {
+            // Burn
+            return verifyBurn(index, publicInputs, height);
+        } else {
+            // Not allowed
+            revert("RollupV1: Invalid message kind");
+        }
+    }
+
+    function verifyMint(
+        uint i,
+        bytes32[] calldata messages
+    ) internal returns (uint) {
+        bytes32 note_kind = messages[i + 1];
+        bytes32 value = messages[i + 2];
+        bytes32 hash = messages[i + 3];
+
+        require(
+            mints[hash].amount == uint256(value),
+            "RollupV1: Mint value invalid"
+        );
+        require(
+            mints[hash].note_kind == note_kind,
+            "RollupV1: Mint note kind invalid"
+        );
+        require(mints[hash].spent == false, "RollupV1: Mint already spent");
+        mints[hash].spent = true;
+
+        emit Minted(hash, value, note_kind);
+
+        return i + 4;
+    }
+
+    function verifyBurn(
+        uint i,
+        bytes32[] calldata messages,
+        uint256 height
+    ) internal returns (uint) {
+        bytes32 note_kind = messages[i + 1];
+        uint256 value = uint256(messages[i + 2]);
+        bytes32 hash = messages[i + 3];
+        address burn_addr = bytes32ToAddress(messages[i + 4]);
+
+        address token = tokens[note_kind];
+
+        bytes32 substituteBurnKey = getSubstituteBurnKey(
+            hash,
+            burn_addr,
+            note_kind,
+            value,
+            height
+        );
+        address substitutor = substitutedBurns[substituteBurnKey];
+        if (substitutor != address(0)) {
+            executeBurn(token, substitutor, hash, value, false);
+        } else {
+            executeBurn(token, burn_addr, hash, value, false);
         }
 
-        for (uint i = 0; i < results.length; i++) {
-            if (results[i] == false) {
+        return i + 5;
+    }
+
+    function bytes32ToAddress(
+        bytes32 _bytes32
+    ) internal pure returns (address) {
+        return address(uint160(uint256(_bytes32)));
+    }
+
+    /**
+     * @dev Helper function to generate composite key for substitutedBurns mapping
+     * @param hash The burn hash
+     * @param burnAddress The burn address
+     * @param noteKind The note kind
+     * @param amount The amount
+     * @param burnBlockHeight The block height
+     * @return The composite key for the mapping
+     */
+    function getSubstituteBurnKey(
+        bytes32 hash,
+        address burnAddress,
+        bytes32 noteKind,
+        uint256 amount,
+        uint256 burnBlockHeight
+    ) internal pure returns (bytes32) {
+        return
+            keccak256(
+                abi.encode(hash, burnAddress, noteKind, amount, burnBlockHeight)
+            );
+    }
+
+    /////////////////
+    //
+    // BURNS
+    //
+    ///////////
+
+    function executeBurn(
+        address token,
+        address recipient,
+        bytes32 burn_hash,
+        uint256 value,
+        bool substitute
+    ) internal returns (bool) {
+        bool success = executeBurnToAddress(token, recipient, value);
+        emit Burned(token, burn_hash, recipient, substitute, success);
+        return success;
+    }
+
+    function executeBurnToAddress(
+        address token,
+        address recipient,
+        uint256 value
+    ) internal returns (bool) {
+        (bool success, bytes memory returndata) = token.call(
+            abi.encodeCall(IERC20.transfer, (recipient, value))
+        );
+        if (!success) {
+            return false;
+        }
+        if (returndata.length != 0) {
+            bool func_return = abi.decode(returndata, (bool));
+            if (!func_return) {
                 return false;
             }
         }
-
         return true;
     }
 
-    function getMint(bytes32 key) public view returns (uint256) {
-        return mints[key];
+    function wasBurnSubstituted(
+        address burn_address,
+        bytes32 note_kind,
+        bytes32 hash,
+        uint256 amount,
+        uint256 burnBlockHeight
+    ) public view returns (bool) {
+        bytes32 substituteBurnKey = getSubstituteBurnKey(
+            hash,
+            burn_address,
+            note_kind,
+            amount,
+            burnBlockHeight
+        );
+        return substitutedBurns[substituteBurnKey] != address(0);
     }
 
-    function getBurn(bytes32 key) public view returns (Burn memory) {
-        return burns[key];
+    function substituteBurn(
+        address burnAddress,
+        bytes32 note_kind,
+        bytes32 hash,
+        uint256 amount,
+        uint256 burnBlockHeight
+    ) public onlyBurnSubstitutor {
+        substituteBurnTo(
+            burnAddress,
+            msg.sender,
+            note_kind,
+            hash,
+            amount,
+            burnBlockHeight
+        );
     }
 
-    function getRootHashes() public view returns (bytes32[64] memory) {
-        return rootHashes;
+    function substituteBurnTo(
+        address burnAddress,
+        address substituteAddress,
+        bytes32 note_kind,
+        bytes32 hash,
+        uint256 amount,
+        uint256 burnBlockHeight
+    ) private {
+        bytes32 substituteBurnKey = getSubstituteBurnKey(
+            hash,
+            burnAddress,
+            note_kind,
+            amount,
+            burnBlockHeight
+        );
+        require(
+            substitutedBurns[substituteBurnKey] == address(0),
+            "RollupV1: Burn already substituted"
+        );
+        require(
+            blockHeight < burnBlockHeight,
+            "RollupV1: Block height already rolled up"
+        );
+
+        address token = tokens[note_kind];
+        require(token != address(0), "RollupV1: Token not found for note kind");
+
+        IERC20(token).safeTransferFrom(
+            substituteAddress,
+            address(this),
+            amount
+        );
+
+        bool success = executeBurn(token, burnAddress, hash, amount, true);
+        require(success, "RollupV1: Burn failed");
+
+        // This will be returned to the msg.sender when the rollup block for it is submitted
+        substitutedBurns[substituteBurnKey] = substituteAddress;
     }
 
-    function addProver(address prover) public onlyOwner {
-        provers[prover] = 1;
+    /////////////////
+    //
+    // MINTS
+    //
+    ///////////
+
+    function getMint(bytes32 hash) public view returns (Mint memory) {
+        return mints[hash];
+    }
+
+    // Anyone can call mint, although this is likely to be performed on behalf of the user
+    // as they may not have gas to pay for the txn
+    function mint(bytes32 mint_hash, bytes32 value, bytes32 note_kind) public {
+        if (mints[mint_hash].amount != 0) {
+            revert("RollupV1: Mint already exists");
+        }
+
+        address tokenAddress = tokens[note_kind];
+        require(
+            tokenAddress != address(0),
+            "RollupV1: Token not found for note kind"
+        );
+
+        // Take the money from the external account, sender must have been previously
+        // approved as per the ERC20 standard
+        IERC20(tokenAddress).safeTransferFrom(
+            msg.sender,
+            address(this),
+            uint256(value)
+        );
+
+        // Add mint to pending mints, this still needs to be verifier with the verifyBlock,
+        // but Solid validators will check that this commitment exists in the mint map before
+        // accepting the mint txn into a block
+        mints[mint_hash] = Mint({
+            note_kind: note_kind,
+            amount: uint256(value),
+            spent: false
+        });
+
+        emit MintAdded(mint_hash, uint256(value), note_kind);
+    }
+
+    /////////////////
+    //
+    // VALIDATORS
+    //
+    ///////////
+    function verifyValidatorSignatures(
+        bytes32 newRoot,
+        uint256 height,
+        bytes32 otherHashFromBlockHash,
+        Signature[] calldata signatures
+    ) internal {
+        updateValidatorSetIndex(height);
+        ValidatorSet storage validatorSet = getValidators();
+
+        require(signatures.length > 0, "RollupV1: No signatures");
+
+        uint minValidators = (validatorSet.validatorsArray.length * 2) / 3 + 1;
+        require(
+            signatures.length >= minValidators,
+            "RollupV1: Not enough signatures from validators to verify block"
+        );
+
+        bytes32 sigHash = getSignatureMessageHash(
+            newRoot,
+            height,
+            otherHashFromBlockHash
+        );
+
+        address previous = address(0);
+        for (uint i = 0; i < signatures.length; i++) {
+            Signature calldata signature = signatures[i];
+            address signer = ECDSA.recover(
+                sigHash,
+                uint8(signature.v),
+                signature.r,
+                signature.s
+            );
+            require(
+                validatorSet.validators[signer] == true,
+                "RollupV1: Signer is not a validator"
+            );
+
+            require(signer > previous, "RollupV1: Signers are not sorted");
+            previous = signer;
+        }
+    }
+
+    function getSignatureMessageHash(
+        bytes32 newRoot,
+        uint256 height,
+        bytes32 otherHashFromBlockHash
+    ) internal pure returns (bytes32) {
+        bytes32 proposalHash = keccak256(
+            abi.encode(newRoot, height, otherHashFromBlockHash)
+        );
+        bytes32 acceptMsg = keccak256(abi.encode(height + 1, proposalHash));
+        bytes32 sigMsg = keccak256(
+            abi.encodePacked(NETWORK_LEN, NETWORK, acceptMsg)
+        );
+        return sigMsg;
     }
 
     // Returns all validator sets from a given index, inclusive
@@ -190,10 +712,10 @@ contract RollupV1 is Initializable, OwnableUpgradeable {
         uint256 from
     ) public view returns (PublicValidatorSet[] memory) {
         PublicValidatorSet[] memory sets = new PublicValidatorSet[](
-            validatorSetsLength - from
+            validatorSets.length - from
         );
 
-        for (uint256 i = from; i < validatorSetsLength; i++) {
+        for (uint256 i = from; i < validatorSets.length; i++) {
             sets[i - from] = PublicValidatorSet(
                 validatorSets[i].validatorsArray,
                 validatorSets[i].validFrom
@@ -212,26 +734,32 @@ contract RollupV1 is Initializable, OwnableUpgradeable {
         address[] calldata validators
     ) private {
         require(
-            validatorSetsLength == 0 ||
-                validatorSets[validatorSetsLength - 1].validFrom < validFrom,
-            "New validator set must have a validFrom greater than the last set"
+            validatorSets.length == 0 ||
+                validatorSets[validatorSets.length - 1].validFrom < validFrom,
+            "RollupV1: New validator set must have a validFrom greater than the last set"
+        );
+        require(
+            validFrom == 0 || validFrom <= block.number + MAX_FUTURE_BLOCKS,
+            "RollupV1: validFrom cannot be more than 30 days in the future"
         );
 
-        validatorSets[validatorSetsLength].validFrom = validFrom;
-        validatorSets[validatorSetsLength].validatorsArray = validators;
+        // Create a new ValidatorSet and push it to the array
+        validatorSets.push();
+        uint256 newIndex = validatorSets.length - 1;
+
+        validatorSets[newIndex].validFrom = validFrom;
+        validatorSets[newIndex].validatorsArray = validators;
 
         for (uint256 i = 0; i < validators.length; i++) {
             require(
-                validatorSets[validatorSetsLength].validators[validators[i]] ==
-                    false,
-                "Validator already exists"
+                validatorSets[newIndex].validators[validators[i]] == false,
+                "RollupV1: Validator already exists"
             );
 
-            validatorSets[validatorSetsLength].validators[validators[i]] = true;
+            validatorSets[newIndex].validators[validators[i]] = true;
         }
 
-        emit ValidatorSetAdded(validatorSetsLength, validFrom);
-        validatorSetsLength += 1;
+        emit ValidatorSetAdded(newIndex, validFrom);
     }
 
     function setValidators(
@@ -242,7 +770,7 @@ contract RollupV1 is Initializable, OwnableUpgradeable {
     }
 
     function updateValidatorSetIndex(uint256 height) internal {
-        for (uint256 i = validatorSetIndex + 1; i < validatorSetsLength; i++) {
+        for (uint256 i = validatorSetIndex + 1; i < validatorSets.length; i++) {
             if (validatorSets[i].validFrom > height) {
                 break;
             }
@@ -251,236 +779,36 @@ contract RollupV1 is Initializable, OwnableUpgradeable {
         }
     }
 
-    // Verify a new block
-    function verifyBlock(
-        // Transaction[] calldata txns,
-        bytes calldata aggrProof,
-        bytes32[12] calldata aggrInstances,
-        bytes32 oldRoot,
+    // Debug function to expose internal hash calculation
+    function debugGetSignatureMessageHash(
         bytes32 newRoot,
-        // 6 utxo x 3 hashes per utxo
-        bytes32[18] calldata utxoHashes,
-        bytes32 otherHashFromBlockHash,
         uint256 height,
-        // uint64 skips,
-        Signature[] calldata signatures
-    ) public virtual onlyProver {
-        updateValidatorSetIndex(height);
-        ValidatorSet storage validatorSet = getValidators();
+        bytes32 otherHashFromBlockHash
+    ) external pure returns (bytes32) {
+        return getSignatureMessageHash(newRoot, height, otherHashFromBlockHash);
+    }
 
-        require(
-            oldRoot == currentRootHash(),
-            "Old root does not match the current root"
-        );
-
-        // Check mints/burns
-        for (uint i = 0; i < 18; i += 3) {
-            bytes32 mb = utxoHashes[i + 1];
-            bytes32 value = utxoHashes[i + 2];
-
-            if (value == 0) {
-                continue;
-            }
-
-            if (mints[mb] != 0) {
-                require(mints[mb] == uint256(value), "Invalid mint amount");
-                delete mints[mb];
-                continue;
-            }
-
-            if (burns[mb].amount != 0) {
-                require(
-                    burns[mb].amount == uint256(value),
-                    "Invalid burn amount"
-                );
-
-                // Perform the transfer to the requested account
-                require(
-                    usdc.transfer(burns[mb].to, burns[mb].amount),
-                    "Transfer failed"
-                );
-
-                delete burns[mb];
-                continue;
-            }
-
-            revert("Invalid mint/burn");
-        }
-
-        // Check recent roots
-        require(
-            containsRootHashes(
-                [
-                    utxoHashes[0],
-                    utxoHashes[3],
-                    utxoHashes[6],
-                    utxoHashes[9],
-                    utxoHashes[12],
-                    utxoHashes[15]
-                ]
-            ),
-            "Invalid recent roots"
-        );
-
-        uint minValidators = (validatorSet.validatorsArray.length * 2) / 3 + 1;
-        require(
-            signatures.length >= minValidators,
-            "Not enough signatures from validators to verify block"
-        );
-
-        bytes32 proposalHash = keccak256(
+    // Debug function to expose intermediate values
+    function debugGetIntermediateHashes(
+        bytes32 newRoot,
+        uint256 height,
+        bytes32 otherHashFromBlockHash
+    )
+        external
+        pure
+        returns (bytes32 proposalHash, bytes32 acceptMsg, bytes32 sigMsg)
+    {
+        proposalHash = keccak256(
             abi.encode(newRoot, height, otherHashFromBlockHash)
         );
-        bytes32 acceptMsg = keccak256(abi.encode(height + 1, proposalHash));
-        bytes32 sigMsg = keccak256(
-            abi.encodePacked(NETWORK_LEN, NETWORK, acceptMsg)
-        );
-
-        require(signatures.length > 0, "No signatures");
-        address previous = address(0);
-        for (uint i = 0; i < signatures.length; i++) {
-            Signature calldata signature = signatures[i];
-            address signer = ecrecover(
-                sigMsg,
-                uint8(signature.v),
-                signature.r,
-                signature.s
-            );
-            require(
-                validatorSet.validators[signer] == true,
-                "Signer is not a validator"
-            );
-
-            require(signer > previous, "Signers are not sorted");
-            previous = signer;
-        }
-
-        aggregateVerifier.verify(
-            aggrProof,
-            aggrInstances,
-            oldRoot,
-            newRoot,
-            utxoHashes
-        );
-
-        addRootHash(newRoot);
-        blockHash = proposalHash;
-
-        blockHeight = height;
+        acceptMsg = keccak256(abi.encode(height + 1, proposalHash));
+        sigMsg = keccak256(abi.encodePacked(NETWORK_LEN, NETWORK, acceptMsg));
     }
 
-    // Anyone can call mint, although this is likely to be performed on behalf of the user
-    // as they may not have gas to pay for the txn
-    function mint(
-        bytes calldata proof,
-        bytes32 commitment,
-        bytes32 value,
-        bytes32 source
-    ) public virtual {
-        if (mints[commitment] != 0) {
-            revert("Mint already exists");
-        }
-
-        mintVerifier.verify(proof, [commitment, value, source]);
-
-        // Take the money from the external account, sender must have been previously
-        // approved as per the ERC20 standard
-        require(
-            usdc.transferFrom(msg.sender, address(this), uint256(value)),
-            "Transfer failed"
-        );
-
-        // Add mint to pending mints, this still needs to be verifier with the verifyBlock,
-        // but Solid validators will check that this commitment exists in the mint map before
-        // accepting the mint txn into a block
-        mints[commitment] = uint256(value);
-    }
-
-    bytes32 constant MINT_WITH_AUTHORIZATION_TYPE_HASH =
-        keccak256(
-            "MintWithAuthorization(bytes32 commitment,bytes32 value,bytes32 source,address from,uint256 validAfter,uint256 validBefore,bytes32 nonce)"
-        );
-
-    function mintWithAuthorization(
-        bytes calldata proof,
-        bytes32 commitment,
-        bytes32 value,
-        bytes32 source,
-        address from,
-        uint256 validAfter,
-        uint256 validBefore,
-        bytes32 nonce,
-        uint256 v,
-        bytes32 r,
-        bytes32 s,
-        // Second signature, not for receiveWithAuthorization,
-        // but for this mintWithAuthorization call
-        uint256 v2,
-        bytes32 r2,
-        bytes32 s2
-    ) public virtual {
-        if (mints[commitment] != 0) {
-            revert("Mint already exists");
-        }
-
-        bytes32 structHash = keccak256(
-            abi.encode(
-                MINT_WITH_AUTHORIZATION_TYPE_HASH,
-                commitment,
-                value,
-                source,
-                from,
-                validAfter,
-                validBefore,
-                nonce
-            )
-        );
-        bytes32 computedHash = keccak256(
-            abi.encodePacked("\x19\x01", _DOMAIN_SEPARATOR, structHash)
-        );
-        address signer = ecrecover(computedHash, uint8(v2), r2, s2);
-        require(signer == from, "Invalid signer");
-
-        mintVerifier.verify(proof, [commitment, value, source]);
-
-        usdc.receiveWithAuthorization(
-            from,
-            address(this),
-            uint256(value),
-            validAfter,
-            validBefore,
-            nonce,
-            uint8(v),
-            r,
-            s
-        );
-
-        mints[commitment] = uint256(value);
-    }
-
-    // Anyone can call burn, although this is likely to be performed on behalf of the user
-    // as they may not have gas to pay for the txn
-    function burn(
-        // to address is not verified, we don't care who they send it to
-        address to,
-        bytes calldata proof,
-        bytes32 nullifer,
-        bytes32 value,
-        bytes32 source,
-        bytes32 sig
-    ) public virtual {
-        burnVerifier.verify(
-            proof,
-            [bytes32(uint256(uint160(to))), nullifer, value, source, sig]
-        );
-
-        // Add burn to pending burns, this still needs to be verifier with the verifyBlock,
-        // but validators will check that this nullifier exists in the burn map before
-        // accepting the burn txn into a block
-        burns[nullifer] = Burn(to, uint256(value));
-    }
-
-    function setRoot(bytes32 newRoot) public onlyOwner {
-        addRootHash(newRoot);
+    // Debug function to see the raw packed bytes
+    function debugGetPackedBytes(
+        bytes32 acceptMsg
+    ) external pure returns (bytes memory) {
+        return abi.encodePacked(NETWORK_LEN, NETWORK, acceptMsg);
     }
 }
