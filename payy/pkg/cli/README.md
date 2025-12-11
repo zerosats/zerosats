@@ -83,7 +83,7 @@ cat alice.json
 
 ## Full Documentation
 
-See [Getting Started Guide](./GettingStarted.md) for detailed instructions.
+See [Getting Started Guide](../../GettingStarted.md) for detailed instructions.
 
 ## Network Details
 
