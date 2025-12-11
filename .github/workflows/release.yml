@@ -71,13 +71,15 @@ jobs:
           key: ${{ runner.os }}-cargo-build-target-${{ matrix.target }}-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Build
+        working-directory: ./payy
         run: cargo build --release --target ${{ matrix.target }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Rename and prepare binary (macOS/Linux)
+        working-directory: ./payy
         run: |
-          cp payy/target/${{ matrix.target }}/release/${{ matrix.artifact_name }} ${{ matrix.asset_name }}
+          cp target/${{ matrix.target }}/release/${{ matrix.artifact_name }} ${{ matrix.asset_name }}
           chmod +x ${{ matrix.asset_name }}
         shell: bash
 
@@ -99,7 +101,7 @@ jobs:
           cache-dependency-path: web/package-lock.json
 
       - name: Install npm dependencies
-        working-directory: web
+        working-directory: ./payy/web
         run: npm ci
 
       - name: Clean Electron release directory (macOS/Linux)
@@ -107,11 +109,12 @@ jobs:
         shell: bash
 
       - name: Copy CLI binary for Electron packaging (macOS/Linux)
+        working-directory: ./payy
         run: |
-          mkdir -p payy/target/release
-          rm -f payy/target/release/${{ matrix.artifact_name }}
-          cp payy/target/${{ matrix.target }}/release/${{ matrix.artifact_name }} payy/target/release/${{ matrix.artifact_name }}
-          chmod +x payy/target/release/${{ matrix.artifact_name }}
+          mkdir -p target/release
+          rm -f target/release/${{ matrix.artifact_name }}
+          cp target/${{ matrix.target }}/release/${{ matrix.artifact_name }} payy/target/release/${{ matrix.artifact_name }}
+          chmod +x target/release/${{ matrix.artifact_name }}
         shell: bash
 
       - name: Build Electron app (macOS)
