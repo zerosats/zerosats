@@ -71,3 +71,16 @@ pub fn is_one_of(value: Field, one_of: [Field]) -> bool {
     }
     is_one_of
 }
+
+pub fn check_input_note_hashlock(input_note: InputNote) {
+    if (input_note.note.kind != 0) {
+        assert(
+            pmessage4
+                == poseidon2::Poseidon2::hash(
+                    [ input_note.note.psi ],
+                    1,
+                ),
+            "InputNote hashlock must match private input"
+        );
+    }
+}
