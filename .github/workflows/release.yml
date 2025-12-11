@@ -104,13 +104,6 @@ jobs:
         working-directory: ./payy/web
         run: npm ci
 
-      - name: Copy CLI binary for Electron packaging (macOS/Linux)
-        working-directory: ./payy
-        run: |
-          cp target/${{ matrix.target }}/release/${{ matrix.artifact_name }} payy/target/release/${{ matrix.artifact_name }}
-          chmod +x target/release/${{ matrix.artifact_name }}
-        shell: bash
-
       - name: Build Electron app (macOS)
         if: runner.os == 'macOS'
         working-directory: ./payy/web
