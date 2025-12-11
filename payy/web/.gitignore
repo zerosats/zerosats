@@ -5,3 +5,6 @@ dist/
 # Test artifacts
 *.log
 
+# Backend binaries
+bb
+

@@ -1,0 +1,45 @@
+name: Push check
+
+on:
+  push:
+
+jobs:
+  test-dmg:
+    runs-on: macos-latest  # Free for public repos
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          lfs: true          # Add this line
+          fetch-depth: 0     # Optional: full history if needed
+
+      - name: Download DMG
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release download v0.0.4.1 \
+             --repo zerosats/ciphera-cli \
+             --pattern "*arm64.dmg"
+          
+          ls -la *.dmg
+          file *.dmg
+
+          tar -xvzf $GITHUB_WORKSPACE/payy/web/binaries/darwin/barretenberg-arm64-darwin.tar.gz -C $GITHUB_WORKSPACE/payy/web/binaries/darwin 
+          chmod +x $GITHUB_WORKSPACE/payy/web/binaries/darwin/bb
+
+          file $GITHUB_WORKSPACE/payy/web/binaries/darwin/bb
+          $GITHUB_WORKSPACE/payy/web/binaries/darwin/bb --version
+
+      - name: Mount and test
+        run: |
+          hdiutil attach Ciphera-0.1.0-arm64.dmg
+          
+          # Check binaries exist and are executable
+          ls -la "/Volumes/Ciphera 0.1.0-arm64/Ciphera.app/Contents/Resources/bin/"
+          file "/Volumes/Ciphera 0.1.0-arm64/Ciphera.app/Contents/Resources/bin/bb"
+          file "/Volumes/Ciphera 0.1.0-arm64/Ciphera.app/Contents/Resources/bin/ciphera-cli"
+          
+          # Test CLI
+          "/Volumes/Ciphera 0.1.0-arm64/Ciphera.app/Contents/Resources/bin/ciphera-cli" create
+          # "/Volumes/Ciphera 0.1.0-arm64/Ciphera.app/Contents/Resources/bin/bb" --version
+          
+          hdiutil detach "/Volumes/Ciphera 0.1.0-arm64"
