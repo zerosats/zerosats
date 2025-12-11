@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CIPHERA // Private Payments</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/css/terminal.css">
+</head>
+<body>
+    <!-- Scanline overlay -->
+    <div class="scanlines"></div>
+    
+    <!-- CRT screen effect container -->
+    <div class="crt">
+        <div class="terminal">
+            <!-- Header -->
+            <header class="terminal-header">
+                <div class="terminal-title">
+                    <span class="blink">▊</span> CIPHERA v0.0.1 
+                    <span class="dim">// ENCRYPTED BITCOIN</span>
+                </div>
+                <div class="header-controls">
+                    <!-- View Toggle Tabs -->
+                    <button class="header-btn active" data-view="wallet" id="walletTab">
+                        <span class="btn-icon">◈</span> WALLET
+                    </button>
+                    <button class="header-btn" data-view="explorer" id="explorerTab">
+                        <span class="btn-icon">⌕</span> EXPLORER
+                    </button>
+                    <!-- Settings Dropdown -->
+                    <div class="settings-dropdown" id="settingsDropdown">
+                        <button class="header-btn" id="settingsBtn">
+                            <span class="btn-icon">⚙</span>
+                            <span>SETTINGS</span>
+                            <span class="dropdown-arrow">▼</span>
+                        </button>
+                        <div class="dropdown-menu" id="dropdownMenu">
+                            <div class="dropdown-section">
+                                <div class="dropdown-header">CONNECTION</div>
+                                <div class="dropdown-status">
+                                    <span class="status-dot" id="connectionStatus"></span>
+                                    <span id="statusText">DISCONNECTED</span>
+                                </div>
+                            </div>
+                            <div class="dropdown-divider"></div>
+                            <button class="dropdown-item" data-action="export">
+                                <span class="item-icon">↓</span> Export Wallet
+                            </button>
+                            <button class="dropdown-item" data-action="import">
+                                <span class="item-icon">↑</span> Import Wallet
+                            </button>
+                            <div class="dropdown-divider"></div>
+                            <button class="dropdown-item" data-action="about">
+                                <span class="item-icon">ⓘ</span> About
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </header>
+
+            <!-- ASCII Art Logo -->
+            <div class="ascii-logo">
+<pre>
+ ██████╗██╗██████╗ ██╗  ██╗███████╗██████╗  █████╗ 
+██╔════╝██║██╔══██╗██║  ██║██╔════╝██╔══██╗██╔══██╗
+██║     ██║██████╔╝███████║█████╗  ██████╔╝███████║
+██║     ██║██╔═══╝ ██╔══██║██╔══╝  ██╔══██╗██╔══██║
+╚██████╗██║██║     ██║  ██║███████╗██║  ██║██║  ██║
+ ╚═════╝╚═╝╚═╝     ╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝╚═╝  ╚═╝
+<span class="dim">═══════════════════════════════════════════════════</span>
+<span class="accent">        ENCRYPTED BITCOIN PAYMENTS USING ZK</span>
+</pre>
+            </div>
+
+            <!-- WALLET VIEW -->
+            <main class="terminal-main view-content" id="walletView">
+                <!-- Wallet Info Panel -->
+                <section class="panel wallet-panel" id="walletPanel">
+                    <div class="panel-header">
+                        <span class="panel-icon">◈</span> WALLET STATUS
+                    </div>
+                    <div class="panel-content">
+                        <div class="info-row">
+                            <span class="label">IDENTITY:</span>
+                            <span class="value" id="walletName">NOT LOADED</span>
+                        </div>
+                        <div class="info-row">
+                            <span class="label">CIPHERA ADDRESS:</span>
+                            <span class="value mono" id="walletAddress">────────────────</span>
+                        </div>
+                        <div class="info-row">
+                            <span class="label">BALANCE:</span>
+                            <span class="value highlight" id="walletBalance">0.00000000 wcBTC</span>
+                        </div>
+                        <div class="balance-bar">
+                            <div class="balance-fill" id="balanceFill"></div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Node Info Panel -->
+                <section class="panel node-panel" id="nodePanel">
+                    <div class="panel-header">
+                        <span class="panel-icon">◉</span> CIPHERA NODE
+                    </div>
+                    <div class="panel-content">
+                        <div class="info-row">
+                            <span class="label">ENDPOINT:</span>
+                            <span class="value mono" id="nodeEndpoint">DISCONNECTED</span>
+                        </div>
+                        <div class="info-row">
+                            <span class="label">NETWORK:</span>
+                            <span class="value" id="networkName">CIPHERA TESTNET</span>
+                        </div>
+                        <div class="connection-status" id="nodeConnectionStatus">
+                            <span class="status-indicator" id="nodeStatusIndicator"></span>
+                            <span class="status-label" id="nodeStatusLabel">DISCONNECTED</span>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Action Buttons -->
+                <nav class="actions-bar">
+                    <button class="action-btn" data-action="create" title="Create new wallet">
+                        <span class="btn-key">[1]</span> CREATE
+                    </button>
+                    <button class="action-btn" data-action="connect" title="Connect to node">
+                        <span class="btn-key">[2]</span> CONNECT
+                    </button>
+                    <button class="action-btn" data-action="mint" title="Mint tokens">
+                        <span class="btn-key">[3]</span> MINT
+                    </button>
+                    <button class="action-btn" data-action="send" title="Send tokens">
+                        <span class="btn-key">[4]</span> SEND
+                    </button>
+                    <button class="action-btn" data-action="receive" title="Receive tokens">
+                        <span class="btn-key">[5]</span> RECEIVE
+                    </button>
+                    <button class="action-btn" data-action="burn" title="Burn to EVM">
+                        <span class="btn-key">[6]</span> BURN
+                    </button>
+                </nav>
+
+                <!-- Terminal Output -->
+                <section class="terminal-output" id="terminalOutput">
+                    <div class="output-line system">
+                        <span class="timestamp">[00:00:00]</span>
+                        <span class="message">CIPHERA TERMINAL INITIALIZED</span>
+                    </div>
+                </section>
+
+                <!-- Command Input -->
+                <div class="terminal-input-area">
+                    <span class="prompt">ciphera@wallet <span class="accent">►</span></span>
+                    <input type="text" 
+                           class="terminal-input" 
+                           id="commandInput" 
+                           placeholder="Enter command or press action key..."
+                           autocomplete="off"
+                           spellcheck="false">
+                    <span class="cursor blink">▊</span>
+                </div>
+            </main>
+
+            <!-- EXPLORER VIEW -->
+            <main class="terminal-main view-content hidden" id="explorerView">
+                <!-- Network Stats Panel (hidden for now - functionality preserved in JS)
+                <section class="panel stats-panel" id="statsPanel">
+                    <div class="panel-header">
+                        <span class="panel-icon">◉</span> NETWORK STATS
+                    </div>
+                    <div class="panel-content stats-grid">
+                        <div class="stat-item">
+                            <span class="stat-label">HEIGHT</span>
+                            <span class="stat-value" id="statHeight">────</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-label">TRANSACTIONS</span>
+                            <span class="stat-value" id="statTxCount">────</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-label">ELEMENTS</span>
+                            <span class="stat-value" id="statElements">────</span>
+                        </div>
+                    </div>
+                </section>
+                -->
+
+                <!-- Search Bar -->
+                <div class="explorer-search">
+                    <div class="search-input-area">
+                        <span class="prompt">ciphera@explorer <span class="accent">►</span></span>
+                        <input type="text" 
+                               class="terminal-input" 
+                               id="explorerInput" 
+                               placeholder="Enter tx hash, block height, or element..."
+                               autocomplete="off"
+                               spellcheck="false">
+                    </div>
+                    <div class="search-hint">
+                        <span class="dim">Search: transaction hash | block number | element hash</span>
+                    </div>
+                </div>
+
+                <!-- Search Results -->
+                <section class="panel results-panel" id="resultsPanel">
+                    <div class="panel-header">
+                        <span class="panel-icon">◈</span> 
+                        <span id="resultTitle">SEARCH RESULTS</span>
+                        <button class="copy-json-btn" id="copyJsonBtn" style="display: none;">
+                            COPY JSON
+                        </button>
+                    </div>
+                    <div class="panel-content">
+                        <div class="results-placeholder" id="resultsPlaceholder">
+                            <span class="dim">Enter a search query above to look up transactions, blocks, or elements</span>
+                        </div>
+                        <pre class="json-output" id="jsonOutput" style="display: none;"></pre>
+                    </div>
+                </section>
+            </main>
+
+            <!-- Footer -->
+            <footer class="terminal-footer">
+                <div class="footer-left">
+                    <span class="dim">ZK MAGIC</span>
+                    <span class="separator">│</span>
+                    <span class="dim">COMPLETELY ENCRYPTED</span>
+                </div>
+                <div class="footer-right">
+                    <span class="dim" id="currentTime">00:00:00</span>
+                </div>
+            </footer>
+        </div>
+    </div>
+
+    <!-- Vite Module Entry Point -->
+    <script type="module" src="/src/main.js"></script>
+</body>
+</html>
