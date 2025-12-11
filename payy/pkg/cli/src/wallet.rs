@@ -313,6 +313,12 @@ impl Wallet {
         Err(WalletError::KeyNotFound(format!("Cant import {:?}", note)))
     }
 
+    pub fn address(&mut self) -> Element {
+        let pk = self.gen_pk();
+        self.keys.push(pk.clone());
+        hash_merge([pk, Element::ZERO])
+    }
+
     pub fn get_address(&mut self, amount: u64, ticker: &str) -> CipheraAddress {
         let pk = self.gen_pk();
         let psi = self.gen_pk();

@@ -140,7 +140,7 @@ const wallet = await window.ciphera.readWallet('alice');
 const { wallets } = await window.ciphera.listWallets();
 
 // Run raw CLI command
-const result = await window.ciphera.runCommand(['--name', 'alice', 'connect']);
+const result = await window.ciphera.runCommand(['--name', 'alice', 'sync']);
 ```
 
 ## Troubleshooting

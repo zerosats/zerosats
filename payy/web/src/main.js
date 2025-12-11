@@ -396,7 +396,7 @@ class CipheraApp {
                 break;
             case '2':
             case 'connect':
-                this.handleAction('connect');
+                this.handleAction('sync');
                 break;
             case '3':
             case 'mint':
@@ -447,7 +447,8 @@ class CipheraApp {
         
         switch (action) {
             case 'create': this.startCreateWallet(); break;
-            case 'connect': this.startConnect(); break;
+            case 'connect': this.startSync(); break; // #TODO: refactor. Left for backward compatibility
+            case 'sync': this.startSync(); break;
             case 'mint': this.startMint(); break;
             case 'send': this.startSend(); break;
             case 'receive': this.startReceive(); break;
@@ -765,7 +766,8 @@ class CipheraApp {
         
         switch (command) {
             case 'create': await this.executeCreateWallet(answers); break;
-            case 'connect': await this.executeConnect(answers); break;
+            case 'connect': await this.executeSync(answers); break; // #TODO: refactor later
+            case 'sync': await this.executeSync(answers); break;
             case 'mint': await this.executeMint(answers); break;
             case 'send': await this.executeSend(answers); break;
             case 'receive': await this.executeReceive(answers); break;
@@ -811,16 +813,16 @@ class CipheraApp {
         }
     }
 
-    startConnect() {
+    startSync() {
         this.terminal.log('CONNECT TO NODE', 'info');
         this.terminal.log('Type "clear" to return home', 'dim');
-        this.startPromptSequence('connect', [
+        this.startPromptSequence('sync', [
             { key: 'host', label: 'Host:', placeholder: '63.176.138.198', default: '63.176.138.198' },
             { key: 'port', label: 'Port:', placeholder: '8091', default: '8091' }
         ]);
     }
 
-    async executeConnect(answers) {
+    async executeSync(answers) {
         if (!this.state.cliReady) {
             this.terminal.log('CLI not ready', 'error');
             return;

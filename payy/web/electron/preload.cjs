@@ -136,7 +136,7 @@ contextBridge.exposeInMainWorld('ciphera', {
             '--name', name,
             '--host', host,
             '--port', String(port),
-            'connect'
+            'sync'
         ];
         return ipcRenderer.invoke('cli:run', args);
     },

@@ -56,6 +56,10 @@ struct Cli {
 
 #[derive(Subcommand, Debug)]
 enum Commands {
+    Create {
+        #[arg(long)]
+        private_key: Option<String>,
+    },
     /// Connect to a Pay node and check its health
     Sync {},
     Address {
@@ -149,6 +153,37 @@ pub enum AppError {
     NotSupportedYet(),
     #[error("Cant convert Element")]
     ConversionError(),
+}
+
+async fn handle_create(name: &str, private_key: Option<String>) -> Result<(), AppError> {
+    let wallet_file = format!("{name}.json");
+
+    // Check if wallet already exists
+    if Path::new(&wallet_file).exists() {
+        println!("\n⚠️  Wallet '{name}' already exists!");
+        println!("   Location: {wallet_file}");
+    };
+
+    let mut wallet = Wallet::init(name)?;
+
+    println!("\n✅ Wallet created successfully!");
+    println!("\n📋 Wallet Details:");
+    println!("   Name: {}", name);
+    println!("   File: {wallet_file}");
+    println!("   Address: {}", wallet.address());
+    println!("   Private Key: {}", wallet.pk);
+    println!("   Balance: {} sats", wallet.balance);
+
+    println!("\n⚠️  IMPORTANT: Keep your private key safe!");
+    println!("   Your private key is stored in {wallet_file}");
+    println!("   Never share it with anyone.");
+
+    println!("\n🚀 Next Steps:");
+    println!("   1. Connect to network:  ciphera-cli --name {name} connect");
+    println!("   2. Mint tokens:         ciphera-cli --name {name} mint --amount <AMOUNT> --secret <YOUR_ETH_KEY> --geth-rpc <RPC_URL>");
+    println!("   3. Check balance:       cat {wallet_file}");
+
+    Ok(())
 }
 
 /// Handle the connect command
@@ -568,6 +603,9 @@ async fn main() -> Result<()> {
 
     // Execute command
     match cli.command {
+        Commands::Create { private_key } => {
+            handle_create(&cli.name, private_key).await?;
+        }
         Commands::Sync {} => {
             handle_sync(&cli.name, &cli.host, cli.port, cli.timeout).await?;
         }
