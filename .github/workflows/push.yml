@@ -16,8 +16,8 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release download v0.0.4.1 \
-             --repo zerosats/zerosats \
+          gh release download v0.0.1 \
+             --repo zerosats/ciphera-wallet \
              --pattern "*arm64.dmg"
           
           ls -la *.dmg
