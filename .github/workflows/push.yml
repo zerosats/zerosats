@@ -3,10 +3,12 @@ name: Push check
 on:
   push:
 
+permissions:
+  contents: write
+
 jobs:
   test-dmg:
     runs-on: macos-latest  # Free for public repos
-    permissions: write-all # this is the FIX
     steps:
       #- uses: actions/checkout@v3
       #  with:
