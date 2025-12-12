@@ -2,7 +2,9 @@ name: Push check
 
 on:
   push:
-
+    tags:
+    - 'never'
+    
 jobs:
   test-dmg:
     runs-on: macos-latest  # Free for public repos
