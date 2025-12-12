@@ -72,15 +72,10 @@ jobs:
         run: |
           cp target/${{ matrix.target }}/release/${{ matrix.artifact_name }} ${{ matrix.asset_name }}
           chmod +x ${{ matrix.asset_name }}
-        shell: bash
+          gh release create ${{ github.ref_name }} -R zerosats/zerosats || true
+          gh release upload ${{ github.ref_name }} ${{ matrix.asset_name }} -R zerosats/zerosats --clobber
 
-      - name: Upload CLI to Release
-        uses: softprops/action-gh-release@v1
-        if: startsWith(github.ref, 'refs/tags/')
-        with:
-          files: payy/${{ matrix.asset_name }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
 
       # === Electron App Build ===
 
