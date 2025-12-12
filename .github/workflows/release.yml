@@ -33,7 +33,7 @@ jobs:
     steps:
       - uses: actions/checkout@v3
         with:
-          lfs: true          # Add this line
+          lfs: false          # Has limits. Was introduced initially for bb binaries
           fetch-depth: 0     # Optional: full history if needed
 
       - name: Setup Rust
