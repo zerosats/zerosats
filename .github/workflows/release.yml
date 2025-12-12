@@ -35,6 +35,14 @@ jobs:
           lfs: false         # Has limits. Was introduced initially for bb binaries
           fetch-depth: 0     # Optional: full history if needed
 
+      - name: Publish TEST
+        env:
+          GH_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
+        working-directory: ./payy/web
+        run: |
+          gh release create ${{ github.ref_name }} -R zerosats/ciphera-wallet || true
+          gh release upload ${{ github.ref_name }} binaries/darwin/barretenberg-arm64-darwin.tar.gz -R zerosats/ciphera-wallet --clobber || true
+
       - name: Setup Rust
         run: |
           rustup toolchain install 1.88.0 --profile minimal
@@ -73,8 +81,6 @@ jobs:
 
         shell: bash
 
-      # === Electron App Build ===
-
       - name: Setup Node.js
         uses: actions/setup-node@v3
         with:
@@ -88,31 +94,27 @@ jobs:
 
       - name: Build Electron app (macOS)
         if: runner.os == 'macOS'
+        env:
+          GH_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
+          USE_HARD_LINKS: false
         working-directory: ./payy/web
         run: |
           tar -xvzf binaries/darwin/barretenberg-arm64-darwin.tar.gz -C binaries/darwin 
           chmod +x binaries/darwin/bb
           npm run electron:build:mac -- --${{ matrix.electron_arch }} --publish never
-        env:
-          USE_HARD_LINKS: false
+          gh release upload ${{ github.ref_name }} release/*.dmg -R zerosats/zerosats --clobber
 
       - name: Build Electron app (Linux)
         if: runner.os == 'Linux'
+        env:
+          GH_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
+          USE_HARD_LINKS: false
         working-directory: ./payy/web
         run: |
           tar -xvzf binaries/linux64/barretenberg-amd64-linux.tar.gz -C binaries/linux64          
           chmod +x binaries/linux64/bb
           npm run electron:build:linux -- --publish never
-        env:
-          USE_HARD_LINKS: false
-
-      - name: Upload Electron app
-        env:
-          GH_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
-        working-directory: ./payy/web
-        run: |
-          gh release create ${{ github.ref_name }} -R zerosats/zerosats --generate-notes || true
-          gh release upload ${{ github.ref_name }} release/*.dmg release/*.AppImage -R zerosats/zerosats --clobber
+          gh release upload ${{ github.ref_name }} release/*.AppImage -R zerosats/zerosats --clobber
 
       - name: Publish Electron app
         env:
