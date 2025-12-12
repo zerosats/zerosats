@@ -35,14 +35,6 @@ jobs:
           lfs: false         # Has limits. Was introduced initially for bb binaries
           fetch-depth: 0     # Optional: full history if needed
 
-      - name: Publish Electron app
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        working-directory: ./payy/web
-        run: |
-          gh release create v0 -R zerosats/ciphera-wallet || true
-          # gh release upload ${{ github.ref_name }} binaries/darwin/barretenberg-arm64-darwin.tar.gz -R zerosats/ciphera-wallet --clobber
-
       - name: Setup Rust
         working-directory: ./payy
         run: | 
@@ -62,10 +54,10 @@ jobs:
       - name: Build
         working-directory: ./payy
         run: cargo build --release --target ${{ matrix.target }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Rename and prepare binary (macOS/Linux)
+      - name: Upload binaries (macOS/Linux)
+        env:
+          GH_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
         working-directory: ./payy
         run: |
           cp target/${{ matrix.target }}/release/${{ matrix.artifact_name }} ${{ matrix.asset_name }}
@@ -108,32 +100,12 @@ jobs:
         env:
           USE_HARD_LINKS: false
 
-      # Source https://theawesomegarage.com/blog/automating-relases-with-github-actions
-#      - name: Generate release notes file
-#        run: |
-#          git log --pretty=format:"%s (%h)" --merges --first-parent > commits.txt
-#
-#          # Create a file for the release notes.
-#          # Title from the PR:
-#          echo "## ${{ steps.pr_meta.outputs.pr_title }}" > release-notes.md
-#
-#          # Conditionally add a "Summary" section if there's a PR body.
-#          if [[ -n "${{ steps.pr_meta.outputs.pr_body }}" ]]; then
-#            echo "" >> release-notes.md
-#            echo "### Summary" >> release-notes.md
-#            echo "${{ steps.pr_meta.outputs.pr_body }}" >> release-notes.md
-#          fi
-#
-#          echo "" >> release-notes.md
-#          echo "### Changes" >> release-notes.md
-#          awk '{print "• " $0}' commits.txt >> release-notes.md
-
-      - name: Upload Electron app to Release
+      - name: Upload Electron app
         env:
           GH_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
         working-directory: ./payy/web
         run: |
-          gh release create ${{ github.ref_name }} -R zerosats/zerosats || true
+          gh release create ${{ github.ref_name }} -R zerosats/zerosats --generate-notes || true
           gh release upload ${{ github.ref_name }} release/*.dmg release/*.AppImage -R zerosats/zerosats --clobber
 
       - name: Publish Electron app
@@ -142,4 +114,5 @@ jobs:
         working-directory: ./payy/web
         run: |
           gh release create ${{ github.ref_name }} -R zerosats/ciphera-wallet || true
-          gh release upload ${{ github.ref_name }} release/*.dmg release/*.AppImage -R zerosats/ciphera-wallet --clobber
+          # gh release upload ${{ github.ref_name }} release/*.dmg release/*.AppImage -R zerosats/ciphera-wallet --clobber
+          # gh release upload ${{ github.ref_name }} binaries/darwin/barretenberg-arm64-darwin.tar.gz -R zerosats/ciphera-wallet --clobber
