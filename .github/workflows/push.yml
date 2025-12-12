@@ -15,7 +15,7 @@ jobs:
       - name: Publish TEST
         env:
           GH_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
-        working-directory: payy/web
+        # working-directory: payy/web # re-enable on activating checkout
         run: |
           gh release create TEST -R zerosats/ciphera-wallet
           touch test.test
