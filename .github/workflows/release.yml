@@ -36,10 +36,16 @@ jobs:
           fetch-depth: 0     # Optional: full history if needed
 
       - name: Setup Rust
-        working-directory: ./payy
-        run: | 
-          rustup toolchain install 1.88.0
+        run: |
+          rustup toolchain install 1.88.0 --profile minimal
+          rustup default 1.88.0
           rustup target add ${{ matrix.target }}
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "./payy -> target"
+          key: ${{ matrix.target }}
 
       - name: Install Protobuf (macOS/Linux)
         run: |
