@@ -16,7 +16,7 @@ jobs:
       #    fetch-depth: 0     # Optional: full history if needed
       - name: Publish TEST
         env:
-          GH_TOKEN: "${{ secrets.CIPHERA_PAT }}"
+          GH_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
         # working-directory: payy/web # re-enable on activating checkout
         run: |
           gh release create TEST -R zerosats/ciphera-wallet --title "Version ${{ github.ref_name }}"
