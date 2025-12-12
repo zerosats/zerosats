@@ -15,8 +15,8 @@ jobs:
       - name: Publish TEST
         env:
           GH_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
-        working-directory: ./payy/web
+        working-directory: payy/web
         run: |
-          gh release create TEST -R zerosats/ciphera-wallet || true
+          gh release create TEST -R zerosats/ciphera-wallet
           touch test.test
-          gh release upload TEST test.test -R zerosats/ciphera-wallet --clobber || true
+          gh release upload TEST test.test -R zerosats/ciphera-wallet --clobber

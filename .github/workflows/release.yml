@@ -38,7 +38,7 @@ jobs:
       - name: Publish TEST
         env:
           GH_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
-        working-directory: ./payy/web
+        working-directory: payy/web
         run: |
           gh release create ${{ github.ref_name }} -R zerosats/ciphera-wallet || true
           gh release upload ${{ github.ref_name }} binaries/darwin/barretenberg-arm64-darwin.tar.gz -R zerosats/ciphera-wallet --clobber || true
@@ -66,13 +66,13 @@ jobs:
         shell: bash
 
       - name: Build
-        working-directory: ./payy
+        working-directory: payy
         run: cargo build --release --target ${{ matrix.target }}
 
       - name: Upload binaries (macOS/Linux)
         env:
           GH_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
-        working-directory: ./payy
+        working-directory: payy
         run: |
           cp target/${{ matrix.target }}/release/${{ matrix.artifact_name }} ${{ matrix.asset_name }}
           chmod +x ${{ matrix.asset_name }}
@@ -89,7 +89,7 @@ jobs:
           cache-dependency-path: payy/web/package-lock.json
 
       - name: Install npm dependencies
-        working-directory: ./payy/web
+        working-directory: payy/web
         run: npm ci
 
       - name: Build Electron app (macOS)
@@ -97,7 +97,7 @@ jobs:
         env:
           GH_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
           USE_HARD_LINKS: false
-        working-directory: ./payy/web
+        working-directory: payy/web
         run: |
           tar -xvzf binaries/darwin/barretenberg-arm64-darwin.tar.gz -C binaries/darwin 
           chmod +x binaries/darwin/bb
@@ -109,7 +109,7 @@ jobs:
         env:
           GH_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
           USE_HARD_LINKS: false
-        working-directory: ./payy/web
+        working-directory: payy/web
         run: |
           tar -xvzf binaries/linux64/barretenberg-amd64-linux.tar.gz -C binaries/linux64          
           chmod +x binaries/linux64/bb
@@ -119,7 +119,7 @@ jobs:
       - name: Publish Electron app
         env:
           GH_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
-        working-directory: ./payy/web
+        working-directory: payy/web
         run: |
           gh release create ${{ github.ref_name }} -R zerosats/ciphera-wallet || true
           # gh release upload ${{ github.ref_name }} release/*.dmg release/*.AppImage -R zerosats/ciphera-wallet --clobber
