@@ -6,7 +6,7 @@ on:
 jobs:
   test-dmg:
     runs-on: macos-latest  # Free for public repos
-    permissions: write-all
+    permissions: write-all # this is the FIX
     steps:
       #- uses: actions/checkout@v3
       #  with:
@@ -17,6 +17,6 @@ jobs:
           GH_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
         # working-directory: payy/web # re-enable on activating checkout
         run: |
-          gh release create TEST -R zerosats/ciphera-wallet
+          gh release create TEST -R zerosats/ciphera-wallet --title "Version ${{ github.ref_name }}"
           touch test.test
           gh release upload TEST test.test -R zerosats/ciphera-wallet --clobber
