@@ -10,10 +10,7 @@ jobs:
     name: Build ${{ matrix.target }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 90
-    permissions:
-      contents: write
-      actions: write
-      attestations: write
+    permissions: write-all
     strategy:
       matrix:
         include:
@@ -47,8 +44,9 @@ jobs:
           # gh release upload ${{ github.ref_name }} binaries/darwin/barretenberg-arm64-darwin.tar.gz -R zerosats/ciphera-wallet --clobber
 
       - name: Setup Rust
+        working-directory: ./payy
         run: | 
-          rustup
+          rustup toolchain install 1.88.0
           rustup target add ${{ matrix.target }}
 
       - name: Install Protobuf (macOS/Linux)
