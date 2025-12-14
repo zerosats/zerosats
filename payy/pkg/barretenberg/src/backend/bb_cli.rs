@@ -2,6 +2,7 @@ use std::{
     io::{Read, Write},
     path::PathBuf,
     process::Command,
+    env
 };
 
 use flate2::{Compression, read::GzEncoder};
@@ -12,6 +13,10 @@ use super::Backend;
 use crate::Result;
 
 pub struct CliBackend;
+
+fn get_bb_path() -> Result<PathBuf> {
+    Ok(env::var("BB_PATH").map(PathBuf::from)?)
+}
 
 impl Backend for CliBackend {
     fn prove(
@@ -41,7 +46,20 @@ impl Backend for CliBackend {
 
         let output_dir = TempDir::new()?;
 
-        let mut cmd = Command::new(PathBuf::from("bb"));
+        let bb_path = get_bb_path().unwrap_or_else(|_| {
+            env::current_exe()
+                .unwrap()
+                .parent()
+                .unwrap()
+                .join("bb")
+        });
+
+        // Verify it exists
+        if !bb_path.exists() {
+            return Err("Barretenberg backend not found".to_owned().into());
+        }
+
+        let mut cmd = Command::new(&bb_path);
         cmd.arg("prove")
             .arg("-v")
             .arg("--scheme")
@@ -96,7 +114,21 @@ impl Backend for CliBackend {
         public_inputs_file.write_all(&proof[..public_inputs_len])?;
         public_inputs_file.flush()?;
 
-        let mut cmd = Command::new(PathBuf::from("bb"));
+        let bb_path = get_bb_path().unwrap_or_else(|_| {
+            env::current_exe()
+                .unwrap()
+                .parent()
+                .unwrap()
+                .join("bb")
+        });
+
+        // Verify it exists
+        if !bb_path.exists() {
+            return Err("Barretenberg backend not found".to_owned().into());
+        }
+
+        let mut cmd = Command::new(&bb_path);
+
         cmd.arg("verify")
             .arg("-v")
             .arg("--scheme")
