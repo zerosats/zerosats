@@ -66,6 +66,8 @@ jobs:
 
       - name: Build
         working-directory: payy
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: cargo build --release --target ${{ matrix.target }}
 
       - name: Upload binaries (macOS/Linux)
