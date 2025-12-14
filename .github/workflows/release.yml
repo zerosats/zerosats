@@ -52,6 +52,7 @@ jobs:
         with:
           workspaces: "./payy -> target"
           key: ${{ matrix.target }}
+          cache-on-failure: true
 
       - name: Install Protobuf (macOS/Linux)
         run: |
