@@ -577,7 +577,7 @@ async fn handle_rollup(geth_rpc: &str, secret: &str, chain: u64, rollup: &str) -
 
 /// Initialize logging based on verbosity level
 fn init_logging(verbose: bool) {
-    let log_level = if verbose { "debug" } else { "info" };
+    let log_level = if verbose { "debug" } else { "error" };
 
     tracing_subscriber::fmt().with_env_filter(log_level).init();
 }

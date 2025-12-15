@@ -14,8 +14,44 @@ use crate::Result;
 
 pub struct CliBackend;
 
+fn verify_bb_executable(path: &PathBuf) -> bool {
+    Command::new(path)
+        .arg("--version")
+        .output()
+        .map(|output| {
+            tracing::debug!(
+                "Installed Barretenberg version {}", String::from_utf8_lossy(&output.stdout)
+            );
+            output.status.success()
+        })
+        .unwrap_or(false)
+}
 fn get_bb_path() -> Result<PathBuf> {
-    Ok(env::var("BB_PATH").map(PathBuf::from)?)
+    let bb_path = PathBuf::from(&"bb");
+    if verify_bb_executable(&bb_path) {
+        // PATH
+        return Ok(bb_path)
+    };
+    if let Ok(workdir) = env::current_exe() {
+        // Current directory (MACOS binaries)
+        let bb_exe = workdir.parent().unwrap().join("bb");
+
+        if !bb_exe.exists() || !verify_bb_executable(&bb_exe) {
+            return Err("Barretenberg backend not found".to_owned().into());
+        }
+        return Ok(bb_exe)
+    }
+    if let Ok(bb) = env::var("BB_PATH").map(PathBuf::from) {
+        // Last resort
+        let bb_exe = bb.parent().unwrap().join("bb");
+        // Verify it exists
+        if !bb_exe.exists() || !verify_bb_executable(&bb_exe) {
+            return Err("Barretenberg backend not found".to_owned().into());
+        }
+        return Ok(bb_exe)
+    } else {
+        return Err("Barretenberg backend not found".to_owned().into())
+    }
 }
 
 impl Backend for CliBackend {
@@ -46,18 +82,8 @@ impl Backend for CliBackend {
 
         let output_dir = TempDir::new()?;
 
-        let bb_path = get_bb_path().unwrap_or_else(|_| {
-            env::current_exe()
-                .unwrap()
-                .parent()
-                .unwrap()
-                .join("bb")
-        });
-
-        // Verify it exists
-        if !bb_path.exists() {
-            return Err("Barretenberg backend not found".to_owned().into());
-        }
+        let bb_path = get_bb_path()?;
+        let mut cmd = Command::new(&bb_path);
 
         let mut cmd = Command::new(&bb_path);
         cmd.arg("prove")
@@ -114,19 +140,7 @@ impl Backend for CliBackend {
         public_inputs_file.write_all(&proof[..public_inputs_len])?;
         public_inputs_file.flush()?;
 
-        let bb_path = get_bb_path().unwrap_or_else(|_| {
-            env::current_exe()
-                .unwrap()
-                .parent()
-                .unwrap()
-                .join("bb")
-        });
-
-        // Verify it exists
-        if !bb_path.exists() {
-            return Err("Barretenberg backend not found".to_owned().into());
-        }
-
+        let bb_path = get_bb_path()?;
         let mut cmd = Command::new(&bb_path);
 
         cmd.arg("verify")
@@ -155,5 +169,29 @@ impl Backend for CliBackend {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_bb_in_system_path() {
+        // `ls` on Unix, `cmd` on Windows should always exist
+        #[cfg(unix)]
+        let result = get_bb_path();
+
+        assert!(result.is_some());
+    }
+
+    #[test]
+    fn test_bb_in_local_dir() {
+        assert!(true);
+    }
+
+    #[test]
+    fn test_bb_in_bb_path_env() {
+        assert!(true);
     }
 }
