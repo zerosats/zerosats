@@ -27,9 +27,11 @@ base64 = { workspace = true }
 flate2 = { workspace = true }
 bb_rs = { workspace = true, optional = true }
 tracing = { workspace = true }
+dirs = { workspace = true}
 
 [dev-dependencies]
 smirk = { workspace = true }
+temp-env = "0.3.6"
 
 [[bin]]
 name = "vk_hash"

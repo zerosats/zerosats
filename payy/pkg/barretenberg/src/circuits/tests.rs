@@ -54,7 +54,7 @@ pub fn verify_proof(proof: &impl Verify) {
     let start = std::time::Instant::now();
     let result = proof.verify();
     let duration = start.elapsed();
-
+    // TODO: Dec 2025, three tests are failing if bb is not searched in PATH via "which", see bb_cli
     assert!(
         result.is_ok(),
         "Proof verification failed: {:?}",
