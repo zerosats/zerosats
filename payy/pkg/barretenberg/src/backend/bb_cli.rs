@@ -53,12 +53,13 @@ fn get_bb_path() -> Result<PathBuf> {
     // eventually searching in PATH
     let which_result = Command::new("which")
         .arg("bb")
-        .output();
+        .output()?;
 
-    if let Ok(output) = which_result.status.success() {
-        let bb_exe = String::from_utf8_lossy(&output.stdout).into_owned().replace('\n', "");
+    if which_result.status.success() {
+        let bb_path = String::from_utf8_lossy(&which_result.stdout).into_owned().replace('\n', "");
+        let bb_exe = PathBuf::from(&bb_path);
         if bb_exe.exists() && verify_bb_executable(&bb_exe) {
-            Ok(PathBuf::from(&bb_exe));
+            return Ok(PathBuf::from(&bb_exe));
         }
     }
 
@@ -150,6 +151,7 @@ impl Backend for CliBackend {
         public_inputs_file.flush()?;
 
         let bb_path = get_bb_path()?;
+
         let mut cmd = Command::new(&bb_path);
         cmd.arg("verify")
             .arg("-v")
