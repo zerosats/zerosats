@@ -97,6 +97,7 @@ jobs:
         run: npm ci
 
       - name: Set version
+        working-directory: payy/web
         run: npm version ${{ github.ref_name }} --no-git-tag-version
 
       - name: Build Electron app (macOS)
