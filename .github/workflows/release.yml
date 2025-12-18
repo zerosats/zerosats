@@ -171,4 +171,4 @@ jobs:
           /Volumes/Ciphera/Ciphera.app/Contents/Resources/bin/bb --version
           /Volumes/Ciphera/Ciphera.app/Contents/Resources/bin/ciphera-cli create
           
-          hdiutil detach "/Volumes/Ciphera-arm64"
+          hdiutil detach /Volumes/Ciphera
