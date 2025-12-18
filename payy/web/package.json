@@ -87,7 +87,8 @@
       "allowToChangeInstallationDirectory": true
     },
     "dmg": {
-      "volumeName": "Ciphera",
+      "title": "Ciphera",
+      "artifactName": "Ciphera",
       "contents": [
         {
           "x": 130,
