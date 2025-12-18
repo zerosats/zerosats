@@ -147,7 +147,8 @@ jobs:
 
       - name: Mount and test
         run: |
-          hdiutil attach Ciphera-0.1.0-arm64.dmg
+          # Refer to package.lock artifactName field
+          hdiutil attach Ciphera-arm64.dmg
           
           # Check binaries exist and are executable
           ls -la "/Volumes/Ciphera 0.1.0-arm64/Ciphera.app/Contents/Resources/bin/"

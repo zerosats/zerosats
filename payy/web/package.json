@@ -1,6 +1,6 @@
 {
   "name": "ciphera-wallet",
-  "version": "0.1.0",
+  "version": "0.0.x",
   "description": "Ciphera Wallet - Zero-Knowledge Bitcoin Payments",
   "author": "Zerosats Team",
   "license": "MIT",
@@ -55,6 +55,7 @@
       "hardenedRuntime": true,
       "gatekeeperAssess": false,
       "target": "dmg",
+      "artifactName": "Ciphera-arm64.dmg",
       "extraResources": [
         {
           "from": "../target/release/ciphera-cli",
@@ -69,6 +70,7 @@
     "linux": {
       "category": "Finance",
       "target": "AppImage",
+      "artifactName": "Ciphera-x64.AppImage",
       "extraResources": [
         {
           "from": "../target/release/ciphera-cli",
