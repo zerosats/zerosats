@@ -9,7 +9,7 @@ on:
       tag:
         description: 'Tag to build'
         required: true
-        default: 'v0.0.2'
+        default: 'v0.0.4'
 
 jobs:
   build:
@@ -96,6 +96,17 @@ jobs:
         working-directory: payy/web
         run: npm ci
 
+      - name: Set version
+        working-directory: payy/web
+        run: |
+          if [[ "${{ github.ref_type }}" == "tag" ]]; then
+            npm version ${{ github.ref_name }} --no-git-tag-version
+          elif [[ "${{ github.event.inputs.tag }}" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            npm version "${{ github.event.inputs.tag }}-${{ github.sha }}" --no-git-tag-version
+          else
+            npm version "0.0.0-${{ github.sha }}" --no-git-tag-version
+          fi
+
       - name: Build Electron app (macOS)
         if: runner.os == 'macOS'
         env:
@@ -147,15 +158,17 @@ jobs:
 
       - name: Mount and test
         run: |
-          hdiutil attach Ciphera-0.1.0-arm64.dmg
+          # Refer to package.lock artifactName field
+          hdiutil attach Ciphera-arm64.dmg
           
           # Check binaries exist and are executable
-          ls -la "/Volumes/Ciphera 0.1.0-arm64/Ciphera.app/Contents/Resources/bin/"
-          file "/Volumes/Ciphera 0.1.0-arm64/Ciphera.app/Contents/Resources/bin/bb"
-          file "/Volumes/Ciphera 0.1.0-arm64/Ciphera.app/Contents/Resources/bin/ciphera-cli"
+          ls -la /Volumes/Ciphera/Ciphera.app/Contents/Resources/bin/
+          file /Volumes/Ciphera/Ciphera.app/Contents/Resources/bin/bb
+          file /Volumes/Ciphera/Ciphera.app/Contents/Resources/bin/ciphera-cli
           
           # Test CLI
-          "/Volumes/Ciphera 0.1.0-arm64/Ciphera.app/Contents/Resources/bin/ciphera-cli" create
-          # "/Volumes/Ciphera 0.1.0-arm64/Ciphera.app/Contents/Resources/bin/bb" --version
           
-          hdiutil detach "/Volumes/Ciphera 0.1.0-arm64"
+          /Volumes/Ciphera/Ciphera.app/Contents/Resources/bin/bb --version
+          /Volumes/Ciphera/Ciphera.app/Contents/Resources/bin/ciphera-cli create
+          
+          hdiutil detach /Volumes/Ciphera
