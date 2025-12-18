@@ -55,7 +55,6 @@
       "hardenedRuntime": true,
       "gatekeeperAssess": false,
       "target": "dmg",
-      "volumeName": "Ciphera",
       "artifactName": "Ciphera-arm64.dmg",
       "extraResources": [
         {
@@ -88,6 +87,7 @@
       "allowToChangeInstallationDirectory": true
     },
     "dmg": {
+      "volumeName": "Ciphera",
       "contents": [
         {
           "x": 130,
