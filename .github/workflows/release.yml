@@ -161,13 +161,21 @@ jobs:
           # Refer to package.lock artifactName field
           hdiutil attach Ciphera-arm64.dmg
           
+          if [[ "${{ github.ref_type }}" == "tag" ]]; then
+            VERSION="${{ github.ref_name }}"
+          elif [[ "${{ github.event.inputs.tag }}" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            VERSION="${{ github.event.inputs.tag }}-${{ github.sha }}"
+          else
+            VERSION="0.0.0-${{ github.sha }}"
+          fi
+          
           # Check binaries exist and are executable
-          ls -la "/Volumes/Ciphera ${{ github.ref_name }}-arm64/Ciphera.app/Contents/Resources/bin/"
-          file "/Volumes/Ciphera ${{ github.ref_name }}-arm64/Ciphera.app/Contents/Resources/bin/bb"
-          file "/Volumes/Ciphera ${{ github.ref_name }}-arm64/Ciphera.app/Contents/Resources/bin/ciphera-cli"
+          ls -la "/Volumes/Ciphera ${VERSION#v}"-arm64/Ciphera.app/Contents/Resources/bin/"
+          file "/Volumes/Ciphera ${VERSION#v}"-arm64/Ciphera.app/Contents/Resources/bin/bb"
+          file "/Volumes/Ciphera ${VERSION#v}"-arm64/Ciphera.app/Contents/Resources/bin/ciphera-cli"
           
           # Test CLI
-          "/Volumes/Ciphera ${{ github.ref_name }}-arm64/Ciphera.app/Contents/Resources/bin/ciphera-cli" create
-          # "/Volumes/Ciphera ${{ github.ref_name }}-arm64/Ciphera.app/Contents/Resources/bin/bb" --version
+          "/Volumes/Ciphera ${VERSION#v}"-arm64/Ciphera.app/Contents/Resources/bin/ciphera-cli" create
+          # "/Volumes/Ciphera ${VERSION#v}"-arm64/Ciphera.app/Contents/Resources/bin/bb" --version
           
           hdiutil detach "/Volumes/Ciphera-arm64"
