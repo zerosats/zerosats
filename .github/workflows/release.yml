@@ -151,12 +151,12 @@ jobs:
           hdiutil attach Ciphera-arm64.dmg
           
           # Check binaries exist and are executable
-          ls -la "/Volumes/Ciphera 0.1.0-arm64/Ciphera.app/Contents/Resources/bin/"
-          file "/Volumes/Ciphera 0.1.0-arm64/Ciphera.app/Contents/Resources/bin/bb"
-          file "/Volumes/Ciphera 0.1.0-arm64/Ciphera.app/Contents/Resources/bin/ciphera-cli"
+          ls -la "/Volumes/Ciphera-arm64/Ciphera.app/Contents/Resources/bin/"
+          file "/Volumes/Ciphera-arm64/Ciphera.app/Contents/Resources/bin/bb"
+          file "/Volumes/Ciphera-arm64/Ciphera.app/Contents/Resources/bin/ciphera-cli"
           
           # Test CLI
-          "/Volumes/Ciphera 0.1.0-arm64/Ciphera.app/Contents/Resources/bin/ciphera-cli" create
-          # "/Volumes/Ciphera 0.1.0-arm64/Ciphera.app/Contents/Resources/bin/bb" --version
+          "/Volumes/Ciphera-arm64/Ciphera.app/Contents/Resources/bin/ciphera-cli" create
+          # "/Volumes/Ciphera-arm64/Ciphera.app/Contents/Resources/bin/bb" --version
           
-          hdiutil detach "/Volumes/Ciphera 0.1.0-arm64"
+          hdiutil detach "/Volumes/Ciphera-arm64"
