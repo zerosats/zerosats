@@ -9,7 +9,7 @@ on:
       tag:
         description: 'Tag to build'
         required: true
-        default: 'v0.0.2'
+        default: 'v0.0.4'
 
 jobs:
   build:
@@ -98,7 +98,14 @@ jobs:
 
       - name: Set version
         working-directory: payy/web
-        run: npm version ${{ github.ref_name }} --no-git-tag-version
+        run: |
+          if [[ "${{ github.ref_type }}" == "tag" ]]; then
+            npm version ${{ github.ref_name }} --no-git-tag-version
+          elif [[ "${{ github.event.inputs.tag }}" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            npm version "${{ github.event.inputs.tag }}-${{ github.sha }}" --no-git-tag-version
+          else
+            npm version "0.0.0-${{ github.sha }}" --no-git-tag-version
+          fi
 
       - name: Build Electron app (macOS)
         if: runner.os == 'macOS'
