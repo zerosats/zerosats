@@ -1,6 +1,6 @@
 {
   "name": "ciphera-wallet",
-  "version": "0.0.1",
+  "version": "0.0.4",
   "description": "Ciphera Wallet - Zero-Knowledge Bitcoin Payments",
   "author": "Zerosats Team",
   "license": "MIT",
