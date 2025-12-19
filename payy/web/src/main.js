@@ -1,14 +1,14 @@
 /**
  * CIPHERA WALLET - Electron UI
- * 
+ *
  * This is the main entry point for the Ciphera wallet UI.
  * It communicates with the CLI binary through Electron's IPC bridge.
- * 
+ *
  * The window.ciphera API is exposed by electron/preload.js
  */
 
-import { Terminal } from './terminal.js';
-import { ethers } from 'ethers';
+import {Terminal} from './terminal.js';
+import {ethers} from 'ethers';
 
 // Contract addresses for Citrea testnet
 const CONTRACTS = {
@@ -40,7 +40,7 @@ class CipheraApp {
 
         // Initialize terminal
         this.terminal = new Terminal(document.getElementById('terminalOutput'));
-        
+
         // App state
         this.state = {
             walletName: null,
@@ -51,7 +51,7 @@ class CipheraApp {
             pendingNote: null, // Stores note waiting to be saved
             nodeEndpoint: null, // Stores connected node endpoint for explorer
         };
-        
+
         // Prompt system state
         this.promptState = {
             active: false,
@@ -61,13 +61,13 @@ class CipheraApp {
             answers: {},
             isPassword: false,
         };
-        
+
         // Current view
         this.currentView = 'wallet';
-        
+
         // Explorer auto-refresh interval
         this.explorerPollInterval = null;
-        
+
         // Get DOM elements
         this.elements = {
             walletName: document.getElementById('walletName'),
@@ -96,7 +96,7 @@ class CipheraApp {
             jsonOutput: document.getElementById('jsonOutput'),
             copyJsonBtn: document.getElementById('copyJsonBtn'),
         };
-        
+
         this.bindEvents();
         this.init();
     }
@@ -108,7 +108,7 @@ class CipheraApp {
             this.terminal.log('  Run with: npm run electron:dev', 'dim');
             return;
         }
-        
+
         // Check CLI binary
         try {
             const cliCheck = await window.ciphera.checkCli();
@@ -123,14 +123,15 @@ class CipheraApp {
             this.terminal.log(`✗ CLI check failed: ${e.message}`, 'error');
             return;
         }
-        
+
         // CLI output is suppressed for clean UX - we show our own status messages
         // Errors are logged to console for debugging
-        window.ciphera.onStdout(() => {});
+        window.ciphera.onStdout(() => {
+        });
         window.ciphera.onStderr((data) => {
             console.warn('CLI stderr:', data);
         });
-        
+
         // Check for existing wallets
         let hasWallet = false;
         try {
@@ -142,14 +143,14 @@ class CipheraApp {
         } catch (e) {
             console.error('Failed to check wallets:', e);
         }
-        
+
         // Show appropriate welcome message
         if (hasWallet) {
             this.showReturningUserMessage();
         } else {
             this.showWelcomeMessage();
         }
-        
+
         this.updateTime();
         setInterval(() => this.updateTime(), 1000);
     }
@@ -203,7 +204,7 @@ class CipheraApp {
                     e.preventDefault();
                     const input = this.elements.commandInput.value.trim();
                     this.elements.commandInput.value = '';
-                    
+
                     if (this.promptState.active) {
                         this.handlePromptAnswer(input);
                     } else {
@@ -279,14 +280,14 @@ class CipheraApp {
     }
 
     // === Wallet Management ===
-    
+
     async loadSavedWallet() {
         try {
             const result = await window.ciphera.listWallets();
             if (result.wallets && result.wallets.length > 0) {
                 const name = result.wallets[0];
                 const walletData = await window.ciphera.readWallet(name);
-                
+
                 if (walletData.exists && walletData.wallet) {
                     this.state.walletName = walletData.wallet.name || name;
                     this.state.walletAddress = walletData.wallet.pk || '---';
@@ -305,7 +306,7 @@ class CipheraApp {
         }
         if (this.elements.walletAddress) {
             const addr = this.state.walletAddress;
-            this.elements.walletAddress.textContent = addr && addr !== '---' 
+            this.elements.walletAddress.textContent = addr && addr !== '---'
                 ? this.truncateAddress(addr)
                 : '---';
         }
@@ -333,7 +334,7 @@ class CipheraApp {
                 this.explorerPollInterval = null;
             }
         }
-        
+
         if (this.elements.nodeStatusIndicator) {
             this.elements.nodeStatusIndicator.className = 'status-indicator ' + (connected ? 'connected' : '');
         }
@@ -376,19 +377,19 @@ class CipheraApp {
         const timeEl = document.getElementById('currentTime');
         if (timeEl) {
             const now = new Date();
-            timeEl.textContent = now.toLocaleTimeString('en-US', { hour12: false });
+            timeEl.textContent = now.toLocaleTimeString('en-US', {hour12: false});
         }
     }
 
     // === Command Handling ===
-    
+
     handleCommand(input) {
         if (!input) return;
-        
+
         this.terminal.log(`> ${input}`, 'command');
-        
+
         const [cmd, ...args] = input.toLowerCase().split(' ');
-        
+
         switch (cmd) {
             case 'help':
                 this.showHelp();
@@ -447,15 +448,29 @@ class CipheraApp {
     handleAction(action) {
         // Clear terminal for fresh start on each action
         this.terminal.clear();
-        
+
         switch (action) {
-            case 'create': this.startCreateWallet(); break;
-            case 'connect': this.startSync(); break; // #TODO: refactor. Left for backward compatibility
-            case 'sync': this.startSync(); break;
-            case 'mint': this.startMint(); break;
-            case 'send': this.startSend(); break;
-            case 'receive': this.startReceive(); break;
-            case 'burn': this.startBurn(); break;
+            case 'create':
+                this.startCreateWallet();
+                break;
+            case 'connect':
+                this.startSync();
+                break; // #TODO: refactor. Left for backward compatibility
+            case 'sync':
+                this.startSync();
+                break;
+            case 'mint':
+                this.startMint();
+                break;
+            case 'send':
+                this.startSend();
+                break;
+            case 'receive':
+                this.startReceive();
+                break;
+            case 'burn':
+                this.startBurn();
+                break;
         }
     }
 
@@ -509,7 +524,7 @@ class CipheraApp {
 
         try {
             const response = await fetch(`http://${this.state.nodeEndpoint}/v0/transactions/${hash}`);
-            
+
             if (!response.ok) {
                 if (response.status === 404) {
                     this.completeStatus(false, 'Transaction not found');
@@ -521,7 +536,7 @@ class CipheraApp {
 
             const tx = await response.json();
             this.terminal.clearUpdatable();
-            
+
             this.terminal.log('TRANSACTION', 'success');
             this.terminal.separator('─');
             this.terminal.log(`Hash: ${tx.hash || hash}`, 'default');
@@ -558,7 +573,7 @@ class CipheraApp {
 
         try {
             const response = await fetch(`http://${this.state.nodeEndpoint}/v0/blocks/${blockNum}`);
-            
+
             if (!response.ok) {
                 if (response.status === 404) {
                     this.completeStatus(false, 'Block not found');
@@ -570,7 +585,7 @@ class CipheraApp {
 
             const block = await response.json();
             this.terminal.clearUpdatable();
-            
+
             this.terminal.log(`BLOCK #${blockNum}`, 'success');
             this.terminal.separator('─');
             if (block.hash) {
@@ -604,7 +619,14 @@ class CipheraApp {
         this.terminal.clear();
         // Cancel any active prompt
         if (this.promptState.active) {
-            this.promptState = { active: false, command: null, prompts: [], currentIndex: 0, answers: {}, isPassword: false };
+            this.promptState = {
+                active: false,
+                command: null,
+                prompts: [],
+                currentIndex: 0,
+                answers: {},
+                isPassword: false
+            };
         }
         // Clear pending note
         this.state.pendingNote = null;
@@ -620,23 +642,23 @@ class CipheraApp {
         try {
             this.terminal.log('Opening file browser...', 'dim');
             const result = await window.ciphera.openFileDialog();
-            
+
             if (result.canceled) {
                 this.terminal.log('File selection cancelled', 'dim');
                 this.showNextPrompt(); // Show the prompt again
                 return;
             }
-            
+
             // Use the selected file path
             const filePath = result.filePath;
             this.terminal.log('Note selected', 'success');
-            
+
             // Store the answer and continue
             const prompt = this.promptState.prompts[this.promptState.currentIndex];
             this.promptState.answers[prompt.key] = filePath;
             this.promptState.currentIndex++;
             this.showNextPrompt();
-            
+
         } catch (e) {
             this.terminal.log(`Browse failed: ${e.message}`, 'error');
             this.showNextPrompt();
@@ -648,15 +670,15 @@ class CipheraApp {
             this.terminal.log('No note to save. Create a note first with "send"', 'warning');
             return;
         }
-        
+
         try {
             this.updateStatus('⏳ Saving note to Downloads...');
-            
+
             const result = await window.ciphera.saveNoteToDownloads(
                 this.state.walletName,
                 this.state.pendingNote.content
             );
-            
+
             if (result.success) {
                 this.completeStatus(true, `NOTE SAVED TO DOWNLOADS: ${result.filename}`);
                 this.terminal.log('Send this file via Signal to recipient', 'info');
@@ -666,13 +688,12 @@ class CipheraApp {
                 this.completeStatus(false, `SAVE FAILED: ${result.error}`);
             }
         } catch (e) {
-            const errorMsg = this.parseCliError(e);
-            this.completeStatus(false, `SAVE FAILED: ${errorMsg}`);
+            this.completeStatus(false, `SAVE FAILED: ${e}`);
         }
     }
 
     // === Prompt System ===
-    
+
     startPromptSequence(command, prompts) {
         this.promptState = {
             active: true,
@@ -690,12 +711,12 @@ class CipheraApp {
             this.executePromptCommand();
             return;
         }
-        
+
         const prompt = this.promptState.prompts[this.promptState.currentIndex];
         this.promptState.isPassword = prompt.type === 'password';
-        
+
         this.terminal.log(`${prompt.label}`, 'prompt');
-        
+
         if (this.elements.commandInput) {
             this.elements.commandInput.type = this.promptState.isPassword ? 'password' : 'text';
             this.elements.commandInput.placeholder = prompt.placeholder || '';
@@ -709,37 +730,37 @@ class CipheraApp {
             this.goHome();
             return;
         }
-        
+
         // Check if user wants to save a pending note
         if (input.toLowerCase() === 'save') {
             this.saveNoteToDownloads();
             return;
         }
-        
+
         // Check if user wants to browse for a file
         if (input.toLowerCase() === 'browse') {
             this.browseForFile();
             return;
         }
-        
+
         const prompt = this.promptState.prompts[this.promptState.currentIndex];
-        
+
         if (prompt.required && !input && !prompt.default) {
             this.terminal.log('This field is required.', 'error');
             return;
         }
-        
+
         // Mask password in terminal
         const displayValue = this.promptState.isPassword ? '********' : input;
         this.terminal.log(`  → ${displayValue || prompt.default || '(default)'}`, 'dim');
-        
+
         this.promptState.answers[prompt.key] = input || prompt.default;
         this.promptState.currentIndex++;
-        
+
         if (this.elements.commandInput) {
             this.elements.commandInput.type = 'text';
         }
-        
+
         this.showNextPrompt();
     }
 
@@ -764,27 +785,41 @@ class CipheraApp {
     }
 
     async executePromptCommand() {
-        const { command, answers } = this.promptState;
+        const {command, answers} = this.promptState;
         this.resetPromptState();
-        
+
         switch (command) {
-            case 'create': await this.executeCreateWallet(answers); break;
-            case 'connect': await this.executeSync(answers); break; // #TODO: refactor later
-            case 'sync': await this.executeSync(answers); break;
-            case 'mint': await this.executeMint(answers); break;
-            case 'send': await this.executeSend(answers); break;
-            case 'receive': await this.executeReceive(answers); break;
-            case 'burn': await this.executeBurn(answers); break;
+            case 'create':
+                await this.executeCreateWallet(answers);
+                break;
+            case 'connect':
+                await this.executeSync(answers);
+                break; // #TODO: refactor later
+            case 'sync':
+                await this.executeSync(answers);
+                break;
+            case 'mint':
+                await this.executeMint(answers);
+                break;
+            case 'send':
+                await this.executeSend(answers);
+                break;
+            case 'receive':
+                await this.executeReceive(answers);
+                break;
+            case 'burn':
+                await this.executeBurn(answers);
+                break;
         }
     }
 
     // === Command Implementations (using CLI) ===
-    
+
     startCreateWallet() {
         this.terminal.log('CREATE WALLET', 'info');
         this.terminal.log('Type "clear" to return home', 'dim');
         this.startPromptSequence('create', [
-            { key: 'name', label: 'Wallet name:', placeholder: 'e.g., alice', required: true }
+            {key: 'name', label: 'Wallet name:', placeholder: 'e.g., alice', required: true}
         ]);
     }
 
@@ -793,11 +828,16 @@ class CipheraApp {
             this.terminal.log('CLI not ready', 'error');
             return;
         }
-        
+
         try {
             this.updateStatus('⏳ CREATE: Generating wallet keys...');
             const result = await window.ciphera.createWallet(answers.name);
-            
+
+            if (!result.success) {
+                this.completeStatus(false, `CREATE FAILED - ${result.error}`);
+                return;
+            }
+
             // Reload wallet data
             const walletData = await window.ciphera.readWallet(answers.name);
             if (walletData.exists) {
@@ -806,13 +846,12 @@ class CipheraApp {
                 this.state.balance = walletData.wallet.balance || 0;
                 this.updateWalletDisplay();
             }
-            
+
             this.completeStatus(true, `WALLET CREATED: Welcome, ${answers.name}!`);
             this.terminal.log('Next: Connect to node, then mint wcBTC', 'info');
-            
+
         } catch (e) {
-            const errorMsg = this.parseCliError(e);
-            this.completeStatus(false, `CREATE FAILED: ${errorMsg}`);
+            this.completeStatus(false, `CREATE FAILED: ${e}`);
         }
     }
 
@@ -820,8 +859,8 @@ class CipheraApp {
         this.terminal.log('CONNECT TO NODE', 'info');
         this.terminal.log('Type "clear" to return home', 'dim');
         this.startPromptSequence('sync', [
-            { key: 'host', label: 'Host:', placeholder: '63.176.138.198', default: '63.176.138.198' },
-            { key: 'port', label: 'Port:', placeholder: '8091', default: '8091' }
+            {key: 'host', label: 'Host:', placeholder: '63.176.138.198', default: '63.176.138.198'},
+            {key: 'port', label: 'Port:', placeholder: '8091', default: '8091'}
         ]);
     }
 
@@ -830,33 +869,31 @@ class CipheraApp {
             this.terminal.log('CLI not ready', 'error');
             return;
         }
-        
+
         if (!this.state.walletName) {
             this.terminal.log('Create a wallet first with "create" command.', 'warning');
             return;
         }
-        
-        try {
-            this.updateStatus(`⏳ CONNECT: Reaching ${answers.host}:${answers.port}...`);
-            
-            await window.ciphera.connect(
-                this.state.walletName,
-                answers.host,
-                parseInt(answers.port)
-            );
-            
-            // Store endpoint in state for explorer lookups
-            this.state.nodeEndpoint = `${answers.host}:${answers.port}`;
-            
-            this.updateConnectionStatus(true, `${answers.host}:${answers.port}`);
-            
-            this.completeStatus(true, `CONNECTED: ${answers.host}:${answers.port}`);
-            
-        } catch (e) {
-            this.updateConnectionStatus(false);
-            const errorMsg = this.parseCliError(e);
-            this.completeStatus(false, `CONNECTION FAILED: ${errorMsg}`);
+
+        this.updateStatus(`⏳ CONNECT: Reaching ${answers.host}:${answers.port}...`);
+
+        const result = await window.ciphera.connect(
+            this.state.walletName,
+            answers.host,
+            parseInt(answers.port)
+        );
+
+        if (!result.success) {
+            this.completeStatus(false, `CONNECT FAILED - ${result.error}`);
+            return;
         }
+
+        // Store endpoint in state for explorer lookups
+        this.state.nodeEndpoint = `${answers.host}:${answers.port}`;
+
+        this.updateConnectionStatus(true, `${answers.host}:${answers.port}`);
+
+        this.completeStatus(true, `CONNECTED: ${answers.host}:${answers.port}`);
     }
 
     startMint() {
@@ -864,18 +901,23 @@ class CipheraApp {
             this.terminal.log('Create a wallet first (type "1" or "create")', 'warning');
             return;
         }
-        
+
         if (!this.state.connected) {
             this.terminal.log('Connect to a node first (type "2" or "connect")', 'warning');
             return;
         }
-        
+
         this.terminal.log('MINT wcBTC', 'info');
         this.terminal.log('Type "clear" to return home', 'dim');
         this.startPromptSequence('mint', [
-            { key: 'amount', label: 'Amount (wcBTC):', placeholder: 'e.g., 0.00001', required: true },
-            { key: 'secret', label: 'Citrea private key:', placeholder: '0x...', type: 'password', required: true },
-            { key: 'gethRpc', label: 'RPC URL:', placeholder: 'https://rpc.testnet.citrea.xyz', default: 'https://rpc.testnet.citrea.xyz' },
+            {key: 'amount', label: 'Amount (wcBTC):', placeholder: 'e.g., 0.00001', required: true},
+            {key: 'secret', label: 'Citrea private key:', placeholder: '0x...', type: 'password', required: true},
+            {
+                key: 'gethRpc',
+                label: 'RPC URL:',
+                placeholder: 'https://rpc.testnet.citrea.xyz',
+                default: 'https://rpc.testnet.citrea.xyz'
+            },
         ]);
     }
 
@@ -884,69 +926,68 @@ class CipheraApp {
             this.terminal.log('CLI not ready', 'error');
             return;
         }
-        
+
         // Convert wcBTC input to wei for CLI
         const amountWei = this.wcbtcToWei(answers.amount);
-        
+
         let citreaTxHash = null;
         let cipheraTxHash = null;
-        
-        try {
-            // Step 1: Connect and check approval
-            this.updateStatus('⏳ MINT: Connecting to Citrea...');
-            const provider = new ethers.JsonRpcProvider(answers.gethRpc);
-            const wallet = new ethers.Wallet(answers.secret, provider);
-            const tokenContract = new ethers.Contract(CONTRACTS.WCBTC, ERC20_ABI, wallet);
-            
-            this.updateStatus('⏳ MINT: Checking token approval...');
-            const currentAllowance = await tokenContract.allowance(wallet.address, CONTRACTS.ROLLUP);
-            const mintAmount = BigInt(amountWei);
-            
-            // Step 2: Approve if needed
-            if (currentAllowance < mintAmount) {
-                this.updateStatus('⏳ MINT: Approving contract...');
-                const approveAmount = mintAmount * 10n;
-                const tx = await tokenContract.approve(CONTRACTS.ROLLUP, approveAmount);
-                citreaTxHash = tx.hash;
-                
-                this.updateStatus('⏳ MINT: Waiting for approval confirmation...');
-                await tx.wait();
-            }
-            
-            // Step 3: Generate ZK proof and mint
-            this.updateStatus('⏳ MINT: Generating ZK proof (30-60s)...');
-            
-            const result = await window.ciphera.mint({
-                name: this.state.walletName,
-                amount: amountWei,
-                secret: answers.secret,
-                gethRpc: answers.gethRpc,
-            });
-            
-            // Extract Ciphera tx hash from CLI output
-            cipheraTxHash = this.extractCipheraTxHash(result.output);
-            
-            // Step 4: Update wallet
-            const walletData = await window.ciphera.readWallet(this.state.walletName);
-            if (walletData.exists) {
-                this.state.balance = walletData.wallet.balance || 0;
-                this.updateBalanceDisplay();
-            }
-            
-            // Complete!
-            this.completeStatus(true, `MINT COMPLETE: +${answers.amount} wcBTC`);
-            
-            // Show transaction IDs
-            if (citreaTxHash) {
-                this.terminal.log(`Citrea TX: ${this.shortenTxHash(citreaTxHash)}`, 'dim');
-            }
-            if (cipheraTxHash) {
-                this.terminal.log(`Ciphera TX: ${this.padTxHash(cipheraTxHash)}`, 'dim');
-            }
-            
-        } catch (e) {
-            const errorMsg = this.parseCliError(e);
-            this.completeStatus(false, `MINT FAILED: ${errorMsg}`);
+
+        // Step 1: Connect and check approval
+        this.updateStatus('⏳ MINT: Connecting to Citrea...');
+        const provider = new ethers.JsonRpcProvider(answers.gethRpc);
+        const wallet = new ethers.Wallet(answers.secret, provider);
+        const tokenContract = new ethers.Contract(CONTRACTS.WCBTC, ERC20_ABI, wallet);
+
+        this.updateStatus('⏳ MINT: Checking token approval...');
+        const currentAllowance = await tokenContract.allowance(wallet.address, CONTRACTS.ROLLUP);
+        const mintAmount = BigInt(amountWei);
+
+        // Step 2: Approve if needed
+        if (currentAllowance < mintAmount) {
+            this.updateStatus('⏳ MINT: Approving contract...');
+            const approveAmount = mintAmount * 10n;
+            const tx = await tokenContract.approve(CONTRACTS.ROLLUP, approveAmount);
+            citreaTxHash = tx.hash;
+
+            this.updateStatus('⏳ MINT: Waiting for approval confirmation...');
+            await tx.wait();
+        }
+
+        // Step 3: Generate ZK proof and mint
+        this.updateStatus('⏳ MINT: Generating ZK proof (30-60s)...');
+
+        const result = await window.ciphera.mint({
+            name: this.state.walletName,
+            amount: amountWei,
+            secret: answers.secret,
+            gethRpc: answers.gethRpc,
+        });
+
+        if (!result.success) {
+            this.completeStatus(false, `MINT FAILED - ${result.error}`);
+            return;
+        }
+
+        // Extract Ciphera tx hash from CLI output
+        cipheraTxHash = this.extractCipheraTxHash(result.output);
+
+        // Step 4: Update wallet
+        const walletData = await window.ciphera.readWallet(this.state.walletName);
+        if (walletData.exists) {
+            this.state.balance = walletData.wallet.balance || 0;
+            this.updateBalanceDisplay();
+        }
+
+        // Complete!
+        this.completeStatus(true, `MINT COMPLETE: +${answers.amount} wcBTC`);
+
+        // Show transaction IDs
+        if (citreaTxHash) {
+            this.terminal.log(`Citrea TX: ${this.shortenTxHash(citreaTxHash)}`, 'dim');
+        }
+        if (cipheraTxHash) {
+            this.terminal.log(`Ciphera TX: ${this.padTxHash(cipheraTxHash)}`, 'dim');
         }
     }
 
@@ -955,22 +996,28 @@ class CipheraApp {
             this.terminal.log('Create a wallet first (type "1" or "create")', 'warning');
             return;
         }
-        
+
         if (!this.state.connected) {
             this.terminal.log('Connect to a node first (type "2" or "connect")', 'warning');
             return;
         }
-        
+
         if (this.state.balance <= 0) {
             this.terminal.log('No balance to send. Mint first (type "3" or "mint")', 'warning');
             return;
         }
-        
+
         const balanceWcbtc = this.formatBalance(this.state.balance);
         this.terminal.log(`SEND (Balance: ${balanceWcbtc} wcBTC)`, 'info');
         this.terminal.log('Type "clear" to return home', 'dim');
         this.startPromptSequence('send', [
-            { key: 'amount', label: 'Amount (wcBTC):', placeholder: `e.g., ${balanceWcbtc}`, default: balanceWcbtc, required: true }
+            {
+                key: 'amount',
+                label: 'Amount (wcBTC):',
+                placeholder: `e.g., ${balanceWcbtc}`,
+                default: balanceWcbtc,
+                required: true
+            }
         ]);
     }
 
@@ -979,42 +1026,42 @@ class CipheraApp {
             this.terminal.log('CLI not ready', 'error');
             return;
         }
-        
+
         // Convert wcBTC input to wei for CLI
         const amountWei = this.wcbtcToWei(answers.amount);
-        
-        try {
-            this.updateStatus('⏳ SEND: Creating private note...');
-            await window.ciphera.spend(this.state.walletName, amountWei);
-            
-            // Check for note file
-            const noteData = await window.ciphera.readNote(this.state.walletName);
-            
-            // Update wallet
-            const walletData = await window.ciphera.readWallet(this.state.walletName);
-            if (walletData.exists) {
-                this.state.balance = walletData.wallet.balance || 0;
-                this.updateBalanceDisplay();
-            }
-            
-            // Complete!
-            if (noteData.exists) {
-                this.completeStatus(true, `NOTE CREATED: ${answers.amount} wcBTC`);
-                // Store the pending note for saving
-                this.state.pendingNote = {
-                    content: noteData.note,
-                    amount: answers.amount,
-                };
-                this.terminal.separator();
-                this.terminal.log('Type "save" to save note to Downloads', 'info');
-                this.terminal.log('Then send the file via Signal to recipient', 'dim');
-            } else {
-                this.completeStatus(true, `SEND COMPLETE: -${answers.amount} wcBTC`);
-            }
-            
-        } catch (e) {
-            const errorMsg = this.parseCliError(e);
-            this.completeStatus(false, `SEND FAILED: ${errorMsg}`);
+
+        this.updateStatus('⏳ SEND: Creating private note...');
+
+        const result = await window.ciphera.spend(this.state.walletName, amountWei);
+
+        if (!result.success) {
+            this.completeStatus(false, `SEND FAILED - ${result.error}`);
+            return;
+        }
+
+        // Check for note file
+        const noteData = await window.ciphera.readNote(this.state.walletName);
+
+        // Update wallet
+        const walletData = await window.ciphera.readWallet(this.state.walletName);
+        if (walletData.exists) {
+            this.state.balance = walletData.wallet.balance || 0;
+            this.updateBalanceDisplay();
+        }
+
+        // Complete!
+        if (noteData.exists) {
+            this.completeStatus(true, `NOTE CREATED: ${answers.amount} wcBTC`);
+            // Store the pending note for saving
+            this.state.pendingNote = {
+                content: noteData.note,
+                amount: answers.amount,
+            };
+            this.terminal.separator();
+            this.terminal.log('Type "save" to save note to Downloads', 'info');
+            this.terminal.log('Then send the file via Signal to recipient', 'dim');
+        } else {
+            this.completeStatus(true, `SEND COMPLETE: -${answers.amount} wcBTC`);
         }
     }
 
@@ -1023,17 +1070,17 @@ class CipheraApp {
             this.terminal.log('Create a wallet first (type "1" or "create")', 'warning');
             return;
         }
-        
+
         if (!this.state.connected) {
             this.terminal.log('Connect to a node first (type "2" or "connect")', 'warning');
             return;
         }
-        
+
         this.terminal.log('RECEIVE NOTE', 'info');
         this.terminal.log('Type "browse" to select file from Downloads', 'dim');
         this.terminal.log('Type "clear" to return home', 'dim');
         this.startPromptSequence('receive', [
-            { key: 'noteFile', label: 'Note file path (or "browse"):', placeholder: 'e.g., note.json' },
+            {key: 'noteFile', label: 'Note file path (or "browse"):', placeholder: 'e.g., note.json'},
         ]);
     }
 
@@ -1042,45 +1089,44 @@ class CipheraApp {
             this.terminal.log('CLI not ready', 'error');
             return;
         }
-        
+
         if (!answers.noteFile) {
             this.terminal.log('Please provide a note file path or type "browse"', 'error');
             return;
         }
-        
-        try {
-            const oldBalance = this.state.balance;
-            
-            this.updateStatus('⏳ RECEIVE: Processing note...');
-            const result = await window.ciphera.receive({
-                name: this.state.walletName,
-                noteFile: answers.noteFile,
-            });
-            
-            // Extract Ciphera tx hash from CLI output
-            const cipheraTxHash = this.extractCipheraTxHash(result.output);
-            
-            // Update wallet
-            const walletData = await window.ciphera.readWallet(this.state.walletName);
-            if (walletData.exists) {
-                this.state.balance = walletData.wallet.balance || 0;
-                this.updateBalanceDisplay();
-            }
-            
-            // Complete!
-            const received = this.state.balance - oldBalance;
-            const formattedReceived = this.formatBalance(received > 0 ? received : this.state.balance);
-            this.completeStatus(true, `RECEIVED: +${formattedReceived} wcBTC`);
-            
-            // Show transaction ID
-            if (cipheraTxHash) {
-                this.terminal.log(`Ciphera TX: ${this.padTxHash(cipheraTxHash)}`, 'dim');
-            }
-            
-        } catch (e) {
-            console.log('[ERROR]:', e);
-            const errorMsg = this.parseCliError(e);
-            this.completeStatus(false, `RECEIVE FAILED: ${errorMsg}`);
+
+        const oldBalance = this.state.balance;
+
+        this.updateStatus('⏳ RECEIVE: Processing note...');
+
+        const result = await window.ciphera.receive({
+            name: this.state.walletName,
+            noteFile: answers.noteFile,
+        });
+
+        if (!result.success) {
+            this.completeStatus(false, `RECEIVE FAILED - ${result.error}`);
+            return;
+        }
+
+        // Extract Ciphera tx hash from CLI output
+        const cipheraTxHash = this.extractCipheraTxHash(result.output);
+
+        // Update wallet
+        const walletData = await window.ciphera.readWallet(this.state.walletName);
+        if (walletData.exists) {
+            this.state.balance = walletData.wallet.balance || 0;
+            this.updateBalanceDisplay();
+        }
+
+        // Complete!
+        const received = this.state.balance - oldBalance;
+        const formattedReceived = this.formatBalance(received > 0 ? received : this.state.balance);
+        this.completeStatus(true, `RECEIVED: +${formattedReceived} wcBTC`);
+
+        // Show transaction ID
+        if (cipheraTxHash) {
+            this.terminal.log(`Ciphera TX: ${this.padTxHash(cipheraTxHash)}`, 'dim');
         }
     }
 
@@ -1089,25 +1135,36 @@ class CipheraApp {
             this.terminal.log('Create a wallet first (type "1" or "create")', 'warning');
             return;
         }
-        
+
         if (!this.state.connected) {
             this.terminal.log('Connect to a node first (type "2" or "connect")', 'warning');
             return;
         }
-        
+
         if (this.state.balance <= 0) {
             this.terminal.log('No balance to burn. Mint first (type "3" or "mint")', 'warning');
             return;
         }
-        
+
         const balanceWcbtc = this.formatBalance(this.state.balance);
         this.terminal.log(`BURN TO CITREA (Balance: ${balanceWcbtc} wcBTC)`, 'info');
         this.terminal.log('Type "clear" to return home', 'dim');
         this.startPromptSequence('burn', [
-            { key: 'amount', label: 'Amount (wcBTC):', placeholder: `e.g., ${balanceWcbtc}`, default: balanceWcbtc, required: true },
-            { key: 'address', label: 'EVM address:', placeholder: '0x...', required: true },
-            { key: 'secret', label: 'Citrea private key:', placeholder: '0x...', type: 'password', required: true },
-            { key: 'gethRpc', label: 'RPC URL:', placeholder: 'https://rpc.testnet.citrea.xyz', default: 'https://rpc.testnet.citrea.xyz' },
+            {
+                key: 'amount',
+                label: 'Amount (wcBTC):',
+                placeholder: `e.g., ${balanceWcbtc}`,
+                default: balanceWcbtc,
+                required: true
+            },
+            {key: 'address', label: 'EVM address:', placeholder: '0x...', required: true},
+            {key: 'secret', label: 'Citrea private key:', placeholder: '0x...', type: 'password', required: true},
+            {
+                key: 'gethRpc',
+                label: 'RPC URL:',
+                placeholder: 'https://rpc.testnet.citrea.xyz',
+                default: 'https://rpc.testnet.citrea.xyz'
+            },
         ]);
     }
 
@@ -1116,49 +1173,48 @@ class CipheraApp {
             this.terminal.log('CLI not ready', 'error');
             return;
         }
-        
+
         // Convert wcBTC input to wei for CLI
         const amountWei = this.wcbtcToWei(answers.amount);
-        
-        try {
-            this.updateStatus('⏳ BURN: Withdrawing to Citrea...');
-            
-            const result = await window.ciphera.burn({
-                name: this.state.walletName,
-                amount: amountWei,
-                address: answers.address,
-                secret: answers.secret,
-                gethRpc: answers.gethRpc,
-            });
-            
-            // Extract Ciphera tx hash from CLI output
-            const cipheraTxHash = this.extractCipheraTxHash(result.output);
-            
-            // Update wallet
-            const walletData = await window.ciphera.readWallet(this.state.walletName);
-            if (walletData.exists) {
-                this.state.balance = walletData.wallet.balance || 0;
-                this.updateBalanceDisplay();
-            }
-            
-            // Complete!
-            const shortAddress = `${answers.address.slice(0, 8)}...${answers.address.slice(-6)}`;
-            this.completeStatus(true, `BURN COMPLETE: ${answers.amount} wcBTC → ${shortAddress}`);
-            
-            // Show transaction ID
-            if (cipheraTxHash) {
-                this.terminal.log(`Ciphera TX: ${this.padTxHash(cipheraTxHash)}`, 'dim');
-            }
 
-        } catch (e) {
-            this.terminal.log(`ERR: ${e}`);
-            const errorMsg = this.parseCliError(e);
-            this.completeStatus(false, `BURN FAILED: ${errorMsg}`);
+
+        this.updateStatus('⏳ BURN: Withdrawing to Citrea...');
+
+        const result = await window.ciphera.burn({
+            name: this.state.walletName,
+            amount: amountWei,
+            address: answers.address,
+            secret: answers.secret,
+            gethRpc: answers.gethRpc,
+        });
+
+        if (!result.success) {
+            this.completeStatus(false, `BURN FAILED - ${result.error}`);
+            return;
+        }
+
+        // Extract Ciphera tx hash from CLI output
+        const cipheraTxHash = this.extractCipheraTxHash(result.output);
+
+        // Update wallet
+        const walletData = await window.ciphera.readWallet(this.state.walletName);
+        if (walletData.exists) {
+            this.state.balance = walletData.wallet.balance || 0;
+            this.updateBalanceDisplay();
+        }
+
+        // Complete!
+        const shortAddress = `${answers.address.slice(0, 8)}...${answers.address.slice(-6)}`;
+        this.completeStatus(true, `BURN COMPLETE: ${answers.amount} wcBTC → ${shortAddress}`);
+
+        // Show transaction ID
+        if (cipheraTxHash) {
+            this.terminal.log(`Ciphera TX: ${this.padTxHash(cipheraTxHash)}`, 'dim');
         }
     }
 
     // === TX Hash Helpers ===
-    
+
     /**
      * Extract Ciphera transaction hash from CLI output
      * CLI prints: "✅ Transaction {hash} has been sent!"
@@ -1168,7 +1224,7 @@ class CipheraApp {
         const match = output.match(/Transaction\s+([a-fA-F0-9]+)\s+has been sent/);
         return match ? match[1] : null;
     }
-    
+
     /**
      * Shorten a transaction hash for display
      */
@@ -1187,30 +1243,8 @@ class CipheraApp {
     }
 
     // === Error Helpers ===
-    parseCliError(result) {
-        // If it's already a string, use it
-        if (typeof result === 'string') {
-            this.terminal.log(`string: ${result}`);
-            return this.extractErrorMessage(result);
-        }
-
-        // Handle error object from CLI
-        if (result && !result.success) {
-            this.terminal.log(`error: ${errorText}`);
-            this.terminal.log(`error: ${result.error}`);
-            this.terminal.log(`error: ${result.stderr}`);
-            return this.extractErrorMessage(result.stderr);
-        }
-
-        return 'Unknown error occurred';
-    }
-
-    /**
-     * Extract clean error message from CLI output
-     */
-    extractErrorMessage(text) {
-        this.terminal.log(`text: ${text}`);
-        if (!text) return 'Unknown error';
+    parseCliError(stderr) {
+        const text = stderr || '';
 
         // Try to find the main error line (after ❌)
         const errorMatch = text.match(/❌\s*([^\n!]+)/);
@@ -1220,11 +1254,11 @@ class CipheraApp {
             // Also grab the "Error:" line if present
             const detailMatch = text.match(/Error:\s*([^\n]+)/);
             if (detailMatch) {
-                const detail = detailMatch[1].trim();
-                // Avoid duplicating "undefined error:"
-                const cleanDetail = detail.replace(/^undefined error:\s*/i, '');
-                if (cleanDetail && !msg.includes(cleanDetail)) {
-                    msg += ` - ${cleanDetail}`;
+                const detail = detailMatch[1]
+                    .replace(/^undefined error:\s*/i, '')
+                    .trim();
+                if (detail && !msg.includes(detail)) {
+                    msg += `: ${detail}`;
                 }
             }
 
@@ -1237,13 +1271,11 @@ class CipheraApp {
             return simpleMatch[1].replace(/^undefined error:\s*/i, '').trim();
         }
 
-        // Last resort: first non-empty line
-        const firstLine = text.split('\n').find(l => l.trim());
-        return firstLine?.trim().slice(0, 100) || 'Unknown error';
+        return `Process exited with error`;
     }
 
     // === UI Helpers ===
-    
+
     toggleSettingsDropdown() {
         if (this.elements.settingsDropdown) {
             this.elements.settingsDropdown.classList.toggle('open');
@@ -1275,13 +1307,13 @@ class CipheraApp {
         this.terminal.log('CIPHERA WALLET', 'info');
         this.terminal.log('Zero-Knowledge Bitcoin Payments', 'dim');
         this.terminal.separator();
-        
+
         if (window.ciphera) {
             const info = await window.ciphera.getAppInfo();
             this.terminal.log(`Version: ${info.version}`, 'dim');
             this.terminal.log(`Platform: ${info.platform}`, 'dim');
         }
-        
+
         this.terminal.log('', 'default');
         this.terminal.log('Built with Noir ZK circuits and Barretenberg', 'dim');
         this.terminal.log('https://github.com/zerosats/ciphera-cli', 'dim');
@@ -1290,7 +1322,7 @@ class CipheraApp {
 
     showView(view) {
         this.currentView = view;
-        
+
         // Update tabs
         if (this.elements.walletTab) {
             this.elements.walletTab.classList.toggle('active', view === 'wallet');
@@ -1298,7 +1330,7 @@ class CipheraApp {
         if (this.elements.explorerTab) {
             this.elements.explorerTab.classList.toggle('active', view === 'explorer');
         }
-        
+
         // Update views
         if (this.elements.walletView) {
             this.elements.walletView.classList.toggle('hidden', view !== 'wallet');
@@ -1306,7 +1338,7 @@ class CipheraApp {
         if (this.elements.explorerView) {
             this.elements.explorerView.classList.toggle('hidden', view !== 'explorer');
         }
-        
+
         // Load explorer stats when switching to explorer view
         if (view === 'explorer' && this.state.connected) {
             this.loadExplorerStats();
@@ -1325,7 +1357,7 @@ class CipheraApp {
 
     async loadExplorerStats() {
         if (!this.state.nodeEndpoint) return;
-        
+
         try {
             // Fetch height
             const heightRes = await fetch(`http://${this.state.nodeEndpoint}/v0/height`);
@@ -1335,7 +1367,7 @@ class CipheraApp {
                     this.elements.statHeight.textContent = heightData.height || heightData;
                 }
             }
-            
+
             // Fetch stats
             const statsRes = await fetch(`http://${this.state.nodeEndpoint}/v0/stats`);
             if (statsRes.ok) {
@@ -1354,7 +1386,7 @@ class CipheraApp {
 
     async handleExplorerSearch(query) {
         if (!query) return;
-        
+
         if (!this.state.connected || !this.state.nodeEndpoint) {
             this.showExplorerError('Connect to a node first (use WALLET tab → connect)');
             return;
@@ -1366,7 +1398,7 @@ class CipheraApp {
         try {
             // Determine search type based on query
             const isNumber = /^\d+$/.test(query);
-            
+
             if (isNumber) {
                 // Block lookup
                 await this.explorerLookupBlock(query);
@@ -1441,13 +1473,13 @@ class CipheraApp {
         // Normalize hash - remove 0x prefix and pad to 64 chars
         const cleanHash = hash.startsWith('0x') ? hash.slice(2) : hash;
         const paddedHash = cleanHash.padStart(64, '0');
-        
+
         // Try plural endpoint first (v0/transactions/{hash})
         let url = `http://${this.state.nodeEndpoint}/v0/transactions/${paddedHash}`;
         console.log('[Explorer] Trying:', url);
         let response = await fetch(url);
         console.log('[Explorer] Response:', response.status);
-        
+
         // If not found, try singular endpoint (v0/transaction/{hash})
         if (!response.ok && response.status === 404) {
             url = `http://${this.state.nodeEndpoint}/v0/transaction/${paddedHash}`;
@@ -1455,7 +1487,7 @@ class CipheraApp {
             response = await fetch(url);
             console.log('[Explorer] Response:', response.status);
         }
-        
+
         if (!response.ok) {
             if (response.status === 404) {
                 return false; // Not found, try element
@@ -1471,7 +1503,7 @@ class CipheraApp {
 
     async explorerLookupBlock(blockNum) {
         const response = await fetch(`http://${this.state.nodeEndpoint}/v0/blocks/${blockNum}`);
-        
+
         if (!response.ok) {
             if (response.status === 404) {
                 this.showExplorerError(`Block ${blockNum} not found`);
@@ -1488,9 +1520,9 @@ class CipheraApp {
         // Normalize hash - remove 0x prefix and pad to 64 chars
         const cleanHash = hash.startsWith('0x') ? hash.slice(2) : hash;
         const paddedHash = cleanHash.padStart(64, '0');
-        
+
         const response = await fetch(`http://${this.state.nodeEndpoint}/v0/elements/${paddedHash}`);
-        
+
         if (!response.ok) {
             if (response.status === 404) {
                 this.showExplorerError('Not found (checked transactions and elements)');
