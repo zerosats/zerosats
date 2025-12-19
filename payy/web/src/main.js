@@ -35,6 +35,9 @@ class CipheraApp {
     }
 
     setup() {
+        // Setup version
+        document.getElementById('appVersion').textContent = `v${__APP_VERSION__}`;
+
         // Initialize terminal
         this.terminal = new Terminal(document.getElementById('terminalOutput'));
         
@@ -663,8 +666,8 @@ class CipheraApp {
                 this.completeStatus(false, `SAVE FAILED: ${result.error}`);
             }
         } catch (e) {
-            const errorMsg = e.message || String(e);
-            this.completeStatus(false, `SAVE FAILED: ${errorMsg.slice(0, 50)}`);
+            const errorMsg = this.parseCliError(e);
+            this.completeStatus(false, `SAVE FAILED: ${errorMsg}`);
         }
     }
 
@@ -808,8 +811,8 @@ class CipheraApp {
             this.terminal.log('Next: Connect to node, then mint wcBTC', 'info');
             
         } catch (e) {
-            const errorMsg = e.reason || e.error || e.message || String(e);
-            this.completeStatus(false, `CREATE FAILED: ${errorMsg.slice(0, 50)}`);
+            const errorMsg = this.parseCliError(e);
+            this.completeStatus(false, `CREATE FAILED: ${errorMsg}`);
         }
     }
 
@@ -851,8 +854,8 @@ class CipheraApp {
             
         } catch (e) {
             this.updateConnectionStatus(false);
-            const errorMsg = e.reason || e.error || e.message || String(e);
-            this.completeStatus(false, `CONNECTION FAILED: ${errorMsg.slice(0, 50)}`);
+            const errorMsg = this.parseCliError(e);
+            this.completeStatus(false, `CONNECTION FAILED: ${errorMsg}`);
         }
     }
 
@@ -942,8 +945,8 @@ class CipheraApp {
             }
             
         } catch (e) {
-            const errorMsg = e.reason || e.error || e.message || String(e);
-            this.completeStatus(false, `MINT FAILED: ${errorMsg.slice(0, 60)}`);
+            const errorMsg = this.parseCliError(e);
+            this.completeStatus(false, `MINT FAILED: ${errorMsg}`);
         }
     }
 
@@ -1010,8 +1013,8 @@ class CipheraApp {
             }
             
         } catch (e) {
-            const errorMsg = e.reason || e.error || e.message || String(e);
-            this.completeStatus(false, `SEND FAILED: ${errorMsg.slice(0, 50)}`);
+            const errorMsg = this.parseCliError(e);
+            this.completeStatus(false, `SEND FAILED: ${errorMsg}`);
         }
     }
 
@@ -1075,8 +1078,9 @@ class CipheraApp {
             }
             
         } catch (e) {
-            const errorMsg = e.reason || e.error || e.message || String(e);
-            this.completeStatus(false, `RECEIVE FAILED: ${errorMsg.slice(0, 50)}`);
+            console.log('[ERROR]:', e);
+            const errorMsg = this.parseCliError(e);
+            this.completeStatus(false, `RECEIVE FAILED: ${errorMsg}`);
         }
     }
 
@@ -1147,8 +1151,9 @@ class CipheraApp {
             }
 
         } catch (e) {
-            const errorMsg = e.reason || e.error || e.message || String(e);
-            this.completeStatus(false, `BURN FAILED: ${errorMsg.slice(0, 50)}`);
+            this.terminal.log(`ERR: ${e}`);
+            const errorMsg = this.parseCliError(e);
+            this.completeStatus(false, `BURN FAILED: ${errorMsg}`);
         }
     }
 
@@ -1179,6 +1184,62 @@ class CipheraApp {
         if (!hash) return hash;
         const cleanHash = hash.startsWith('0x') ? hash.slice(2) : hash;
         return cleanHash.padStart(64, '0');
+    }
+
+    // === Error Helpers ===
+    parseCliError(result) {
+        // If it's already a string, use it
+        if (typeof result === 'string') {
+            this.terminal.log(`string: ${result}`);
+            return this.extractErrorMessage(result);
+        }
+
+        // Handle error object from CLI
+        if (result && !result.success) {
+            this.terminal.log(`error: ${errorText}`);
+            this.terminal.log(`error: ${result.error}`);
+            this.terminal.log(`error: ${result.stderr}`);
+            return this.extractErrorMessage(result.stderr);
+        }
+
+        return 'Unknown error occurred';
+    }
+
+    /**
+     * Extract clean error message from CLI output
+     */
+    extractErrorMessage(text) {
+        this.terminal.log(`text: ${text}`);
+        if (!text) return 'Unknown error';
+
+        // Try to find the main error line (after ❌)
+        const errorMatch = text.match(/❌\s*([^\n!]+)/);
+        if (errorMatch) {
+            let msg = errorMatch[1].trim();
+
+            // Also grab the "Error:" line if present
+            const detailMatch = text.match(/Error:\s*([^\n]+)/);
+            if (detailMatch) {
+                const detail = detailMatch[1].trim();
+                // Avoid duplicating "undefined error:"
+                const cleanDetail = detail.replace(/^undefined error:\s*/i, '');
+                if (cleanDetail && !msg.includes(cleanDetail)) {
+                    msg += ` - ${cleanDetail}`;
+                }
+            }
+
+            return msg;
+        }
+
+        // Fallback: find any "Error:" line
+        const simpleMatch = text.match(/Error:\s*([^\n]+)/);
+        if (simpleMatch) {
+            return simpleMatch[1].replace(/^undefined error:\s*/i, '').trim();
+        }
+
+        // Last resort: first non-empty line
+        const firstLine = text.split('\n').find(l => l.trim());
+        return firstLine?.trim().slice(0, 100) || 'Unknown error';
     }
 
     // === UI Helpers ===
