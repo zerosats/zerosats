@@ -43,13 +43,7 @@ function getCliPath() {
         if (fs.existsSync(binPath)) {
             return binPath;
         }
-        // TODO: cleanup
-        // Windows
-        const winPath = binPath + '.exe';
-        if (fs.existsSync(winPath)) {
-            return winPath;
-        }
-        
+
         throw new Error('CLI binary not found in resources');
     }
 }
