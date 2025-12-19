@@ -9,7 +9,7 @@ on:
       tag:
         description: 'Tag to build'
         required: true
-        default: 'v0.0.4'
+        default: 'v0.0.5'
 
 jobs:
   build:
@@ -172,3 +172,33 @@ jobs:
           /Volumes/Ciphera/Ciphera.app/Contents/Resources/bin/ciphera-cli create
           
           hdiutil detach /Volumes/Ciphera
+     
+          
+  test-appimage:
+    runs-on: ubuntu-latest
+    needs: [ build ]
+    steps:
+      - name: Download AppImage
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release download ${{ github.ref_name }} \
+             --repo zerosats/zerosats \
+             --pattern "*.AppImage"
+
+          ls -la *.AppImage
+          file *.AppImage
+
+      - name: Extract and test
+        run: |
+          chmod +x Ciphera-x64.AppImage
+          ./Ciphera-x64.AppImage --appimage-extract
+
+          # Check binaries exist and are executable
+          ls -la squashfs-root/resources/bin/
+          file squashfs-root/resources/bin/bb
+          file squashfs-root/resources/bin/ciphera-cli
+
+          # Test CLI
+          squashfs-root/resources/bin/ciphera-cli create
+          squashfs-root/resources/bin/bb --version

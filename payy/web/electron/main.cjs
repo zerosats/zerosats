@@ -43,13 +43,7 @@ function getCliPath() {
         if (fs.existsSync(binPath)) {
             return binPath;
         }
-        // TODO: cleanup
-        // Windows
-        const winPath = binPath + '.exe';
-        if (fs.existsSync(winPath)) {
-            return winPath;
-        }
-        
+
         throw new Error('CLI binary not found in resources');
     }
 }
@@ -103,6 +97,37 @@ function createWindow() {
     if (process.platform === 'darwin') {
         app.setName('Ciphera');
     }
+}
+
+function parseCliError(stderr, stdout, code) {
+    const text = stderr || stdout || '';
+
+    // Try to find the main error line (after ❌)
+    const errorMatch = text.match(/❌\s*([^\n!]+)/);
+    if (errorMatch) {
+        let msg = errorMatch[1].trim();
+
+        // Also grab the "Error:" line if present
+        const detailMatch = text.match(/Error:\s*([^\n]+)/);
+        if (detailMatch) {
+            const detail = detailMatch[1]
+                .replace(/^undefined error:\s*/i, '')
+                .trim();
+            if (detail && !msg.includes(detail)) {
+                msg += `: ${detail}`;
+            }
+        }
+
+        return msg;
+    }
+
+    // Fallback: find any "Error:" line
+    const simpleMatch = text.match(/Error:\s*([^\n]+)/);
+    if (simpleMatch) {
+        return simpleMatch[1].replace(/^undefined error:\s*/i, '').trim();
+    }
+
+    return `Process exited with code ${code}`;
 }
 
 // Create window when app is ready
@@ -167,7 +192,7 @@ ipcMain.handle('cli:run', async (event, args) => {
         
         proc.on('error', (err) => {
             console.error(`[CLI] Process error:`, err);
-            reject({
+            resolve({
                 success: false,
                 error: `Failed to start CLI: ${err.message}`,
                 stdout,
@@ -185,12 +210,9 @@ ipcMain.handle('cli:run', async (event, args) => {
                     code,
                 });
             } else {
-                reject({
+                resolve({
                     success: false,
-                    error: stderr || stdout || `Process exited with code ${code}`,
-                    stdout,
-                    stderr,
-                    code,
+                    error: parseCliError(stderr, stdout, code),
                 });
             }
         });

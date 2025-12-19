@@ -1,10 +1,18 @@
 import { defineConfig } from 'vite';
 import { resolve } from 'path';
+import { readFileSync } from 'fs';
+
+const pkg = JSON.parse(readFileSync('./package.json', 'utf-8'));
 
 export default defineConfig({
   // Base path - empty for Electron file:// protocol
   base: './',
-  
+
+  // Constants
+  define: {
+    __APP_VERSION__: JSON.stringify(pkg.version)
+  },
+
   // Resolve aliases
   resolve: {
     alias: {
