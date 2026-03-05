@@ -36,7 +36,7 @@ RUN . /root/.bashrc && bbup -v 1.0.0-nightly.20250723
 
 # Create a workspace directory
 WORKDIR /app
-COPY ./payy .
+COPY ciphera .
 
 WORKDIR /app/citrea
 RUN npm ci
