@@ -1,8 +1,6 @@
-<img src="./payy.png" alt="Payy Logo" width="200" height="200">
+# Ciphera
 
-# Payy - ZK Rollup
-
-An Ethereum L2 ZK rollup for privacy preserving and regulatory compliant transactions. 
+A privacy preserving Zcash-like blockchain. 
 
 Here are some highlights:
 
@@ -10,17 +8,16 @@ Here are some highlights:
  - 🪄 Tiny - UTXO proofs are under 2.8KB
  - ✅ EVM - proofs are compatible with Ethereum 
 
-For a detailed description of our architecture, please [download our whitepaper](https://polybase.github.io/zk-rollup/whitepaper.pdf) or visit our [docs](https://payy.network/docs).
+For a detailed description of the architecture, please [download whitepaper](https://polybase.github.io/zk-rollup/whitepaper.pdf).
 
-
-| Module             | Path                                    | Desc                                                            |
-|--------------------|-----------------------------------------|-----------------------------------------------------------------|
-| Ethereum Contracts | [eth](/eth)                             | Ethereum smart contracts to verify state transitions and proofs |
-| Contracts          | [pkg/prover](/pkg/prover)               | Rust interface to Ethereum smart contracts                      |
-| RPC                | [pkg/rpc](/pkg/rpc-server)              | RPC common utilities shared across all RPC services             |
-| Smirk              | [pkg/smirk](/pkg/smirk)                 | Sparse merkle tree                                              |
-| ZK-Circuits        | [pkg/zk-circuits](/pkg/zk-circuits)     | Halo2 + KZG ZK circuits for proving UTXO, merkle and state transitions      |
-| ZK-Primitives      | [pkg/zk-primitives](/pkg/zk-primitives) | ZK primitives used across multiple modules                      |
+| Module           | Path                                    | Desc                                                            |
+|------------------|-----------------------------------------|-----------------------------------------------------------------|
+| Citrea Contracts | [citrea](/citrea)                       | Ethereum smart contracts to verify state transitions and proofs |
+| Contracts        | [pkg/prover](/pkg/prover)               | Rust interface to Ethereum smart contracts                      |
+| RPC              | [pkg/rpc](/pkg/rpc-server)              | RPC common utilities shared across all RPC services             |
+| Smirk            | [pkg/smirk](/pkg/smirk)                 | Sparse merkle tree                                              |
+| ZK-Circuits      | [pkg/zk-circuits](/pkg/zk-circuits)     | Halo2 + KZG ZK circuits for proving UTXO, merkle and state transitions      |
+| ZK-Primitives    | [pkg/zk-primitives](/pkg/zk-primitives) | ZK primitives used across multiple modules                      |
 
 
 ## Tests
@@ -30,13 +27,6 @@ cargo test
 ```
 
 Note: these tests can take a while to run on your laptop (e.g. more than 20 minutes)
-
-
-## Audit
-
-The ZK-Circuits and Ethereum Contracts have been audited by KALOS. All report findings have been fixed and resolved.
-
-[KALOS Audit Report 2024-02-23](audits/kalos_2024_02_23.pdf)
 
 
 ## Git LFS
@@ -53,27 +43,17 @@ A one-time setup needs to be done for local development:
   $ git lfs pull
   ```
 
-
 ## Contributing
 
 We appreciate your interest in contributing to our open-source project. Your contributions help improve the project for everyone.
 
-### Code of Conduct
-
-This project adheres to the Contributor Covenant [Code of Conduct](CODE_OF_CONDUCT.md). By participating, you are expected to uphold this code. Please report unacceptable behavior to [hello@polybaselabs.com](mailto:hello@polybaselabs.com).
-
-### Security vulnerabilities
-
-We take security issues seriously. If you discover a security vulnerability, we appreciate your assistance in disclosing it to us in a responsible manner. Do not report security vulnerabilities through public issues or forums. Instead, send a full report to [hello@polybaselabs.com](mailto:hello@polybaselabs.com). We do not have an official bug bounty program but will reward responsibly disclosed vulnerabilities at our discretion.
-
-
 ### Reporting Bugs
 
-If you find a bug, please report it by [opening an issue](https://github.com/polybase/payy/issues). Include as much detail as possible, including steps to reproduce the issue, the environment in which it occurs, and any relevant screenshots or code snippets.
+If you find a bug, please report it by [opening an issue](https://github.com/zerosats/zerosats/issues). Include as much detail as possible, including steps to reproduce the issue, the environment in which it occurs, and any relevant screenshots or code snippets.
 
 ### Suggesting Enhancements
 
-We appreciate enhancements! To suggest a feature or enhancement, please [open an issue](https://github.com/polybase/payy/issues) with a detailed description of your proposal. Explain why it is needed and how it would benefit the project.
+We appreciate enhancements! To suggest a feature or enhancement, please [open an issue](https://github.com/zerosats/zerosats/issues) with a detailed description of your proposal. Explain why it is needed and how it would benefit the project.
 
 ### Submitting Pull Requests
 
