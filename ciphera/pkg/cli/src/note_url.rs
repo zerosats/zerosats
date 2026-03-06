@@ -124,7 +124,7 @@ mod tests {
 
         let a: CipheraURL = (&input_note).into();
 
-        println!("to be encoded: {:?}", a);
+        println!("to be encoded: {a:?}");
 
         let encoded = a.encode_url();
 
@@ -137,7 +137,7 @@ mod tests {
 
         let decoded_note = InputNote::from(&decode_url(&encoded));
 
-        println!("decoded: {:?}", decoded_note);
+        println!("decoded: {decoded_note:?}");
 
         // Verify
         assert_eq!(decoded_note.note.kind, input_note.note.kind);
@@ -161,7 +161,7 @@ mod tests {
 
         let a: CipheraURL = (&input_note).into();
 
-        println!("to be encoded: {:?}", a);
+        println!("to be encoded: {a:?}");
 
         let encoded = a.encode_url();
 
@@ -174,7 +174,7 @@ mod tests {
 
         let decoded_note = InputNote::from(&decode_url(&encoded));
 
-        println!("decoded: {:?}", decoded_note);
+        println!("decoded: {decoded_note:?}");
 
         // Verify
         assert_eq!(decoded_note.note.kind, input_note.note.kind);

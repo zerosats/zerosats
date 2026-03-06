@@ -359,7 +359,7 @@ impl NodeClient {
         let client = contracts::Client::new(geth_rpc, None);
 
         let erc20_contract =
-            ERC20Contract::load(client.clone(), &chain_id, erc20_contract, sk).await?;
+            ERC20Contract::load(client.clone(), erc20_contract, sk).await?;
         let rollup = RollupContract::load(client, &chain_id, rollup, sk).await?;
 
         let secp = secp256k1::Secp256k1::new();

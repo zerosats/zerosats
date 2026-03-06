@@ -1,7 +1,6 @@
 use crate::Client;
 use crate::error::Result;
 use ethereum_types::U64;
-use rustc_hex::FromHex;
 use sha3::{Digest, Keccak256};
 use testutil::eth::EthNode;
 use web3::{
@@ -59,7 +58,6 @@ impl ERC20Contract {
 
     pub async fn load(
         client: Client,
-        chain_id: &u64,
         erc20_contract_addr: &str,
         signer: SecretKey,
     ) -> Result<Self> {
@@ -79,8 +77,7 @@ impl ERC20Contract {
         let erc20_addr = "5fbdb2315678afecb367f032d93f642f64180aa3";
 
         let client = Client::from_eth_node(eth_node);
-        let chain_id = 5655 as u64;
-        Self::load(client, &chain_id, erc20_addr, signer).await
+        Self::load(client, erc20_addr, signer).await
     }
 
     pub async fn call(&self, func: &str, params: impl Tokenize + Clone) -> Result<H256> {

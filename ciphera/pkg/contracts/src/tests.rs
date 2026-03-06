@@ -343,7 +343,7 @@ async fn verify_transfers() {
     tokio::time::sleep(Duration::from_secs(2)).await;
 
     let rollup_height = env.rollup_contract.block_height().await.unwrap();
-    println!("Current height: {}", rollup_height);
+    println!("Current height: {rollup_height}");
 
     assert_ne!(rollup_height, 0); // consider changing on assert_eq!(rollup_height, 1)
 }

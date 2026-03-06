@@ -101,7 +101,7 @@ impl EthNode {
         if resources_dir.exists() {
             match fs::remove_dir_all(resources_dir) {
                 Ok(_) => println!("Successfully removed /app/citrea/resources"),
-                Err(e) => println!("Failed to remove /app/citrea/resources: {}", e),
+                Err(e) => println!("Failed to remove /app/citrea/resources: {e}"),
             }
         }
     }

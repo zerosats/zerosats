@@ -186,8 +186,8 @@ impl Backend for CliBackend {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::fs::{self, File, copy, remove_file};
-    use std::os::unix::fs::{PermissionsExt, symlink};
+    use std::fs::{self, copy, remove_file};
+    
     use temp_env::with_var;
 
     #[test]
@@ -224,8 +224,7 @@ mod tests {
                 let path = result.unwrap();
                 assert!(
                     verify_bb_executable(&path),
-                    "Found bb at {:?} but it's not executable",
-                    path
+                    "Found bb at {path:?} but it's not executable"
                 );
                 println!("HOME {}", path.display());
             }
@@ -266,8 +265,7 @@ mod tests {
                     let path = result.unwrap();
                     assert!(
                         verify_bb_executable(&path),
-                        "Found bb at {:?} but it's not executable",
-                        path
+                        "Found bb at {path:?} but it's not executable"
                     );
                     println!("Local {}", path.display());
                     let _ = remove_file(new);
@@ -290,8 +288,7 @@ mod tests {
                 let path = result.unwrap();
                 assert!(
                     verify_bb_executable(&path),
-                    "Found bb at {:?} but it's not executable",
-                    path
+                    "Found bb at {path:?} but it's not executable"
                 );
                 println!("BB_PATH {}", path.display());
             })

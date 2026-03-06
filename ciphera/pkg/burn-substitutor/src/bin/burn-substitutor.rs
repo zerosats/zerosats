@@ -93,7 +93,6 @@ async fn main() -> Result<(), eyre::Error> {
     .await?;
     let erc20_contract = contracts::ERC20Contract::load(
         client.clone(),
-        &config.chain_id,
         &config.erc20_contract_address,
         secret_key,
     )

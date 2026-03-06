@@ -217,7 +217,7 @@ mod tests {
 
         let a: CipheraAddress = (&note).into();
 
-        println!("to be encoded: {:?}", a);
+        println!("to be encoded: {a:?}");
 
         let encoded = a.encode_address();
 
@@ -225,7 +225,7 @@ mod tests {
 
         let decoded_note = Note::from(&decode_address(&encoded));
 
-        println!("decoded: {:?}", decoded_note);
+        println!("decoded: {decoded_note:?}");
 
         // Verify
         assert_eq!(decoded_note.kind, note.kind);
@@ -247,7 +247,7 @@ mod tests {
 
         let a: CipheraAddress = (&note).into();
 
-        println!("to be encoded: {:?}", a);
+        println!("to be encoded: {a:?}");
 
         let encoded = a.encode_address();
 
@@ -255,7 +255,7 @@ mod tests {
 
         let decoded_note = Note::from(&decode_address(&encoded));
 
-        println!("decoded: {:?}", decoded_note);
+        println!("decoded: {decoded_note:?}");
 
         // Verify
         assert_eq!(decoded_note.kind, note.kind);

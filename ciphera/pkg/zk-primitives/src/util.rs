@@ -287,7 +287,7 @@ mod tests {
 
     #[test]
     fn test_wrapped_citrea_testnet_note_kind() {
-        let chain = 5115 as u64; // Citrea chain
+        let chain = 5115_u64; // Citrea chain
         let token =
             H160::from_slice(&hex::decode("8d0c9d1c17aE5e40ffF9bE350f57840E9E66Cd93").unwrap()); // Token Contract
         let result = generate_note_kind_bridge_evm(chain, token);
