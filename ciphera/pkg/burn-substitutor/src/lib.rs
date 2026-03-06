@@ -1,4 +1,4 @@
-use contracts::{Address, ConfirmationType, RollupContract, ERC20Contract};
+use contracts::{Address, ConfirmationType, ERC20Contract, RollupContract};
 use element::Element;
 use eth_util::Eth;
 use eyre::{Context, ContextCompat};

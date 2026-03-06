@@ -1,0 +1,105 @@
+{
+  "name": "ciphera-wallet",
+  "version": "0.0.0",
+  "description": "Ciphera Wallet - Zero-Knowledge Bitcoin Payments",
+  "author": "Zerosats Team",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/zerosats/ciphera-cli"
+  },
+  "main": "electron/main.cjs",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "electron": "electron .",
+    "electron:dev": "concurrently \"npm run dev\" \"wait-on http://localhost:3000 && electron .\"",
+    "electron:build": "npm run build && electron-builder",
+    "electron:build:mac": "npm run build && electron-builder --mac",
+    "electron:build:linux": "npm run build && electron-builder --linux",
+    "postinstall": "electron-builder install-app-deps"
+  },
+  "dependencies": {
+    "ethers": "^6.9.0"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.0",
+    "electron": "^28.0.0",
+    "electron-builder": "^24.9.0",
+    "vite": "^5.4.0",
+    "wait-on": "^7.2.0"
+  },
+  "build": {
+    "appId": "com.ciphera.wallet",
+    "productName": "Ciphera",
+    "copyright": "Copyright © 2024 Zerosats Team",
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "!node_modules/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "../target/release/ciphera-cli",
+        "to": "bin/ciphera-cli"
+      }
+    ],
+    "mac": {
+      "category": "public.app-category.finance",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "target": "dmg",
+      "artifactName": "Ciphera-arm64.dmg",
+      "extraResources": [
+        {
+          "from": "../target/release/ciphera-cli",
+          "to": "bin/ciphera-cli"
+        },
+        {
+          "from": "./binaries/darwin/bb",
+          "to": "bin/bb"
+        }
+      ]
+    },
+    "linux": {
+      "category": "Finance",
+      "target": "AppImage",
+      "artifactName": "Ciphera-x64.AppImage",
+      "extraResources": [
+        {
+          "from": "../target/release/ciphera-cli",
+          "to": "bin/ciphera-cli"
+        },
+        {
+          "from": "./binaries/linux64/bb",
+          "to": "bin/bb"
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    },
+    "dmg": {
+      "title": "Ciphera",
+      "contents": [
+        {
+          "x": 130,
+          "y": 220
+        },
+        {
+          "x": 410,
+          "y": 220,
+          "type": "link",
+          "path": "/Applications"
+        }
+      ]
+    }
+  }
+}

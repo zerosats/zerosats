@@ -1,14 +1,10 @@
-use element::Element;
-use serde::{Deserialize, Serialize};
-use zk_primitives::{
-    InputNote, Note, generate_note_kind_bridge_evm
+use crate::address::{
+    citrea_currency_from_contract, citrea_usdc_note_kind, citrea_wcbtc_note_kind,
 };
-use rand::rngs::OsRng;
-use rand::RngCore;
-use web3::types::H160;
-use std::str::FromStr;
-use crate::address::{citrea_wcbtc_note_kind, citrea_usdc_note_kind, citrea_currency_from_contract};
+use element::Element;
 use hash::hash_merge;
+use serde::{Deserialize, Serialize};
+use zk_primitives::{InputNote, Note};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct CipheraURL {
@@ -107,12 +103,11 @@ pub fn decode_url(address: &str) -> CipheraURL {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use zk_primitives::Note;
     use hash::hash_merge;
+    use zk_primitives::Note;
 
     #[test]
     fn test_roundtrip_from_wcbtc_note() {

@@ -20,7 +20,7 @@ use contracts::ConfirmationType;
 use ethereum_types::U256;
 use secp256k1::PublicKey;
 use web3::signing::{keccak256, SecretKey};
-use web3::types::{H256, Address};
+use web3::types::{Address, H256};
 
 use crate::rpc::{HealthResponse, ListTransactionsResponse, ListTxnsQuery};
 /// Singleton HTTP client shared across all NodeClient instances
@@ -326,7 +326,7 @@ impl NodeClient {
 
         let tx = rollup.mint(&mint_hash, &note.value, &note.contract).await?;
 
-        println!("\nSubmitted MINT tx {:#x}\n", tx);
+        println!("\nSubmitted MINT tx {tx:#x}\n");
 
         while rollup
             .client
@@ -372,8 +372,7 @@ impl NodeClient {
         if mint_erc20 {
             let tx_mint_erc20 = erc20_contract.mint(admin, 10000000).await?;
             println!(
-                "\nRequested ERC20 mint {:#x}. Approving next\n",
-                tx_mint_erc20
+                "\nRequested ERC20 mint {tx_mint_erc20:#x}. Approving next\n"
             );
         }
 
@@ -409,23 +408,25 @@ impl NodeClient {
         let rh = rollup.root_hash().await?;
         let b = rollup.block_height().await?;
         let kind_wcbtc = H256::from_slice(
-            &hex::decode("000200000000000013fb8d0c9d1c17ae5e40fff9be350f57840e9e66cd930000").unwrap()
+            &hex::decode("000200000000000013fb8d0c9d1c17ae5e40fff9be350f57840e9e66cd930000")
+                .unwrap(),
         );
 
         let kind_usdc = H256::from_slice(
-            &hex::decode("000200000000000013fb52f74a8f9bdd29f77a5efd7f6cb44dcf6906a4b60000").unwrap()
+            &hex::decode("000200000000000013fb52f74a8f9bdd29f77a5efd7f6cb44dcf6906a4b60000")
+                .unwrap(),
         );
 
         let token_wbtc = rollup.token(kind_wcbtc).await?;
-        let token_usdc = rollup.token(kind_usdc.into()).await?;
+        let token_usdc = rollup.token(kind_usdc).await?;
 
         println!("\nRollup State Info\n");
-        println!("\tChain                :{} ", chain_id);
-        println!("\tToken kind WBTC      :{:#x} ", token_wbtc);
-        println!("\tToken kind USDC      :{:#x} ", token_usdc);
+        println!("\tChain                :{chain_id} ");
+        println!("\tToken kind WBTC      :{token_wbtc:#x} ");
+        println!("\tToken kind USDC      :{token_usdc:#x} ");
 
-        println!("\tBlock                :{} ", b);
-        println!("\tRoot hash            :{:#x} ", rh);
+        println!("\tBlock                :{b} ");
+        println!("\tRoot hash            :{rh:#x} ");
 
         Ok(())
     }

@@ -4,7 +4,7 @@ use element::Element;
 use hash::hash_merge;
 use zk_primitives::{InputNote, Note, Utxo};
 
-use super::{Server, ServerConfig, mint, rollup_contract, erc20_contract};
+use super::{Server, ServerConfig, erc20_contract, mint, rollup_contract};
 use barretenberg::Prove;
 use testutil::eth::EthNode;
 

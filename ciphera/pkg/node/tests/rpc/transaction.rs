@@ -15,7 +15,7 @@ use zk_primitives::{InputNote, Note, Utxo, bridged_polygon_usdc_note_kind};
 
 use crate::rpc::{
     ElementResponse, ListBlocksOrder, ListBlocksQuery, ListTxnOrder, ListTxnsQuery, ServerConfig,
-    burn, mint, mint_with_note, rollup_contract, erc20_contract,
+    burn, erc20_contract, mint, mint_with_note, rollup_contract,
 };
 
 use super::Server;

@@ -3,21 +3,21 @@
 mod client;
 mod constants;
 mod eip7702;
+mod erc20;
 mod error;
 mod rollup;
 mod social_recovery;
 #[cfg(test)]
 mod tests;
-mod erc20;
 pub mod util;
 pub mod wallet;
 
 pub use client::{Client, ConfirmationType};
 pub use eip7702::Eip7702Account;
+pub use erc20::ERC20Contract;
 pub use error::{Error, Result};
 pub use rollup::RollupContract;
 pub use social_recovery::{GuardianConfig, GuardianEntry, SocialRecoveryContract};
-pub use erc20::ERC20Contract;
 
 pub use web3::{
     signing::SecretKey,

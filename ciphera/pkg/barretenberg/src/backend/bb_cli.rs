@@ -1,14 +1,14 @@
 use std::{
+    env,
     io::{Read, Write},
     path::PathBuf,
     process::Command,
-    env
 };
 
+use dirs::home_dir;
 use flate2::{Compression, read::GzEncoder};
 use tempfile::{NamedTempFile, TempDir};
 use tracing::{error, info};
-use dirs::home_dir;
 
 use super::Backend;
 use crate::Result;
@@ -21,7 +21,8 @@ fn verify_bb_executable(path: &PathBuf) -> bool {
         .output()
         .map(|output| {
             tracing::debug!(
-                "Installed Barretenberg version {}", String::from_utf8_lossy(&output.stdout)
+                "Installed Barretenberg version {}",
+                String::from_utf8_lossy(&output.stdout)
             );
             output.status.success()
         })
@@ -51,12 +52,12 @@ fn get_bb_path() -> Result<PathBuf> {
         }
     }
     // eventually searching in PATH
-    let which_result = Command::new("which")
-        .arg("bb")
-        .output()?;
+    let which_result = Command::new("which").arg("bb").output()?;
 
     if which_result.status.success() {
-        let bb_path = String::from_utf8_lossy(&which_result.stdout).into_owned().replace('\n', "");
+        let bb_path = String::from_utf8_lossy(&which_result.stdout)
+            .into_owned()
+            .replace('\n', "");
         let bb_exe = PathBuf::from(&bb_path);
         if bb_exe.exists() && verify_bb_executable(&bb_exe) {
             return Ok(PathBuf::from(&bb_exe));
@@ -186,7 +187,7 @@ impl Backend for CliBackend {
 mod tests {
     use super::*;
     use std::fs::{self, File, copy, remove_file};
-    use std::os::unix::fs::{symlink, PermissionsExt};
+    use std::os::unix::fs::{PermissionsExt, symlink};
     use temp_env::with_var;
 
     #[test]
@@ -208,18 +209,24 @@ mod tests {
 
     #[test]
     fn test_bb_in_system_path() {
-        let which_result = Command::new("which")
-            .arg("bb")
-            .output();
+        let which_result = Command::new("which").arg("bb").output();
 
         match which_result {
             Ok(output) if output.status.success() => {
                 // bb is in PATH, get_bb_path should succeed
                 let result = get_bb_path();
-                assert!(result.is_ok(), "bb is in PATH but get_bb_path failed: {:?}", result.err());
+                assert!(
+                    result.is_ok(),
+                    "bb is in PATH but get_bb_path failed: {:?}",
+                    result.err()
+                );
 
                 let path = result.unwrap();
-                assert!(verify_bb_executable(&path), "Found bb at {:?} but it's not executable", path);
+                assert!(
+                    verify_bb_executable(&path),
+                    "Found bb at {:?} but it's not executable",
+                    path
+                );
                 println!("HOME {}", path.display());
             }
             _ => {
@@ -231,25 +238,37 @@ mod tests {
 
     #[test]
     fn test_bb_in_local_dir() {
-        let which_result = Command::new("which")
-            .arg("bb")
-            .output();
+        let which_result = Command::new("which").arg("bb").output();
 
         match which_result {
             Ok(output) if output.status.success() => {
                 // reset PATH
-                let bb_bin = String::from_utf8_lossy(&output.stdout).into_owned().replace('\n', "");
+                let bb_bin = String::from_utf8_lossy(&output.stdout)
+                    .into_owned()
+                    .replace('\n', "");
                 let existing = PathBuf::from(&bb_bin);
                 with_var("HOME", Some("/tmp/bin"), || {
                     // doing similar modifications as in code because
                     // there is straight forward way to test this flow in cargo test env
-                    let new = std::env::current_exe().unwrap().parent().unwrap().join("bb");
+                    let new = std::env::current_exe()
+                        .unwrap()
+                        .parent()
+                        .unwrap()
+                        .join("bb");
                     let _ = copy(existing, &new);
                     let result = get_bb_path();
-                    assert!(result.is_ok(), "bb is in PATH but get_bb_path failed: {:?}", result.err());
+                    assert!(
+                        result.is_ok(),
+                        "bb is in PATH but get_bb_path failed: {:?}",
+                        result.err()
+                    );
 
                     let path = result.unwrap();
-                    assert!(verify_bb_executable(&path), "Found bb at {:?} but it's not executable", path);
+                    assert!(
+                        verify_bb_executable(&path),
+                        "Found bb at {:?} but it's not executable",
+                        path
+                    );
                     println!("Local {}", path.display());
                     let _ = remove_file(new);
                 });
@@ -269,7 +288,11 @@ mod tests {
                 assert!(result.is_ok(), "bb is not in BB_PATH: {:?}", result.err());
 
                 let path = result.unwrap();
-                assert!(verify_bb_executable(&path), "Found bb at {:?} but it's not executable", path);
+                assert!(
+                    verify_bb_executable(&path),
+                    "Found bb at {:?} but it's not executable",
+                    path
+                );
                 println!("BB_PATH {}", path.display());
             })
         });

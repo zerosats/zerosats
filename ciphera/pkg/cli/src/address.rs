@@ -1,12 +1,9 @@
 use element::Element;
-use serde::{Deserialize, Serialize};
-use zk_primitives::{
-    Note, generate_note_kind_bridge_evm
-};
 use rand::rngs::OsRng;
 use rand::RngCore;
+use serde::{Deserialize, Serialize};
 use web3::types::H160;
-use std::str::FromStr;
+use zk_primitives::{generate_note_kind_bridge_evm, Note};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct CipheraAddress {
@@ -43,53 +40,43 @@ pub fn citrea_usdc_note_kind() -> Element {
 
 pub fn citrea_token_data(ticker: &str) -> (Element, Element) {
     match ticker.to_uppercase().as_str() {
-        "WCBTC" => {
-            (Element::new(2), citrea_wcbtc_note_kind())
-        },
-        "USDC" => {
-            (Element::new(2), citrea_usdc_note_kind())
-        },
+        "WCBTC" => (Element::new(2), citrea_wcbtc_note_kind()),
+        "USDC" => (Element::new(2), citrea_usdc_note_kind()),
         _ => unreachable!("only WCBTC and USDC tokens are supported"),
     }
 }
 
 pub fn citrea_ticker_from_code(currency: u8) -> String {
     match currency {
-        1 => {
-            "WCBTC".to_string()
-        },
-        2 => {
-            "USDC".to_string()
-        },
+        1 => "WCBTC".to_string(),
+        2 => "USDC".to_string(),
         _ => unreachable!("only WCBTC and USDC tokens are supported"),
     }
 }
 
 pub fn citrea_currency_from_contract(contract: Element) -> u8 {
     if contract == citrea_wcbtc_note_kind() {
-        return 1
+        return 1;
     }
     if contract == citrea_usdc_note_kind() {
-        return 2
+        return 2;
     }
     unreachable!("only WCBTC and USDC tokens are supported")
 }
 
 pub fn citrea_ticker_from_contract(contract: Element) -> String {
     if contract == citrea_wcbtc_note_kind() {
-        return "WCBTC".to_string()
+        return "WCBTC".to_string();
     }
     if contract == citrea_usdc_note_kind() {
-        return "USDC".to_string()
+        return "USDC".to_string();
     }
     unreachable!("only WCBTC and USDC tokens are supported")
 }
 
 impl From<&CipheraAddress> for Note {
     fn from(value: &CipheraAddress) -> Self {
-        let psi = value
-            .psi
-            .unwrap_or_else(|| random_element());
+        let psi = value.psi.unwrap_or_else(random_element);
 
         let contract = match value.currency {
             1 => citrea_wcbtc_note_kind(),
@@ -212,12 +199,11 @@ pub fn decode_address(address: &str) -> CipheraAddress {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use zk_primitives::Note;
     use hash::hash_merge;
+    use zk_primitives::Note;
 
     #[test]
     fn test_roundtrip_from_wcbtc_note() {

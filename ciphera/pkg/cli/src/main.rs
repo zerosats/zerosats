@@ -3,10 +3,10 @@ use color_eyre::Result;
 use tracing::{debug, error};
 use web3::types::H160;
 
+use cli::address::citrea_ticker_from_contract;
+use cli::note_url::{decode_url, CipheraURL};
 use cli::NodeClient;
 use cli::Wallet;
-use cli::address::citrea_ticker_from_contract;
-use cli::note_url::{CipheraURL,decode_url};
 
 use barretenberg::Prove;
 use contracts::util::convert_h160_to_element;
@@ -66,7 +66,7 @@ enum Commands {
         #[arg(required = true, short, long)]
         amount: u64,
 
-        #[arg(short, long, default_value="WCBTC")]
+        #[arg(short, long, default_value = "WCBTC")]
         ticker: String,
     },
     Mint {
@@ -79,7 +79,7 @@ enum Commands {
         #[arg(required = true, short, long)]
         amount: u64,
 
-        #[arg(short, long, default_value="WCBTC")]
+        #[arg(short, long, default_value = "WCBTC")]
         ticker: String,
 
         #[arg(required = false, long, short, action=clap::ArgAction::SetTrue)]
@@ -98,7 +98,7 @@ enum Commands {
         #[arg(required = true, short, long)]
         amount: u64,
 
-        #[arg(short, long, default_value="WCBTC")]
+        #[arg(short, long, default_value = "WCBTC")]
         ticker: String,
     },
     Spend {
@@ -106,7 +106,7 @@ enum Commands {
         #[arg(required = true, short, long)]
         amount: u64,
 
-        #[arg(short, long, default_value="WCBTC")]
+        #[arg(short, long, default_value = "WCBTC")]
         ticker: String,
     },
     SpendTo {
@@ -168,7 +168,7 @@ async fn handle_create(name: &str, private_key: Option<String>) -> Result<(), Ap
 
     println!("\n✅ Wallet created successfully!");
     println!("\n📋 Wallet Details:");
-    println!("   Name: {}", name);
+    println!("   Name: {name}");
     println!("   File: {wallet_file}");
     println!("   Address: {}", wallet.address());
     println!("   Private Key: {}", wallet.pk);
@@ -249,9 +249,9 @@ async fn handle_address(name: &str, amount: u64, ticker: &str) -> Result<()> {
     let b = wallet.balance;
     let a = wallet.get_address(amount, ticker);
 
-    println!("\nWallet {} has been found:", name);
-    println!("\tBalance: {:?}", b);
-    println!("\tAddress: {:?}", a);
+    println!("\nWallet {name} has been found:");
+    println!("\tBalance: {b:?}");
+    println!("\tAddress: {a:?}");
 
     let encoded = a.encode_address();
     println!("\nEncoded: {encoded}");
@@ -401,13 +401,13 @@ async fn handle_receive(
         }
         (None, Some(link)) => {
             let input_note = InputNote::from(&decode_url(&link));
-            println!("\n🗝 Decoded note: {:?}", input_note);
+            println!("\n🗝 Decoded note: {input_note:?}");
             input_note
         }
         _ => return Err(AppError::NotEnoughBalance().into()),
     };
 
-    let values = input_note.note.value.to_u64_array().clone();
+    let values = input_note.note.value.to_u64_array();
     let Some(amount) = values.first() else {
         return Err(AppError::ConversionError().into());
     };
@@ -449,10 +449,7 @@ async fn handle_receive(
     }
 }
 
-async fn handle_import(
-    name: &str,
-    notefile: &str,
-) -> Result<()> {
+async fn handle_import(name: &str, notefile: &str) -> Result<()> {
     let mut client = NodeClient::builder()
         .name(name)
         .build()
@@ -570,7 +567,7 @@ async fn handle_burn(
 async fn handle_rollup(geth_rpc: &str, secret: &str, chain: u64, rollup: &str) -> Result<()> {
     // Build client with fluent API
     let client = NodeClient::builder().build()?;
-    let _ = client.state(geth_rpc, chain, secret, rollup).await?;
+    client.state(geth_rpc, chain, secret, rollup).await?;
 
     Ok(())
 }
@@ -618,12 +615,7 @@ async fn main() -> Result<()> {
             handle_note_spend(&cli.name, amount, &ticker_normalized).await?;
         }
         Commands::SpendTo { address } => {
-            handle_spend_to(
-                &cli.name,
-                &cli.host,
-                cli.port,
-                cli.timeout,
-                &address).await?;
+            handle_spend_to(&cli.name, &cli.host, cli.port, cli.timeout, &address).await?;
         }
         Commands::Receive { note, link } => {
             handle_receive(
@@ -638,11 +630,7 @@ async fn main() -> Result<()> {
             .await?;
         }
         Commands::Import { note } => {
-            handle_import(
-                &cli.name,
-                &note,
-            )
-                .await?;
+            handle_import(&cli.name, &note).await?;
         }
         Commands::Mint {
             geth_rpc,
@@ -686,7 +674,7 @@ async fn main() -> Result<()> {
                 &secret,
                 &address,
                 amount,
-                &ticker_normalized
+                &ticker_normalized,
             )
             .await?;
         }

@@ -104,7 +104,9 @@ async fn main() -> Result<(), eyre::Error> {
         .await?
         != U256::MAX
     {
-        let approve_txn = erc20_contract.approve_max(rollup_contract.address()).await?;
+        let approve_txn = erc20_contract
+            .approve_max(rollup_contract.address())
+            .await?;
         client
             .wait_for_confirm(
                 approve_txn,

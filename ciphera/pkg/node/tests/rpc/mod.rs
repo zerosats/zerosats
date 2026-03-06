@@ -21,7 +21,7 @@ use std::{
     sync::{Arc, Mutex, mpsc},
 };
 
-use contracts::{Address, RollupContract, SecretKey, ERC20Contract, util::convert_h160_to_element};
+use contracts::{Address, ERC20Contract, RollupContract, SecretKey, util::convert_h160_to_element};
 use futures::Future;
 use once_cell::sync::Lazy;
 use primitives::hash::CryptoHash;
