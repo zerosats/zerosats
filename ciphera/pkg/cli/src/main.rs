@@ -17,8 +17,8 @@ use zk_primitives::InputNote;
 use zk_primitives::{Note, Utxo};
 
 #[derive(Parser, Debug)]
-#[command(name = "pay-cli")]
-#[command(about = "Pay Network CLI - Connect to and interact with Pay nodes", long_about = None)]
+#[command(name = "Ciphera-cli")]
+#[command(about = "Ciphera Network CLI - Connect to and interact with Ciphera nodes", long_about = None)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,

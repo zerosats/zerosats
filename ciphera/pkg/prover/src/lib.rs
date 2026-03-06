@@ -160,7 +160,7 @@ impl Prover {
 
     #[tracing::instrument(err, skip(self), fields(height = input.height))]
     pub async fn rollup(&self, input: &RollupInput) -> Result<H256> {
-        info!("Sending proof and new root to Ethereum");
+        info!("Sending proof and new root to EVM");
 
         let tx = self
             .contract
@@ -190,7 +190,7 @@ impl Prover {
 
         info!(
             ?tx,
-            "Ethereum root rollup update sent. Waiting for receipt...",
+            "EVM root rollup update sent. Waiting for receipt...",
         );
 
         let wait_start = std::time::Instant::now();
@@ -224,7 +224,7 @@ impl Prover {
             tokio::time::sleep(std::time::Duration::from_secs(1)).await;
         }
 
-        info!("Ethereum root rollup update confirmed");
+        info!("EVM root rollup update confirmed");
 
         Ok(tx)
     }

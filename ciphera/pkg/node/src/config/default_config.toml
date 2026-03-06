@@ -34,9 +34,9 @@ chain-id = 5655 # dev chain
 
 rollup-contract-addr = "0xcf7ed3acca5a467e9e704c703e8d87f634fb0fc9"
 
-health-check-commit-interval-sec = 60
+health-check-commit-interval-sec = 120
 
-rollup-wait-time-ms = 3000
+rollup-wait-time-ms = 10000
 
 bad-blocks = []
 

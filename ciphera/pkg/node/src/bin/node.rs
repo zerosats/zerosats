@@ -4,11 +4,11 @@ use std::{pin::Pin, time::Duration};
 use clap::Parser;
 use eyre::Result;
 use futures::Future;
-use node::{Mode, Node, TxnStats};
 use node::{
-    config::{Config, cli::CliArgs},
+    config::{cli::CliArgs, Config},
     create_rpc_server,
 };
+use node::{Mode, Node, TxnStats};
 use rpc::tracing::setup_tracing;
 
 /// Run the contract worker with restart attempts on failure.
@@ -136,15 +136,14 @@ async fn main() -> Result<()> {
         res = server => {
             tracing::info!("rpc server shutdown: {:?}", res);
         }
-        res = async {
-            match run_contract_worker_with_retries(contract.clone(), Duration::from_secs(30), 3, Duration::from_secs(5)).await {
+        res = run_contract_worker_with_retries(contract.clone(), Duration::from_secs(30), 3, Duration::from_secs(5)) => {
+            match res {
                 Ok(()) => tracing::info!("contract worker shutdown: Ok(())"),
                 Err(e) => {
-                    tracing::error!(error = ?e, "contract worker shutdown after retries; node continues running");
+                    tracing::error!(error = ?e, "contract worker shutdown after retries");
                 }
             }
-            futures::future::pending::<()>().await
-        } => {}
+        }
         res = txn_stats.worker() => {
             tracing::info!("txn stats worker shutdown: {:?}", res);
         }

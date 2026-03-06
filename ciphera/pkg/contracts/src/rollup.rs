@@ -316,27 +316,9 @@ impl RollupContract {
     pub async fn worker(&self, interval: Duration) -> Result<()> {
         let this = self.clone();
         let handle = tokio::spawn(async move {
+            let mut events = this.listen_for_validator_set_added(interval).await?.boxed();
             let mut consecutive_transport_error_count = 0;
             const MAX_CONSECUTIVE_TRANSPORT_ERRORS: u64 = 5;
-
-            let mut events = loop {
-                match this.listen_for_validator_set_added(interval).await {
-                    Ok(events) => break events.boxed(),
-                    Err(err @ web3::Error::Transport(_)) => {
-                        consecutive_transport_error_count += 1;
-                        if consecutive_transport_error_count > MAX_CONSECUTIVE_TRANSPORT_ERRORS {
-                            return Err(err.into());
-                        }
-                        warn!(
-                            ?err,
-                            consecutive_transport_error_count,
-                            "Received a transport error while creating initial event listener. Retrying."
-                        );
-                        tokio::time::sleep(interval).await;
-                    }
-                    Err(err) => return Err(err.into()),
-                }
-            };
 
             while let Some(event) = events.next().await {
                 let event = match event {
