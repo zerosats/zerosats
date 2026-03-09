@@ -6,7 +6,6 @@ mod eip7702;
 mod erc20;
 mod error;
 mod rollup;
-mod social_recovery;
 #[cfg(test)]
 mod tests;
 pub mod util;
@@ -17,7 +16,6 @@ pub use eip7702::Eip7702Account;
 pub use erc20::ERC20Contract;
 pub use error::{Error, Result};
 pub use rollup::RollupContract;
-pub use social_recovery::{GuardianConfig, GuardianEntry, SocialRecoveryContract};
 
 pub use web3::{
     signing::SecretKey,
