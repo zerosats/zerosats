@@ -118,7 +118,7 @@ We are running a node on AWS. You'll need to connect to it before performing ope
    Current Height: 149252
    Height (verified): 149253
 
-✨ Successfully connected to Pay node at 63.176.138.198:8091
+✨ Successfully connected to Ciphera node at 63.176.138.198:8091
 ```
 
 ---

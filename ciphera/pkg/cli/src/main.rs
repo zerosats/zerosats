@@ -17,7 +17,7 @@ use zk_primitives::InputNote;
 use zk_primitives::{Note, Utxo};
 
 #[derive(Parser, Debug)]
-#[command(name = "Ciphera-cli")]
+#[command(name = "ciphera-cli")]
 #[command(about = "Ciphera Network CLI - Connect to and interact with Ciphera nodes", long_about = None)]
 struct Cli {
     #[command(subcommand)]
@@ -60,7 +60,7 @@ enum Commands {
         #[arg(long)]
         private_key: Option<String>,
     },
-    /// Connect to a Pay node and check its health
+    /// Connect to a Ciphera node and check its health
     Sync {},
     Address {
         #[arg(required = true, short, long)]
@@ -188,7 +188,7 @@ async fn handle_create(name: &str, private_key: Option<String>) -> Result<(), Ap
 
 /// Handle the connect command
 ///
-/// Connects to a Pay node and performs health checks
+/// Connects to a Ciphera node and performs health checks
 async fn handle_sync(name: &str, host: &str, port: u16, timeout_secs: u64) -> Result<()> {
     debug!(
         "Connecting wallet {} to Ciphera node at {}:{}",
@@ -240,7 +240,7 @@ async fn handle_sync(name: &str, host: &str, port: u16, timeout_secs: u64) -> Re
         }
     }
 
-    println!("\n✨ Successfully connected to Pay node at {host}:{port}");
+    println!("\n✨ Successfully connected to Ciphera node at {host}:{port}");
     Ok(())
 }
 
@@ -384,7 +384,7 @@ async fn handle_receive(
         }
     }
 
-    println!("\n✨ Successfully connected to Pay node at {host}:{port}");
+    println!("\n✨ Successfully connected to Ciphera node at {host}:{port}");
 
     let input_note = match (notefile, notelink) {
         (Some(path), None) => {
@@ -596,7 +596,7 @@ async fn main() -> Result<()> {
     // Initialize logging
     init_logging(cli.verbose);
 
-    debug!("Starting Pay CLI");
+    debug!("Starting Ciphera CLI");
 
     // Execute command
     match cli.command {

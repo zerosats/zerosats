@@ -1,4 +1,4 @@
-//! Node client for communicating with Pay RPC nodes
+//! Node client for communicating with Ciphera RPC nodes
 //!
 //! Uses a builder pattern with a singleton HTTP client for efficient
 //! connection pooling and session reuse across multiple requests.
@@ -110,7 +110,7 @@ impl Default for NodeClientBuilder {
     }
 }
 
-/// Node client for communicating with Pay RPC nodes
+/// Node client for communicating with Ciphera RPC nodes
 ///
 /// Uses a shared singleton HTTP client for efficient connection pooling.
 /// Instances can be created via the builder pattern.
@@ -143,7 +143,7 @@ impl NodeClient {
     /// Create a new NodeClient with default settings for localhost
     ///
     /// # Arguments
-    /// * `host` - The hostname or IP address of the Pay node
+    /// * `host` - The hostname or IP address of the Ciphera node
     /// * `port` - The RPC server port
     /// * `timeout_secs` - Request timeout in seconds
     ///
