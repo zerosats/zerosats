@@ -6,7 +6,7 @@
 #![allow(clippy::doc_markdown)]
 #![deny(missing_docs)]
 
-//! Interface for requests to Payy Network
+//! Interface for requests to Ciphera Network
 
 mod elements;
 mod error;

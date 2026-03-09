@@ -90,7 +90,7 @@ impl Client {
     pub async fn fast_gas_price(&self) -> Result<U256, web3::Error> {
         let gas_price: U256 =
             retry_on_network_failure(move || self.client.eth().gas_price()).await?;
-        let fast_gas_price = gas_price * 2;
+        let fast_gas_price = gas_price * 1.25;
 
         match self.minimum_gas_price {
             Some(minimum_gas_price) if fast_gas_price < minimum_gas_price => Ok(minimum_gas_price),

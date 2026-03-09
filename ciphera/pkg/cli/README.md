@@ -87,10 +87,10 @@ See [Getting Started Guide](../../GettingStarted.md) for detailed instructions.
 
 ## Network Details
 
-- **Payy Node**: `63.176.138.198:8091`
+- **Ciphera Node**: `ciphera.satsbridge.com:8091`
 - **Citrea Chain ID**: `5115`
 - **Citrea wcBTC Token**: `0x8d0c9d1c17aE5e40ffF9bE350f57840E9E66Cd93`
-- **Rollup Contract**: `0x1a0E789aa9aE8883C5e55B8E57EFC94F00943d53`
+- **Rollup Contract**: `0x26c698fa720806f93d94432d430415e3d15d3539`
 - **Citrea RPC**: `https://rpc.testnet.citrea.xyz`
 
 ## How It Works

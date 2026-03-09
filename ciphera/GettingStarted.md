@@ -76,7 +76,7 @@ npx hardhat compile
 cd ..
 ```
 
-### 3. Build the CLI (make sure you're in the Payy directory)
+### 3. Build the CLI (make sure you're in the project directory)
 
 ```bash
 cargo build --release
@@ -90,12 +90,12 @@ The compiled binary will be at: `target/release/ciphera-cli`
 
 ### Connection Details
 
-For this guide, we'll use our fork of Payy as the payments network and Citrea testnet as the parent chain that hosts the rollup contract and bridge contract. Relevant information:
+For this guide, we'll use our fork of Ciphera as the payments network and Citrea testnet as the parent chain that hosts the rollup contract and bridge contract. Relevant information:
 
-- **Payy Node**: `63.176.138.198:8091`
+- **Ciphera Node**: `ciphera.satsbridge.com`
 - **Citrea Chain ID**: `5115`
 - **Citrea wcBTC Token Contract**: `0x8d0c9d1c17aE5e40ffF9bE350f57840E9E66Cd93`
-- **Our Rollup Contract on Citrea**: `0x1a0E789aa9aE8883C5e55B8E57EFC94F00943d53`
+- **Our Rollup Contract on Citrea**: `0x26c698fa720806f93d94432d430415e3d15d3539`
 - **Citrea RPC**: `https://rpc.testnet.citrea.xyz`
 
 ---

@@ -191,7 +191,7 @@ async fn handle_create(name: &str, private_key: Option<String>) -> Result<(), Ap
 /// Connects to a Pay node and performs health checks
 async fn handle_sync(name: &str, host: &str, port: u16, timeout_secs: u64) -> Result<()> {
     debug!(
-        "Connecting wallet {} to Payy node at {}:{}",
+        "Connecting wallet {} to Ciphera node at {}:{}",
         name, host, port
     );
 
@@ -297,7 +297,7 @@ async fn handle_spend_to(
     address: &str,
 ) -> Result<()> {
     debug!(
-        "Connecting wallet {} to Payy node at {}:{}",
+        "Connecting wallet {} to Ciphera node at {}:{}",
         name, host, port
     );
 
@@ -346,7 +346,7 @@ async fn handle_receive(
     notelink: Option<String>,
 ) -> Result<()> {
     debug!(
-        "Connecting wallet {} to Payy node at {}:{}",
+        "Connecting wallet {} to Ciphera node at {}:{}",
         name, host, port
     );
 

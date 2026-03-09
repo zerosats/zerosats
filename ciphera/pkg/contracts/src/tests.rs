@@ -92,8 +92,8 @@ async fn sign_block(env: &Env, new_root: &Element, height: u64, other_hash: [u8;
 
     let msg = keccak256(&{
         let mut bytes = vec![];
-        bytes.extend_from_slice(&("Payy".len() as u64).to_be_bytes());
-        bytes.extend_from_slice(b"Payy");
+        bytes.extend_from_slice(&("Ciphera".len() as u64).to_be_bytes());
+        bytes.extend_from_slice(b"Ciphera");
         bytes.extend_from_slice(&accept_hash);
         bytes
     });

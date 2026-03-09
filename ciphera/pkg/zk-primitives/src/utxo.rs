@@ -194,9 +194,9 @@ pub enum UtxoKind {
     Null,
     /// Send a note (of the same token) to another address
     Send,
-    /// A mint transaction (minting on Payy Network)
+    /// A mint transaction (minting on Ciphera Network)
     Mint,
-    /// A burn transaction (burning on Payy Network)
+    /// A burn transaction (burning on Ciphera Network)
     Burn,
 }
 

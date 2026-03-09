@@ -3,7 +3,7 @@
 Rollup smart contracts to verify the rollup state on Citrea. A subfolder `/scripts` contains deployment scripts and 
 some test scripts running transactions on both testnet (Chain ID `5115`) and local devnet (Chain ID 5655).
 
-Core components (also including outdated Payy components):
+Core components (also including outdated Ciphera components):
 
 1. RollupV1 contracts with transparent proxy upgradeability
 2. Zero-knowledge proof verifiers (both legacy and Honk-based)
@@ -197,7 +197,7 @@ contracts including rollup infrastructure, verifiers, and USDC tokens.
 #### 3. **USDC Token Deployment**
 
 - `deploy-usdc-devnet.ts` - Deploys USDC contract from binary
-- `test-deployment-devnet.ts` - Further USDC setup with initialization, minting, and approval pulled from Payy
+- `test-deployment-devnet.ts` - Further USDC setup with initialization, minting, and approval pulled from Ciphera
   repository
 
 #### 4. **Testing & Utilities**

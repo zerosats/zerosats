@@ -1,6 +1,6 @@
 # Noir Circuits
 
-This directory contains the Noir circuits for the Payy Network.
+This directory contains the Noir circuits for the Ciphera Network.
 
 ## Updating Circuits
 

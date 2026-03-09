@@ -10,7 +10,7 @@ use tracing::error;
 #[cfg(feature = "ts-rs")]
 use ts_rs::TS;
 
-/// Result for public errors from Payy Network
+/// Result for public errors from Ciphera Network
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 
 /// Error data for a note already spent
@@ -63,7 +63,7 @@ pub enum Error {
     Client(#[from] Box<dyn std::error::Error + Send + Sync + 'static>),
 }
 
-/// Public errors from Payy Network node
+/// Public errors from Ciphera Network node
 #[derive(Debug, Clone, thiserror::Error, HTTPErrorConversion, Serialize, Deserialize)]
 pub enum RpcError {
     /// Submitted proof is not valid (i.e. verify of proof failed)
@@ -99,14 +99,14 @@ pub enum RpcError {
     TxnOutputCommitmentsExistedRecently(ElementsVecData),
 
     /// Mint is not in the contract on the base chain, it is required that
-    /// all mints be registered on the base chain before being submitted to Payy
+    /// all mints be registered on the base chain before being submitted to Ciphera
     /// Network, as we need to validate the users locked funds before releasing them
-    /// on Payy Network
+    /// on Ciphera Network
     #[not_found("mint-not-in-contract")]
     #[error("mint leaf is not in the contract")]
     MintIsNotInTheContract(ElementData),
 
-    /// Mint has already been spent on the Payy Network. This error occurs when attempting
+    /// Mint has already been spent on the Ciphera Network. This error occurs when attempting
     /// to spend a mint that has already been rolled up. The smart contract has marked the mint as spent.
     /// Each mint can only be spent once to prevent double-spending attacks. The client should check
     /// their transaction history and avoid reusing spent mints.

@@ -42,8 +42,8 @@ struct Verifier {
     bool enabled;
 }
 
-string constant NETWORK = "Payy";
-uint64 constant NETWORK_LEN = 4;
+string constant NETWORK = "Ciphera";
+uint64 constant NETWORK_LEN = 7;
 uint256 constant MAX_FUTURE_BLOCKS = 2_592_000; // 30 days (~1 sec blocks)
 
 contract RollupV1 is Initializable, OwnableUpgradeable {

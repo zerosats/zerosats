@@ -85,8 +85,8 @@ describe('RollupV1 Block Height Validation', function () {
       const contractPackedBytes = await rollup.debugGetPackedBytes(acceptMsg)
       
       // Create our packed bytes
-      const NETWORK = 'Payy'
-      const NETWORK_LEN = 4
+      const NETWORK = 'Ciphera'
+      const NETWORK_LEN = 7
       
       // Create the uint64 encoding manually - 8 bytes big-endian
       const networkLenBytes = new Uint8Array(8)
@@ -285,8 +285,8 @@ describe('RollupV1 Block Height Validation', function () {
   }
 
   async function getSignatureMessageHash(newRoot: string, height: number, otherHash: string) {
-    const NETWORK = 'Payy'
-    const NETWORK_LEN = 4
+    const NETWORK = 'Ciphera'
+    const NETWORK_LEN = 7
 
     const proposalHash = ethers.keccak256(
       ethers.AbiCoder.defaultAbiCoder().encode(

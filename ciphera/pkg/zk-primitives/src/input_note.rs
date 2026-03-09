@@ -45,7 +45,7 @@ impl InputNote {
         InputNote::from(&decode_activity_url_payload(link))
     }
 
-    /// Generates a Payy link from the Note + Private Key
+    /// Generates a Ciphera link from the Note + Private Key
     #[must_use]
     pub fn generate_link(&self) -> String {
         let payload: NoteURLPayload = self.into();

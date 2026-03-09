@@ -10,7 +10,7 @@ use std::collections::BTreeMap;
 use ts_rs::TS;
 
 /// A note is used in zk circuits to represent some kind of token (e.g. USDC) on
-/// the Payy Network.
+/// the Ciphera Network.
 ///
 /// This is used to create notes in the zk-rollup
 #[cfg_attr(feature = "ts-rs", derive(TS))]

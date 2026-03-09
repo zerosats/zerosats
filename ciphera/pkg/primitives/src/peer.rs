@@ -137,8 +137,8 @@ impl PeerIdSigner {
 
     pub fn sign(&self, msg: &CryptoHash) -> Signature {
         let mut hasher = Keccak256::new();
-        hasher.update(b"Payy".len().to_be_bytes());
-        hasher.update(b"Payy");
+        hasher.update(b"Ciphera".len().to_be_bytes());
+        hasher.update(b"Ciphera");
         hasher.update(msg.inner());
         let msg = Into::<[u8; 32]>::into(hasher.finalize());
         let msg = Message::from_digest(msg);

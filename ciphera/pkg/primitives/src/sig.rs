@@ -7,7 +7,7 @@ use secp256k1::{
 use serde::{Deserialize, Serialize};
 use sha3::{Digest, Keccak256};
 
-const NETWORK: &str = "Payy";
+const NETWORK: &str = "Ciphera";
 
 #[derive(
     Debug, Clone, PartialEq, Eq, Hash, BorshSerialize, BorshDeserialize, Serialize, Deserialize,
