@@ -188,10 +188,7 @@ impl Prover {
             )
             .await?;
 
-        info!(
-            ?tx,
-            "EVM root rollup update sent. Waiting for receipt...",
-        );
+        info!(?tx, "EVM root rollup update sent. Waiting for receipt...",);
 
         let wait_start = std::time::Instant::now();
         while self
