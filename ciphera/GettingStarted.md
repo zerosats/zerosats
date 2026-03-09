@@ -90,7 +90,7 @@ The compiled binary will be at: `target/release/ciphera-cli`
 
 ### Connection Details
 
-For this guide, we'll use our fork of Ciphera as the payments network and Citrea testnet as the parent chain that hosts the rollup contract and bridge contract. Relevant information:
+For this guide, we'll use Ciphera as the payments network and Citrea testnet as the parent chain that hosts the rollup contract and bridge contract. Relevant information:
 
 - **Ciphera Node**: `ciphera.satsbridge.com`
 - **Citrea Chain ID**: `5115`

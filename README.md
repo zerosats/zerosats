@@ -1,6 +1,7 @@
 # Zerosats
 
-A privacy-preserving appchain built on top of Citrea.
+A privacy-preserving appchain built on top of Citrea. It is a friendly fork of [Payy](https://github.com/polybase/payy) 
+project codebase.
 
 Ciphera services for self-hosting:
 
@@ -59,8 +60,6 @@ LOG_HARDHAT_DEPLOY_OUTPUT=1 cargo test rpc::elements::list_elements_include_spen
 ```
 
 RUST_LOG=debug LOG_CITREA_OUTPUT=1 LOG_HARDHAT_DEPLOY_OUTPUT=1 cargo test tests::burn_to -- --test-threads=1
-
-
 
 fn run(&mut self, log_output: Option<bool>) {
 let mut command = Command::new(find_binary());
