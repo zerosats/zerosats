@@ -87,14 +87,14 @@ impl Client {
         Ok(block_number)
     }
 
-    pub async fn fast_gas_price(&self) -> Result<U256, web3::Error> {
+    pub async fn save_gas_price(&self) -> Result<U256, web3::Error> {
         let gas_price: U256 =
             retry_on_network_failure(move || self.client.eth().gas_price()).await?;
-        let fast_gas_price = gas_price * 1.25;
+        let save_gas_price =  gas_price - (gas_price >> 2); // (1 + 1/2^2) multiplier or div
 
         match self.minimum_gas_price {
-            Some(minimum_gas_price) if fast_gas_price < minimum_gas_price => Ok(minimum_gas_price),
-            _ => Ok(fast_gas_price),
+            Some(minimum_gas_price) if save_gas_price < minimum_gas_price => Ok(minimum_gas_price),
+            _ => Ok(save_gas_price), // works most of the time unless MINIMUM_GAS_PRICE_GWEI is set
         }
     }
 
@@ -147,7 +147,7 @@ impl Client {
     }
 
     pub(crate) async fn options(&self, address: Address) -> Result<Options, web3::Error> {
-        let gas_price = self.fast_gas_price().await?;
+        let gas_price = self.save_gas_price().await?;
         let nonce = self.nonce(address).await?;
 
         Ok(Options {

@@ -8,7 +8,7 @@ env-name = "dev"
 block-txns-count = 6
 
 # Min duration for a block to be produced
-min-block-duration = 1000
+min-block-duration = 2000
 
 # The maximum number of blocks to request in a snapshot chunk
 sync-chunk-size = 10000
