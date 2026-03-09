@@ -89,7 +89,7 @@ impl Config {
         let mut config: Config = Figment::new()
             .merge(Toml::file(args.config_path))
             .merge(
-                Env::prefixed("POLY_")
+                Env::prefixed("CIPHERA_")
                     .split("__")
                     .map(|k| k.as_str().replace('_', "-").into()),
             )
