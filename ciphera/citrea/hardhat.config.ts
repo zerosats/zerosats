@@ -52,8 +52,8 @@ const config: HardhatUserConfig = {
     },
     citreaMainnet: {
       type: "http",
-      chainType: "l1",
-      url: `https://eth-sepolia.g.alchemy.com/v2/${configVariable("ALCHEMY_MAINNET_API_KEY")}`,
+      chainId: 4114,
+      url: `https://citrea-mainnet.g.alchemy.com/v2/${configVariable("ALCHEMY_MAINNET_API_KEY")}`,
       accounts: { mnemonic:configVariable("MNEMONIC")},
     },
     citreaDevnet: {
