@@ -2,7 +2,6 @@
 
 mod client;
 mod constants;
-mod eip7702;
 mod erc20;
 mod error;
 mod rollup;
@@ -12,7 +11,6 @@ pub mod util;
 pub mod wallet;
 
 pub use client::{Client, ConfirmationType};
-pub use eip7702::Eip7702Account;
 pub use erc20::ERC20Contract;
 pub use error::{Error, Result};
 pub use rollup::RollupContract;
