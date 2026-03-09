@@ -10,7 +10,7 @@ use crate::{
 
 /// NoteURLPayload is a struct that contains the data required to create a note URL
 ///
-/// These are used to send payments to a user e.g. `https://payy.link/s#<NoteURLPayload>`
+/// These are used to send payments to a user e.g. `https://ciphera.satsbridge.com/s#<NoteURLPayload>`
 #[derive(Debug, Serialize, Deserialize)]
 pub struct NoteURLPayload {
     /// The version of the note URL payload

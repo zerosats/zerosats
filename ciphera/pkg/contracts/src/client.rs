@@ -90,11 +90,10 @@ impl Client {
     pub async fn save_gas_price(&self) -> Result<U256, web3::Error> {
         let gas_price: U256 =
             retry_on_network_failure(move || self.client.eth().gas_price()).await?;
-        let save_gas_price =  gas_price - (gas_price >> 2); // (1 + 1/2^2) multiplier or div
 
         match self.minimum_gas_price {
-            Some(minimum_gas_price) if save_gas_price < minimum_gas_price => Ok(minimum_gas_price),
-            _ => Ok(save_gas_price), // works most of the time unless MINIMUM_GAS_PRICE_GWEI is set
+            Some(minimum_gas_price) if gas_price < minimum_gas_price => Ok(minimum_gas_price),
+            _ => Ok(gas_price), // works most of the time unless MINIMUM_GAS_PRICE_GWEI is set
         }
     }
 

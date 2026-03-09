@@ -64,13 +64,13 @@ A step-by-step guide to building and using the Ciphera private payments CLI wall
 
 ```bash
 git clone <https://github.com/zerosats/zerosats/tree/wcbtc-janusz-fork>
-cd zerosats/payy
+cd zerosats/ciphera
 ```
 
 ### 2. Compile Solidity Contracts
 
 ```bash
-cd payy/citrea
+cd ciphera/citrea
 npm install
 npx hardhat compile
 cd ..

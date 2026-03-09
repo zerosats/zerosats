@@ -102,7 +102,7 @@ Returns an object containing:
 
 
 ```bash
- podman run -v $(pwd)/payy/pkg:/app/pkg:z --rm -it --entrypoint bash ciphera-cli
+podman run -v $(pwd)/ciphera/pkg:/app/pkg:z --rm -it --entrypoint bash ciphera-cli
 ```
 
 ```bash

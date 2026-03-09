@@ -103,7 +103,7 @@ mod test {
         unsafe {
             std::env::set_var(
                 "TS_RS_EXPORT_DIR",
-                "../../app/packages/payy/src/ts-rs-bindings/",
+                "../../app/packages/ciphera/src/ts-rs-bindings/",
             );
         }
         MigrateProofBytes::export().expect("failed to export MigrateProofBytes");
@@ -114,7 +114,7 @@ mod test {
         unsafe {
             std::env::set_var(
                 "TS_RS_EXPORT_DIR",
-                "../../app/packages/payy/src/ts-rs-bindings/",
+                "../../app/packages/ciphera/src/ts-rs-bindings/",
             );
         }
         MigratePublicInput::export().expect("failed to export MigratePublicInput");
@@ -125,7 +125,7 @@ mod test {
         unsafe {
             std::env::set_var(
                 "TS_RS_EXPORT_DIR",
-                "../../app/packages/payy/src/ts-rs-bindings/",
+                "../../app/packages/ciphera/src/ts-rs-bindings/",
             );
         }
         MigrateProof::export().expect("failed to export MigrateProof");
