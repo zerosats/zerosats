@@ -3,7 +3,7 @@ use actix_web::web;
 use node_interface::NetworkResponse;
 use rpc::error::HttpResult;
 
-/// GET /height - returns data about the rollup (e.g. root hash, version, etc)
+/// GET /network - returns data about the Ciphera network: main contract, chain id, nodes etc.
 
 #[tracing::instrument(err, skip(state))]
 pub async fn get_network_info(state: web::Data<State>) -> HttpResult<web::Json<NetworkResponse>> {

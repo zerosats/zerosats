@@ -5,6 +5,6 @@ use serde::{Deserialize, Serialize};
 pub struct NetworkResponse {
     /// Base chain contract
     pub rollup_contract: String,
-    /// Base chain Id
+    /// Base chain ID
     pub chain_id: u64,
 }

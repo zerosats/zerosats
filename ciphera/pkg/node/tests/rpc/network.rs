@@ -9,6 +9,7 @@ use super::Server;
 async fn network_info() {
     let eth_node = EthNode::default().run_and_deploy().await;
     let server = Server::setup_and_wait(ServerConfig::single_node(false), eth_node).await;
-    let resp = server.height().await.unwrap();
-    assert_eq!(resp.root_hash, smirk::empty_tree_hash(MERKLE_TREE_DEPTH));
+    let resp = server.network().await.unwrap();
+    assert_eq!(resp.rollup_contract, "0xx");
+    assert_eq!(resp.chain_id, 5115);
 }
