@@ -14,6 +14,11 @@ temp/
 *.seed
 *.pid.lock
 
+# Build caches
+.citrea/
+ciphera/target/
+ciphera/citrea/node_modules/
+
 # Docker & Kubernetes
 Dockerfile*
 docker-compose*.yml

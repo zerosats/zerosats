@@ -19,7 +19,12 @@ RUN apt-get update && apt-get install -y \
     libbz2-dev \
     liblz4-dev \
     libzstd-dev \
-    protobuf-compiler
+    protobuf-compiler \
+    libc++-dev
+
+# Install Rust
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain 1.88.0
+ENV PATH="/root/.cargo/bin:$PATH"
 
 RUN curl -fsSL https://deb.nodesource.com/setup_22.x -o nodesource_setup.sh
 RUN bash nodesource_setup.sh
@@ -31,8 +36,8 @@ RUN apt-get update && apt-get install -y nodejs \
 RUN curl -L https://raw.githubusercontent.com/noir-lang/noirup/refs/heads/main/install | bash
 RUN . /root/.bashrc && noirup
 
-RUN curl -L https://raw.githubusercontent.com/AztecProtocol/aztec-packages/refs/heads/master/barretenberg/bbup/install | bash
-RUN . /root/.bashrc && bbup -v 1.0.0-nightly.20250723
+RUN curl -L https://raw.githubusercontent.com/AztecProtocol/aztec-packages/master/barretenberg/bbup/install | bash
+RUN . /root/.bashrc && bbup -v 1.0.0-nightly.20250723 || echo "WARN: bb v1.0.0-nightly.20250723 unavailable (nightly cleaned up from GitHub). Install manually if needed for Noir circuit compilation."
 
 # Create a workspace directory
 WORKDIR /app
