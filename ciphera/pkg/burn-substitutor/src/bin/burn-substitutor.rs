@@ -91,12 +91,9 @@ async fn main() -> Result<(), eyre::Error> {
         secret_key,
     )
     .await?;
-    let erc20_contract = contracts::ERC20Contract::load(
-        client.clone(),
-        &config.erc20_contract_address,
-        secret_key,
-    )
-    .await?;
+    let erc20_contract =
+        contracts::ERC20Contract::load(client.clone(), &config.erc20_contract_address, secret_key)
+            .await?;
 
     if erc20_contract
         .allowance(rollup_contract.signer_address, rollup_contract.address())

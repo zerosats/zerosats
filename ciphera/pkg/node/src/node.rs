@@ -559,4 +559,15 @@ impl NodeShared {
     pub fn estimate_block_time(height: BlockHeight, max_height: BlockHeight) -> u64 {
         chrono::Utc::now().timestamp() as u64 - (max_height.saturating_sub(height.0))
     }
+
+    pub(crate) fn rollup_contract(&self) -> String {
+        format!(
+            "0x{}",
+            hex::encode(self.rollup_contract.address().as_bytes())
+        )
+    }
+
+    pub(crate) fn chain_id(&self) -> u64 {
+        self.config.chain_id
+    }
 }

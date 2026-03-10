@@ -1,6 +1,7 @@
 mod elements;
 mod empty;
 mod merkle;
+mod network;
 mod smirk;
 mod sync;
 mod transaction;
@@ -29,8 +30,8 @@ use reqwest::Url;
 use serde_json::json;
 use testutil::{PortPool, eth::EthNode};
 use tokio::runtime::RuntimeFlavor;
-use zk_primitives::{InputNote, Note, UtxoProof};
 use web3::types::H256;
+use zk_primitives::{InputNote, Note, UtxoProof};
 
 type Error = serde_json::Value;
 
@@ -600,6 +601,22 @@ impl Server {
         }
 
         Ok(res.json().await.unwrap())
+    }
+
+    pub async fn network(&self) -> Result<NetworkResp, Error> {
+        let res = self
+            .client
+            .get(self.base_url().join("/v0/network").unwrap())
+            .send()
+            .await
+            .unwrap();
+
+        if !res.status().is_success() {
+            let err = res.json::<Error>().await.unwrap();
+            return Err(err);
+        }
+
+        Ok(res.json::<NetworkResp>().await.unwrap())
     }
 }
 

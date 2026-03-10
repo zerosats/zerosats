@@ -49,6 +49,12 @@ pub struct HeightResp {
     pub root_hash: Element,
 }
 
+#[derive(Serialize, Deserialize)]
+pub struct NetworkResp {
+    pub rollup_contract: String,
+    pub chain_id: u64,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct MerklePathResponse {
     pub paths: Vec<Vec<Element>>,
