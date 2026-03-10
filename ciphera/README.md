@@ -22,11 +22,16 @@ For a detailed description of the architecture, please [download whitepaper](htt
 
 ## Tests
 
-```
-cargo test
-```
+The main entry point for e2e coverage is `../scripts/test.sh` from this directory, or `./scripts/test.sh` from the repo root.
 
-Note: these tests can take a while to run on your laptop (e.g. more than 20 minutes)
+- `./scripts/test.sh` runs the non-ignored node e2e tests first, then the ignored full-stack integration tests.
+- `./scripts/test.sh --docker` is the most reproducible way to run them if local Citrea/toolchain setup is missing.
+- `./scripts/test.sh burn_tx` runs a specific ignored integration test.
+- `./scripts/test.sh --verbose` enables Citrea / deploy / node logs.
+
+Note: these are not lightweight tests. Even the non-ignored e2e suite is slow and environment-heavy. In one recent run, the non-ignored phase alone took about 9 minutes 41 seconds (MBP M2 Pro), and it depends on Citrea, Hardhat, and Barretenberg/proving setup. So these are harder to run than a normal `cargo test` sanity check.
+
+For broad unit/integration coverage outside the Citrea-backed e2e flow, `cargo test` still works, but expect the full workspace to take a while on a laptop.
 
 
 ## Git LFS

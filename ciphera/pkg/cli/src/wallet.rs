@@ -7,9 +7,7 @@ use std::num::ParseIntError;
 use std::path::Path;
 use zk_primitives::{InputNote, Note, Utxo};
 
-use crate::address::{
-    citrea_ticker_from_contract, citrea_token_data, decode_address,
-};
+use crate::address::{citrea_ticker_from_contract, citrea_token_data, decode_address};
 use crate::rpc::TxnWithInfo;
 use crate::CipheraAddress;
 use std::collections::HashMap;
@@ -227,9 +225,7 @@ impl Wallet {
                 Note::padding_note(),
             )
         } else if *amount_1 < *amount {
-            println!(
-                "Pulling additional note. Requested {amount}, available {amount_1}"
-            );
+            println!("Pulling additional note. Requested {amount}, available {amount_1}");
             let delta = amount - amount_1;
             let input_note_2 = self.spend_note(delta, &ticker)?;
 

@@ -4,11 +4,11 @@ use std::{pin::Pin, time::Duration};
 use clap::Parser;
 use eyre::Result;
 use futures::Future;
+use node::{Mode, Node, TxnStats};
 use node::{
-    config::{cli::CliArgs, Config},
+    config::{Config, cli::CliArgs},
     create_rpc_server,
 };
-use node::{Mode, Node, TxnStats};
 use rpc::tracing::setup_tracing;
 
 /// Run the contract worker with restart attempts on failure.

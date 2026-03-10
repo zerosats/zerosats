@@ -1,6 +1,7 @@
 mod elements;
 mod empty;
 mod merkle;
+mod network;
 mod smirk;
 mod sync;
 mod transaction;
@@ -29,8 +30,8 @@ use reqwest::Url;
 use serde_json::json;
 use testutil::{PortPool, eth::EthNode};
 use tokio::runtime::RuntimeFlavor;
-use zk_primitives::{InputNote, Note, UtxoProof};
 use web3::types::H256;
+use zk_primitives::{InputNote, Note, UtxoProof};
 
 type Error = serde_json::Value;
 
@@ -59,15 +60,12 @@ struct ServerConfig {
 }
 
 impl ServerConfig {
-    fn single_node(keep_port_after_drop: bool) -> Self {
+    fn single_node(keep_port_after_drop: bool, eth_node: &EthNode) -> Self {
+        let proxy_hex = eth_node.deployed().rollup_proxy.trim_start_matches("0x");
         Self {
             keep_port_after_drop,
             safe_eth_height_offset: 0,
-            rollup_contract: Address::from_slice(
-                &hex::decode("cf7ed3acca5a467e9e704c703e8d87f634fb0fc9").unwrap(),
-                // make sure it corresponds to proxy address when running with
-                // LOG_HARDHAT_DEPLOY_OUTPUT=1 cargo test -- --test-threads=1
-            ),
+            rollup_contract: Address::from_slice(&hex::decode(proxy_hex).unwrap()),
             secret_key: hex::decode(
                 "ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80",
             )
@@ -78,10 +76,10 @@ impl ServerConfig {
         }
     }
 
-    fn mock_prover(keep_port_after_drop: bool) -> Self {
+    fn mock_prover(keep_port_after_drop: bool, eth_node: &EthNode) -> Self {
         Self {
             mock_prover: true,
-            ..Self::single_node(keep_port_after_drop)
+            ..Self::single_node(keep_port_after_drop, eth_node)
         }
     }
 }
@@ -604,6 +602,22 @@ impl Server {
 
         Ok(res.json().await.unwrap())
     }
+
+    pub async fn network(&self) -> Result<NetworkResp, Error> {
+        let res = self
+            .client
+            .get(self.base_url().join("/v0/network").unwrap())
+            .send()
+            .await
+            .unwrap();
+
+        if !res.status().is_success() {
+            let err = res.json::<Error>().await.unwrap();
+            return Err(err);
+        }
+
+        Ok(res.json::<NetworkResp>().await.unwrap())
+    }
 }
 
 fn mint_with_note<'m, 't>(
@@ -697,11 +711,12 @@ async fn rollup_contract(addr: Address, eth_node: &EthNode) -> RollupContract {
 }
 
 async fn erc20_contract(rollup: &RollupContract, eth_node: &EthNode) -> ERC20Contract {
-    let kind_usdc = H256::from_slice(
-        &hex::decode("000200000000000013fb52f74a8f9bdd29f77a5efd7f6cb44dcf6906a4b60000")
+    // Note kind produced by Note::new_with_psi() — must match what deploy.ts registers via addToken
+    let mock_btc_kind = H256::from_slice(
+        &hex::decode("000200000000000000893c499c542cef5e3811e1192ce70d8cc03d5c33590000")
             .unwrap(),
     );
-    let usdc_addr = rollup.token(kind_usdc).await.unwrap();
+    let usdc_addr = rollup.token(mock_btc_kind).await.unwrap();
 
     let client = contracts::Client::new(&eth_node.rpc_url(), None);
     ERC20Contract::load(

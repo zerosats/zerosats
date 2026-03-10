@@ -1,4 +1,3 @@
-use constants::MERKLE_TREE_DEPTH;
 use testutil::eth::EthNode;
 
 use crate::rpc::ServerConfig;
@@ -6,9 +5,11 @@ use crate::rpc::ServerConfig;
 use super::Server;
 
 #[tokio::test(flavor = "multi_thread")]
-async fn empty() {
+async fn network_info() {
     let eth_node = EthNode::default().run_and_deploy().await;
     let server = Server::setup_and_wait(ServerConfig::single_node(false, &eth_node), eth_node).await;
-    let resp = server.height().await.unwrap();
-    assert_eq!(resp.root_hash, smirk::empty_tree_hash(MERKLE_TREE_DEPTH));
+    let resp = server.network().await.unwrap();
+    let address_str = format!("0x{:x}", server.rollup_contract_addr);
+    assert_eq!(resp.rollup_contract, address_str);
+    assert_eq!(resp.chain_id, 5655);
 }

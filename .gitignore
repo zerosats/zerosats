@@ -1,0 +1,5 @@
+# Citrea local toolchain (downloaded binaries, configs, caches)
+.citrea/
+
+# OS
+.DS_Store

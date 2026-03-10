@@ -362,8 +362,7 @@ impl NodeClient {
         let sk = SecretKey::from_str(secret)?;
         let client = contracts::Client::new(geth_rpc, None);
 
-        let erc20_contract =
-            ERC20Contract::load(client.clone(), erc20_contract, sk).await?;
+        let erc20_contract = ERC20Contract::load(client.clone(), erc20_contract, sk).await?;
         let rollup = RollupContract::load(client, &chain_id, rollup, sk).await?;
 
         let secp = secp256k1::Secp256k1::new();
@@ -375,9 +374,7 @@ impl NodeClient {
 
         if mint_erc20 {
             let tx_mint_erc20 = erc20_contract.mint(admin, 10000000).await?;
-            println!(
-                "\nRequested ERC20 mint {tx_mint_erc20:#x}. Approving next\n"
-            );
+            println!("\nRequested ERC20 mint {tx_mint_erc20:#x}. Approving next\n");
         }
 
         if erc20_contract

@@ -20,3 +20,6 @@
 /coverage
 
 .env
+
+# Citrea runtime state (RocksDB databases created during dev/test)
+/resources

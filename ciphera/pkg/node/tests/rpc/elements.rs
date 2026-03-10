@@ -11,7 +11,7 @@ use testutil::eth::EthNode;
 #[tokio::test(flavor = "multi_thread")]
 async fn list_elements_unspent_default() {
     let eth_node = EthNode::default().run_and_deploy().await;
-    let server_config = ServerConfig::single_node(false);
+    let server_config = ServerConfig::single_node(false, &eth_node);
     let server = Server::setup_and_wait(server_config, Arc::clone(&eth_node)).await;
     let rollup = rollup_contract(server.rollup_contract_addr, &eth_node).await;
     let erc20 = erc20_contract(&rollup, &eth_node).await;
@@ -46,7 +46,7 @@ async fn list_elements_unspent_default() {
 async fn list_elements_include_spent() {
     let eth_node = EthNode::default().run_and_deploy().await;
     let server =
-        Server::setup_and_wait(ServerConfig::single_node(false), Arc::clone(&eth_node)).await;
+        Server::setup_and_wait(ServerConfig::single_node(false, &eth_node), Arc::clone(&eth_node)).await;
     let rollup = rollup_contract(server.rollup_contract_addr, &eth_node).await;
     let erc20 = erc20_contract(&rollup, &eth_node).await;
 

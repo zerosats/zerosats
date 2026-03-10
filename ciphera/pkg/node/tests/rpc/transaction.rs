@@ -80,7 +80,7 @@ const ALLOWED_DUPLICATE_INPUT_CODES: &[&str] = &[
 #[tokio::test(flavor = "multi_thread")]
 async fn mint_transaction_not_in_contract() {
     let eth_node = EthNode::default().run_and_deploy().await;
-    let mut server_config = ServerConfig::single_node(false);
+    let mut server_config = ServerConfig::single_node(false, &eth_node);
     server_config.safe_eth_height_offset = 1;
     let server = Server::setup_and_wait(server_config, Arc::clone(&eth_node)).await;
     let rollup = rollup_contract(server.rollup_contract_addr, &eth_node).await;
@@ -156,7 +156,7 @@ async fn mint_transaction_not_in_contract() {
 #[tokio::test(flavor = "multi_thread")]
 async fn mint_transaction_only() {
     let eth_node = EthNode::default().run_and_deploy().await;
-    let mut server_config = ServerConfig::single_node(false);
+    let mut server_config = ServerConfig::single_node(false, &eth_node);
     server_config.safe_eth_height_offset = 1;
     let server = Server::setup_and_wait(server_config, Arc::clone(&eth_node)).await;
     let rollup = rollup_contract(server.rollup_contract_addr, &eth_node).await;
@@ -218,7 +218,7 @@ async fn mint_transaction_only() {
 async fn mint_and_transfer_alice_to_bob() {
     let eth_node = EthNode::default().run_and_deploy().await;
     let server =
-        Server::setup_and_wait(ServerConfig::single_node(false), Arc::clone(&eth_node)).await;
+        Server::setup_and_wait(ServerConfig::single_node(false, &eth_node), Arc::clone(&eth_node)).await;
     let rollup = rollup_contract(server.rollup_contract_addr, &eth_node).await;
     let erc20 = erc20_contract(&rollup, &eth_node).await;
 
@@ -268,7 +268,7 @@ async fn mint_and_transfer_alice_to_bob() {
 async fn double_spend() {
     let eth_node = EthNode::default().run_and_deploy().await;
     let server =
-        Server::setup_and_wait(ServerConfig::single_node(false), Arc::clone(&eth_node)).await;
+        Server::setup_and_wait(ServerConfig::single_node(false, &eth_node), Arc::clone(&eth_node)).await;
     let rollup = rollup_contract(server.rollup_contract_addr, &eth_node).await;
     let erc20 = erc20_contract(&rollup, &eth_node).await;
 
@@ -355,7 +355,7 @@ async fn double_spend() {
 async fn send_transaction_with_duplicate_inputs_is_rejected() {
     let eth_node = EthNode::default().run_and_deploy().await;
     let server =
-        Server::setup_and_wait(ServerConfig::single_node(false), Arc::clone(&eth_node)).await;
+        Server::setup_and_wait(ServerConfig::single_node(false, &eth_node), Arc::clone(&eth_node)).await;
     let rollup = rollup_contract(server.rollup_contract_addr, &eth_node).await;
     let erc20 = erc20_contract(&rollup, &eth_node).await;
 
@@ -396,7 +396,7 @@ async fn send_transaction_with_duplicate_inputs_is_rejected() {
 async fn two_transactions_with_duplicate_output_should_conflict() {
     let eth_node = EthNode::default().run_and_deploy().await;
     let server =
-        Server::setup_and_wait(ServerConfig::single_node(false), Arc::clone(&eth_node)).await;
+        Server::setup_and_wait(ServerConfig::single_node(false, &eth_node), Arc::clone(&eth_node)).await;
     let rollup = rollup_contract(server.rollup_contract_addr, &eth_node).await;
     let erc20 = erc20_contract(&rollup, &eth_node).await;
 
@@ -471,7 +471,7 @@ async fn two_transactions_with_duplicate_output_should_conflict() {
 async fn two_transactions_with_duplicate_input_should_conflict() {
     let eth_node = EthNode::default().run_and_deploy().await;
     let server =
-        Server::setup_and_wait(ServerConfig::single_node(false), Arc::clone(&eth_node)).await;
+        Server::setup_and_wait(ServerConfig::single_node(false, &eth_node), Arc::clone(&eth_node)).await;
     let rollup = rollup_contract(server.rollup_contract_addr, &eth_node).await;
     let erc20 = erc20_contract(&rollup, &eth_node).await;
 
@@ -540,8 +540,8 @@ async fn burn_tx() {
     .await;
 
     let server =
-        Server::setup_and_wait(ServerConfig::single_node(false), Arc::clone(&eth_node)).await;
-    let mut prover_server = Server::new(ServerConfig::mock_prover(false), Arc::clone(&eth_node));
+        Server::setup_and_wait(ServerConfig::single_node(false, &eth_node), Arc::clone(&eth_node)).await;
+    let mut prover_server = Server::new(ServerConfig::mock_prover(false, &eth_node), Arc::clone(&eth_node));
     prover_server.set_peers(&[server.to_peer()]);
     prover_server.run(None);
     prover_server.wait().await.unwrap();
@@ -578,8 +578,13 @@ async fn burn_tx() {
         }
 
         if i == 120 {
-            panic!("Failed to wait for tx to be included in a block");
+            panic!(
+                "Failed to wait for tx to be included in a block (contract height={height}, expected={})",
+                tx_resp.height.0
+            );
         }
+
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
     }
 
     let balance = erc20.balance(to).await.unwrap();
@@ -604,8 +609,8 @@ async fn substitute_burn_to_address() {
     .await;
 
     let server =
-        Server::setup_and_wait(ServerConfig::single_node(false), Arc::clone(&eth_node)).await;
-    let mut prover_server = Server::new(ServerConfig::mock_prover(false), Arc::clone(&eth_node));
+        Server::setup_and_wait(ServerConfig::single_node(false, &eth_node), Arc::clone(&eth_node)).await;
+    let mut prover_server = Server::new(ServerConfig::mock_prover(false, &eth_node), Arc::clone(&eth_node));
     prover_server.set_peers(&[server.to_peer()]);
     prover_server.run(None);
     prover_server.wait().await.unwrap();
@@ -671,9 +676,14 @@ async fn substitute_burn_to_address() {
             break;
         }
 
-        if i == 10 {
-            panic!("Failed to wait for tx to be included in a block");
+        if i == 120 {
+            panic!(
+                "Failed to wait for tx to be included in a block (contract height={height}, expected={})",
+                tx_resp.height.0
+            );
         }
+
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
     }
 
     let balance = erc20.balance(to).await.unwrap();
@@ -692,7 +702,7 @@ async fn substitute_burn_to_address() {
 async fn double_mint() {
     let eth_node = EthNode::default().run_and_deploy().await;
     let server =
-        Server::setup_and_wait(ServerConfig::single_node(false), Arc::clone(&eth_node)).await;
+        Server::setup_and_wait(ServerConfig::single_node(false, &eth_node), Arc::clone(&eth_node)).await;
     let rollup = rollup_contract(server.rollup_contract_addr, &eth_node).await;
     let erc20 = erc20_contract(&rollup, &eth_node).await;
 
@@ -730,7 +740,7 @@ async fn double_mint_same_mint_hash_different_address() {
     let eth_node = EthNode::default().run_and_deploy().await;
 
     let server =
-        super::Server::setup_and_wait(ServerConfig::single_node(false), Arc::clone(&eth_node))
+        super::Server::setup_and_wait(ServerConfig::single_node(false, &eth_node), Arc::clone(&eth_node))
             .await;
 
     let rollup = rollup_contract(server.rollup_contract_addr, &eth_node).await;
@@ -782,7 +792,7 @@ async fn double_mint_same_mint_hash_different_address() {
 async fn query_transactions() {
     let eth_node = EthNode::default().run_and_deploy().await;
     let server = Rc::new(
-        Server::setup_and_wait(ServerConfig::single_node(false), Arc::clone(&eth_node)).await,
+        Server::setup_and_wait(ServerConfig::single_node(false, &eth_node), Arc::clone(&eth_node)).await,
     );
     let rollup = rollup_contract(server.rollup_contract_addr, &eth_node).await;
     let erc20 = erc20_contract(&rollup, &eth_node).await;
@@ -1006,7 +1016,7 @@ async fn query_transactions() {
 async fn query_blocks() {
     let eth_node = EthNode::default().run_and_deploy().await;
     let server =
-        Server::setup_and_wait(ServerConfig::single_node(false), Arc::clone(&eth_node)).await;
+        Server::setup_and_wait(ServerConfig::single_node(false, &eth_node), Arc::clone(&eth_node)).await;
     let rollup = rollup_contract(server.rollup_contract_addr, &eth_node).await;
     let erc20 = erc20_contract(&rollup, &eth_node).await;
 
