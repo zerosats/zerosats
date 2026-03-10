@@ -187,7 +187,7 @@ impl Backend for CliBackend {
 mod tests {
     use super::*;
     use std::fs::{self, copy, remove_file};
-    
+
     use temp_env::with_var;
 
     #[test]

@@ -5,11 +5,11 @@ pub mod error;
 pub mod health;
 pub mod height;
 pub mod merkle;
+pub mod network;
 pub mod smirk;
 pub mod state;
 pub mod stats;
 pub mod txn;
-pub mod network;
 
 pub use configure::configure_routes;
 pub use state::State;

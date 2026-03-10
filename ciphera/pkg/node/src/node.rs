@@ -35,8 +35,8 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
-use tokio_stream::wrappers::UnboundedReceiverStream;
 use tokio_stream::StreamExt;
+use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::{debug, error, info, instrument};
 use zk_primitives::UtxoProof;
 
@@ -561,7 +561,10 @@ impl NodeShared {
     }
 
     pub(crate) fn rollup_contract(&self) -> String {
-        format!("0x{}", hex::encode(self.rollup_contract.address().as_bytes()))
+        format!(
+            "0x{}",
+            hex::encode(self.rollup_contract.address().as_bytes())
+        )
     }
 
     pub(crate) fn chain_id(&self) -> u64 {

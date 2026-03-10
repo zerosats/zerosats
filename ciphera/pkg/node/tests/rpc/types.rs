@@ -51,7 +51,6 @@ pub struct HeightResp {
 
 #[derive(Serialize, Deserialize)]
 pub struct NetworkResp {
-    #[expect(dead_code)]
     pub rollup_contract: String,
     pub chain_id: u64,
 }
