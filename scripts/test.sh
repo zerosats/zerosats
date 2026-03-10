@@ -15,7 +15,9 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 CITREA_VERSION="${CITREA_VERSION:-v2.1.0}"
 CITREA_DIR="$REPO_ROOT/.citrea/$CITREA_VERSION"
+CITREA_BASE_IMAGE="satsbridge/ciphera:citrea"
 DOCKER_IMAGE="satsbridge/ciphera:dev"
+BB_VERSION="${BB_VERSION:-1.0.0-nightly.20250723}"
 
 # --- Parse args ---
 VERBOSE=0
@@ -44,21 +46,100 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+# --- Detect platform ---
+detect_platform() {
+    local os arch
+    os="$(uname -s)"
+    arch="$(uname -m)"
+
+    case "$os" in
+        Darwin) os="osx" ;;
+        Linux)  os="linux" ;;
+        *)      echo "Unsupported OS: $os"; exit 1 ;;
+    esac
+
+    case "$arch" in
+        arm64|aarch64) arch="arm64" ;;
+        x86_64)        arch="amd64" ;;
+        *)             echo "Unsupported arch: $arch"; exit 1 ;;
+    esac
+
+    echo "${os}-${arch}"
+}
+
+resolve_citrea_binary_name() {
+    local platform="$1"
+    local name url
+    local -a candidates=()
+
+    case "$platform" in
+        linux-amd64) candidates=("citrea-${CITREA_VERSION}-linux-amd64") ;;
+        linux-arm64) candidates=("citrea-${CITREA_VERSION}-linux-arm64") ;;
+        osx-arm64) candidates=("citrea-${CITREA_VERSION}-osx-arm64") ;;
+        osx-amd64)
+            candidates=(
+                "citrea-${CITREA_VERSION}-osx-amd64"
+                "citrea-${CITREA_VERSION}-osx-x86_64"
+                "citrea-${CITREA_VERSION}-darwin-amd64"
+                "citrea-${CITREA_VERSION}-darwin-x86_64"
+            )
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+
+    for name in "${candidates[@]}"; do
+        url="https://github.com/chainwayxyz/citrea/releases/download/${CITREA_VERSION}/${name}"
+        if curl -fsSLI "$url" >/dev/null 2>&1; then
+            echo "$name"
+            return 0
+        fi
+    done
+
+    return 1
+}
+
+if [[ -n "${CIPHERA_TEST_CITREA_BIN:-}" && ! -x "${CIPHERA_TEST_CITREA_BIN}" ]]; then
+    echo "CIPHERA_TEST_CITREA_BIN is set but not executable: ${CIPHERA_TEST_CITREA_BIN}"
+    exit 1
+fi
+
+if [[ "$USE_DOCKER" -eq 0 && -z "${CIPHERA_TEST_CITREA_BIN:-}" ]]; then
+    PLATFORM="$(detect_platform)"
+    if ! resolve_citrea_binary_name "$PLATFORM" >/dev/null; then
+        if command -v docker >/dev/null 2>&1; then
+            echo "No Citrea binary published for platform=$PLATFORM version=$CITREA_VERSION; switching to Docker mode."
+            USE_DOCKER=1
+        else
+            echo "No Citrea binary published for platform=$PLATFORM version=$CITREA_VERSION."
+            echo "Use --docker or set CIPHERA_TEST_CITREA_BIN to a working local binary."
+            exit 1
+        fi
+    fi
+fi
+
 # =============================================================================
 # Docker mode: build images and run tests inside the container
 # =============================================================================
 if [[ "$USE_DOCKER" -eq 1 ]]; then
     echo "=== Docker mode ==="
 
-    # Build citrea base image if needed
-    if ! docker image inspect satsbridge/ciphera:citrea &>/dev/null; then
-        echo "Building Citrea base image..."
-        docker build -f "$REPO_ROOT/citrea.dockerfile" -t satsbridge/ciphera:citrea "$REPO_ROOT"
-    fi
+    echo "Building Citrea base image..."
+    docker build \
+        --build-arg CITREA_VERSION="$CITREA_VERSION" \
+        -f "$REPO_ROOT/citrea.dockerfile" \
+        -t "$CITREA_BASE_IMAGE" \
+        "$REPO_ROOT"
 
     # Build dev image
     echo "Building dev image..."
-    docker build -f "$REPO_ROOT/dev.dockerfile" -t "$DOCKER_IMAGE" "$REPO_ROOT"
+    docker build \
+        --build-arg CITREA_BASE_IMAGE="$CITREA_BASE_IMAGE" \
+        --build-arg BB_VERSION="$BB_VERSION" \
+        -f "$REPO_ROOT/dev.dockerfile" \
+        -t "$DOCKER_IMAGE" \
+        "$REPO_ROOT"
 
     # Assemble the cargo test command to run inside the container
     DOCKER_ENV=()
@@ -89,49 +170,36 @@ fi
 # Local mode: download Citrea binary, set up env, run tests natively
 # =============================================================================
 
-# --- Detect platform ---
-detect_platform() {
-    local os arch
-    os="$(uname -s)"
-    arch="$(uname -m)"
-
-    case "$os" in
-        Darwin) os="osx" ;;
-        Linux)  os="linux" ;;
-        *)      echo "Unsupported OS: $os"; exit 1 ;;
-    esac
-
-    case "$arch" in
-        arm64|aarch64) arch="arm64" ;;
-        x86_64)        arch="amd64" ;;
-        *)             echo "Unsupported arch: $arch"; exit 1 ;;
-    esac
-
-    echo "${os}-${arch}"
-}
-
 # --- Download Citrea binary + resources ---
 setup_citrea() {
-    if [[ -x "$CITREA_DIR/bin/citrea" && -d "$CITREA_DIR/resources/configs/mock" ]]; then
+    local binary_path="${CIPHERA_TEST_CITREA_BIN:-$CITREA_DIR/bin/citrea}"
+    local configs_root="${CIPHERA_TEST_CITREA_CONFIGS_ROOT:-$CITREA_DIR/resources/configs}"
+    local genesis_root="${CIPHERA_TEST_CITREA_GENESIS_ROOT:-$CITREA_DIR/resources/genesis}"
+
+    if [[ -x "$binary_path" && -d "$configs_root/mock" && -d "$genesis_root/mock" ]]; then
         echo "Citrea $CITREA_VERSION already set up at $CITREA_DIR"
         return
     fi
 
-    local platform
-    platform="$(detect_platform)"
+    mkdir -p "$CITREA_DIR/bin" "$CITREA_DIR/resources/configs/mock" "$CITREA_DIR/resources/genesis/mock"
 
-    # Citrea publishes raw binaries, not tarballs
-    local binary_name="citrea-${CITREA_VERSION}-${platform}"
-    local url="https://github.com/chainwayxyz/citrea/releases/download/${CITREA_VERSION}/${binary_name}"
+    if [[ -z "${CIPHERA_TEST_CITREA_BIN:-}" ]]; then
+        local platform binary_name url
+        platform="$(detect_platform)"
+        binary_name="$(resolve_citrea_binary_name "$platform")" || {
+            echo "No Citrea binary found for platform=$platform version=$CITREA_VERSION"
+            echo "Use --docker or set CIPHERA_TEST_CITREA_BIN to a working local binary."
+            exit 1
+        }
+        url="https://github.com/chainwayxyz/citrea/releases/download/${CITREA_VERSION}/${binary_name}"
 
-    echo "Downloading Citrea $CITREA_VERSION for $platform..."
-    mkdir -p "$CITREA_DIR/bin"
-    curl -fSL "$url" -o "$CITREA_DIR/bin/citrea"
-    chmod +x "$CITREA_DIR/bin/citrea"
+        echo "Downloading Citrea $CITREA_VERSION for $platform..."
+        curl -fSL "$url" -o "$CITREA_DIR/bin/citrea"
+        chmod +x "$CITREA_DIR/bin/citrea"
+    fi
 
     # Pull mock resources from the release
     echo "Fetching mock configs and genesis..."
-    mkdir -p "$CITREA_DIR/resources/configs/mock" "$CITREA_DIR/resources/genesis/mock"
 
     local base_url="https://raw.githubusercontent.com/chainwayxyz/citrea/${CITREA_VERSION}/resources"
     for f in sequencer_rollup_config.toml sequencer_config.toml; do
@@ -171,9 +239,9 @@ setup_citrea
 compile_contracts
 clean_stale_dbs
 
-export CIPHERA_TEST_CITREA_BIN="$CITREA_DIR/bin/citrea"
-export CIPHERA_TEST_CITREA_CONFIGS_ROOT="$CITREA_DIR/resources/configs"
-export CIPHERA_TEST_CITREA_GENESIS_ROOT="$CITREA_DIR/resources/genesis"
+export CIPHERA_TEST_CITREA_BIN="${CIPHERA_TEST_CITREA_BIN:-$CITREA_DIR/bin/citrea}"
+export CIPHERA_TEST_CITREA_CONFIGS_ROOT="${CIPHERA_TEST_CITREA_CONFIGS_ROOT:-$CITREA_DIR/resources/configs}"
+export CIPHERA_TEST_CITREA_GENESIS_ROOT="${CIPHERA_TEST_CITREA_GENESIS_ROOT:-$CITREA_DIR/resources/genesis}"
 
 if [[ "$VERBOSE" -eq 1 ]]; then
     export LOG_CITREA_OUTPUT=1

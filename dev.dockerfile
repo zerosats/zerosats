@@ -1,4 +1,7 @@
-FROM satsbridge/ciphera:citrea
+ARG CITREA_BASE_IMAGE=satsbridge/ciphera:citrea
+FROM ${CITREA_BASE_IMAGE}
+
+ARG BB_VERSION=1.0.0-nightly.20250723
 
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -36,8 +39,9 @@ RUN apt-get update && apt-get install -y nodejs \
 RUN curl -L https://raw.githubusercontent.com/noir-lang/noirup/refs/heads/main/install | bash
 RUN . /root/.bashrc && noirup
 
-RUN curl -L https://raw.githubusercontent.com/AztecProtocol/aztec-packages/master/barretenberg/bbup/install | bash
-RUN . /root/.bashrc && bbup -v 1.0.0-nightly.20250723 || echo "WARN: bb v1.0.0-nightly.20250723 unavailable (nightly cleaned up from GitHub). Install manually if needed for Noir circuit compilation."
+RUN curl -fsSL https://raw.githubusercontent.com/AztecProtocol/aztec-packages/master/barretenberg/bbup/install | bash && \
+    /root/.bb/bbup -v "${BB_VERSION}" && \
+    test -x /root/.bb/bb && /root/.bb/bb --version
 
 # Create a workspace directory
 WORKDIR /app
@@ -47,7 +51,7 @@ WORKDIR /app/citrea
 RUN npm ci
 RUN npx hardhat compile
 
-ENV PATH="/usr/local/cargo/bin:/usr/src/noir/noir-repo/target/release:/usr/src/barretenberg/cpp/build/bin:$PATH"
+ENV PATH="/root/.cargo/bin:/root/.bb:/usr/src/noir/noir-repo/target/release:/usr/src/barretenberg/cpp/build/bin:$PATH"
 
 # Set bash as entrypoint with login shell to ensure profile is sourced
 ENTRYPOINT ["/bin/bash", "--login"]

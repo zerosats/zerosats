@@ -339,11 +339,12 @@ async function main() {
     });
 
     receipt = await publicClient.waitForTransactionReceipt({ hash });
-    if (receipt.status == "success") {
-      console.log(`✅ Registered mock BTC note kind → ${erc20Address}`);
-    } else {
-      console.log(`❌ Failed to register mock BTC note kind`);
+    if (receipt.status !== "success") {
+      throw new Error(
+        `Failed to register mock BTC note kind for ${erc20Address}`,
+      );
     }
+    console.log(`✅ Registered mock BTC note kind → ${erc20Address}`);
   }
 
   // Machine-readable output for the test harness

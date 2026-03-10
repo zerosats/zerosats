@@ -11,7 +11,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Download prebuilt Citrea binary
-RUN ARCH=$(case "$TARGETARCH" in arm64) echo "arm64" ;; amd64) echo "amd64" ;; *) echo "$TARGETARCH" ;; esac) && \
+RUN ARCH="$TARGETARCH" && \
+    if [ -z "$ARCH" ]; then ARCH="$(dpkg --print-architecture)"; fi && \
+    case "$ARCH" in \
+        amd64|arm64) ;; \
+        x86_64) ARCH=amd64 ;; \
+        aarch64) ARCH=arm64 ;; \
+        *) echo "Unsupported arch: $ARCH" >&2; exit 1 ;; \
+    esac && \
     curl -fSL "https://github.com/chainwayxyz/citrea/releases/download/${CITREA_VERSION}/citrea-${CITREA_VERSION}-linux-${ARCH}" \
     -o /citrea && chmod +x /citrea
 
