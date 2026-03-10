@@ -561,7 +561,7 @@ impl NodeShared {
     }
 
     pub(crate) fn rollup_contract(&self) -> String {
-        self.rollup_contract.address().to_string()
+        format!("0x{}", hex::encode(self.rollup_contract.address().as_bytes()))
     }
 
     pub(crate) fn chain_id(&self) -> u64 {
