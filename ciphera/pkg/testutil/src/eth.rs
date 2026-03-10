@@ -8,7 +8,6 @@ use once_cell::sync::Lazy;
 
 use serde_json::json;
 use std::fs;
-use std::path::Path;
 
 use crate::PortPool;
 
@@ -21,11 +20,19 @@ fn find_eth() -> PathBuf {
 static PORT_POOL: Lazy<Mutex<PortPool>> =
     once_cell::sync::Lazy::new(|| Mutex::new(PortPool::new(12345..12346)));
 
+/// Addresses deployed by the Hardhat deploy script
+#[derive(Debug, Clone)]
+pub struct DeployedAddresses {
+    pub rollup_proxy: String,
+    pub erc20: String,
+}
+
 #[derive(Debug)]
 pub struct EthNode {
     process: Option<std::process::Child>,
     port: u16,
     options: EthNodeOptions,
+    deployed: Option<DeployedAddresses>,
 }
 
 impl Drop for EthNode {
@@ -56,25 +63,32 @@ impl EthNode {
             process: None,
             port,
             options,
+            deployed: None,
         }
     }
 
     pub fn run(&mut self) {
         // This must be the actual Citrea dev bin instead of running it through yarn,
         // because we send a SIGKILL which yarn can't forward to the Citrea dev node.
-        let mut command = Command::new("/citrea");
+        let citrea_bin =
+            std::env::var("CIPHERA_TEST_CITREA_BIN").unwrap_or_else(|_| "/citrea".to_string());
+        let configs_root = std::env::var("CIPHERA_TEST_CITREA_CONFIGS_ROOT")
+            .unwrap_or_else(|_| "/configs".to_string());
+        let genesis_root = std::env::var("CIPHERA_TEST_CITREA_GENESIS_ROOT")
+            .unwrap_or_else(|_| "/genesis".to_string());
+        let rollup_config_path = format!("{configs_root}/mock/sequencer_rollup_config.toml");
+        let sequencer_config_path = format!("{configs_root}/mock/sequencer_config.toml");
+        let genesis_path = format!("{genesis_root}/mock/");
+
+        let mut command = Command::new(citrea_bin);
 
         command.current_dir(find_eth());
 
         command.arg("--dev");
         command.arg("--da-layer").arg("mock");
-        command
-            .arg("--rollup-config-path")
-            .arg("/configs/mock/sequencer_rollup_config.toml");
-        command
-            .arg("--sequencer")
-            .arg("/configs/mock/sequencer_config.toml");
-        command.arg("--genesis-paths").arg("/genesis/mock/");
+        command.arg("--rollup-config-path").arg(rollup_config_path);
+        command.arg("--sequencer").arg(sequencer_config_path);
+        command.arg("--genesis-paths").arg(genesis_path);
 
         let should_log = std::env::var("LOG_CITREA_OUTPUT")
             .map(|v| v == "1")
@@ -97,17 +111,22 @@ impl EthNode {
                 .expect("Failed to wait for Citrea dev node to exit");
         }
 
-        let resources_dir = Path::new("/app/citrea/resources");
+        let resources_dir = find_eth().join("resources");
         if resources_dir.exists() {
-            match fs::remove_dir_all(resources_dir) {
-                Ok(_) => println!("Successfully removed /app/citrea/resources"),
-                Err(e) => println!("Failed to remove /app/citrea/resources: {e}"),
+            match fs::remove_dir_all(&resources_dir) {
+                Ok(_) => println!("Successfully removed {}", resources_dir.display()),
+                Err(e) => println!("Failed to remove {}: {e}", resources_dir.display()),
             }
         }
     }
 
     pub fn rpc_url(&self) -> String {
         format!("http://127.0.0.1:{}", self.port)
+    }
+
+    /// Returns the deployed contract addresses (available after `run_and_deploy`)
+    pub fn deployed(&self) -> &DeployedAddresses {
+        self.deployed.as_ref().expect("Contracts not yet deployed")
     }
 
     async fn wait_for_healthy(&self) -> Result<u64, Box<dyn std::error::Error>> {
@@ -163,7 +182,7 @@ impl EthNode {
         }
     }
 
-    fn deploy(&self) -> Result<(), Box<dyn std::error::Error>> {
+    fn deploy(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         let mut command = Command::new("node_modules/.bin/hardhat");
 
         command.current_dir(find_eth());
@@ -192,20 +211,47 @@ impl EthNode {
         let should_log = std::env::var("LOG_HARDHAT_DEPLOY_OUTPUT")
             .map(|v| v == "1")
             .unwrap_or(false);
-        if !should_log {
-            command
-                .stdout(std::process::Stdio::null())
-                .stderr(std::process::Stdio::null());
+
+        // Always capture stdout (for DEPLOY_OUTPUT parsing) and stderr (for failure diagnostics)
+        command.stdout(std::process::Stdio::piped());
+        command.stderr(std::process::Stdio::piped());
+
+        let process = command.spawn().expect("Failed to start Citrea deploy");
+        let output = process.wait_with_output()?;
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+
+        // Always replay on failure so deploy errors are visible;
+        // on success only replay when logging is requested.
+        if !output.status.success() || should_log {
+            eprint!("{stdout}");
+            eprint!("{stderr}");
         }
 
-        let mut process = command.spawn().expect("Failed to start Citrea deploy");
-        let status = process.wait()?;
-
-        if !status.success() {
-            Err("Citrea deploy returned a non-zero exit code".into())
-        } else {
-            Ok(())
+        if !output.status.success() {
+            return Err("Citrea deploy returned a non-zero exit code".into());
         }
+
+        // Parse DEPLOY_OUTPUT={"rollupProxy":"0x...","erc20":"0x...",...}
+        for line in stdout.lines() {
+            if let Some(json_str) = line.strip_prefix("DEPLOY_OUTPUT=") {
+                let v: serde_json::Value = serde_json::from_str(json_str)
+                    .expect("Failed to parse DEPLOY_OUTPUT JSON");
+                self.deployed = Some(DeployedAddresses {
+                    rollup_proxy: v["rollupProxy"]
+                        .as_str()
+                        .expect("missing rollupProxy")
+                        .to_string(),
+                    erc20: v["erc20"]
+                        .as_str()
+                        .expect("missing erc20")
+                        .to_string(),
+                });
+                return Ok(());
+            }
+        }
+
+        Err("Deploy script did not output DEPLOY_OUTPUT line".into())
     }
 
     pub async fn run_and_deploy(mut self) -> Arc<Self> {
@@ -221,6 +267,8 @@ impl EthNode {
             .await
             .expect("Failed to wait for Citrea node");
 
+        #[allow(unused_mut)]
+        let mut eth_node = eth_node;
         let eth_node = tokio::task::spawn_blocking(move || {
             // Deploy is flaky
             for i in 0..3 {
