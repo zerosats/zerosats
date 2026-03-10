@@ -473,7 +473,7 @@ async fn handle_mint(
 
     if !only_snark {
         client
-            .admin_mint(geth_rpc, chain, secret, rollup, ticker, &note, &snark)
+            .admin_mint(geth_rpc, chain, secret, rollup, &note, &snark)
             .await?;
     }
 

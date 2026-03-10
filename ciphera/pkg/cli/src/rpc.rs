@@ -49,7 +49,6 @@ pub struct TransactionResp {
 
 #[derive(Debug, Deserialize)]
 pub struct HeightResp {
-    #[expect(dead_code)]
     pub height: BlockHeight,
     pub root_hash: Element,
 }
@@ -71,9 +70,7 @@ pub struct ElementResponse {
 pub struct ElementsListItem {
     pub element: Element,
     pub height: u64,
-    #[expect(dead_code)]
     pub root_hash: Element,
-    #[expect(dead_code)]
     pub txn_hash: CryptoHash,
     pub spent: bool,
 }
