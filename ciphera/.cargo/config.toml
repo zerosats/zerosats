@@ -3,8 +3,11 @@ rustflags = ["-C", "link-arg=-lc++"] # For MACOS builds
 jobs = 8  # Reduce parallel jobs to avoid memory issues
 
 [env]
-CC = "clang"
-CXX = "clang++"
+# Use compiler driver aliases so macOS resolves to Apple toolchain (`/usr/bin`)
+# instead of Homebrew LLVM (`/opt/homebrew/...`) which can cause libc++ ABI
+# mismatches in librocksdb-sys (__hash_memory undefined at link time).
+CC = "cc"
+CXX = "c++"
 CXXFLAGS="-include cstdint"
 
 [target.x86_64-unknown-linux-gnu]

@@ -74,7 +74,8 @@ impl ERC20Contract {
     }
 
     pub async fn from_eth_node(eth_node: &EthNode, signer: SecretKey) -> Result<Self> {
-        let erc20_addr = "5fbdb2315678afecb367f032d93f642f64180aa3";
+        let deployed = eth_node.deployed();
+        let erc20_addr = deployed.erc20.as_str();
 
         let client = Client::from_eth_node(eth_node);
         Self::load(client, erc20_addr, signer).await

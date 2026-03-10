@@ -1,4 +1,7 @@
-FROM satsbridge/ciphera:citrea
+ARG CITREA_BASE_IMAGE=satsbridge/ciphera:citrea
+FROM ${CITREA_BASE_IMAGE}
+
+ARG BB_VERSION=1.0.0-nightly.20250723
 
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -19,7 +22,12 @@ RUN apt-get update && apt-get install -y \
     libbz2-dev \
     liblz4-dev \
     libzstd-dev \
-    protobuf-compiler
+    protobuf-compiler \
+    libc++-dev
+
+# Install Rust
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain 1.88.0
+ENV PATH="/root/.cargo/bin:$PATH"
 
 RUN curl -fsSL https://deb.nodesource.com/setup_22.x -o nodesource_setup.sh
 RUN bash nodesource_setup.sh
@@ -31,8 +39,9 @@ RUN apt-get update && apt-get install -y nodejs \
 RUN curl -L https://raw.githubusercontent.com/noir-lang/noirup/refs/heads/main/install | bash
 RUN . /root/.bashrc && noirup
 
-RUN curl -L https://raw.githubusercontent.com/AztecProtocol/aztec-packages/refs/heads/master/barretenberg/bbup/install | bash
-RUN . /root/.bashrc && bbup -v 1.0.0-nightly.20250723
+RUN curl -fsSL https://raw.githubusercontent.com/AztecProtocol/aztec-packages/master/barretenberg/bbup/install | bash && \
+    /root/.bb/bbup -v "${BB_VERSION}" && \
+    test -x /root/.bb/bb && /root/.bb/bb --version
 
 # Create a workspace directory
 WORKDIR /app
@@ -42,7 +51,7 @@ WORKDIR /app/citrea
 RUN npm ci
 RUN npx hardhat compile
 
-ENV PATH="/usr/local/cargo/bin:/usr/src/noir/noir-repo/target/release:/usr/src/barretenberg/cpp/build/bin:$PATH"
+ENV PATH="/root/.cargo/bin:/root/.bb:/usr/src/noir/noir-repo/target/release:/usr/src/barretenberg/cpp/build/bin:$PATH"
 
 # Set bash as entrypoint with login shell to ensure profile is sourced
 ENTRYPOINT ["/bin/bash", "--login"]
