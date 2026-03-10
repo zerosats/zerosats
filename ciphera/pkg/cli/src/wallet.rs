@@ -26,6 +26,9 @@ pub enum WalletError {
     #[error("Wallet file not found: {0}")]
     FileNotFound(String),
 
+    #[error("Wallet already exists: {0}")]
+    WalletExists(String),
+
     #[error("No data in wallet file: {0}")]
     KeyNotFound(String),
 
@@ -58,11 +61,12 @@ pub struct Wallet {
     pub avail: HashMap<String, Vec<InputNote>>,
     pub name: Option<String>,
     pub balance: u64,
+    pub chain_id: u64,
 }
 
 impl Wallet {
     /// Create a wallet from an explicit private key.
-    pub fn new(name: Option<String>, pk: Element) -> Self {
+    pub fn new(chain_id: u64, name: Option<String>, pk: Element) -> Self {
         Self {
             pk,
             keys: Vec::new(),
@@ -70,11 +74,12 @@ impl Wallet {
             avail: HashMap::new(),
             name,
             balance: 0,
+            chain_id,
         }
     }
 
     /// Create a wallet with a random 256‑bit private key.
-    pub fn random(name: Option<String>) -> Self {
+    pub fn random(chain_id: u64, name: Option<String>) -> Self {
         let mut bytes = [0u8; 32];
         OsRng.fill_bytes(&mut bytes);
         Self {
@@ -84,6 +89,7 @@ impl Wallet {
             avail: HashMap::new(),
             name,
             balance: 0,
+            chain_id,
         }
     }
 
@@ -94,7 +100,20 @@ impl Wallet {
     }
 
     /// Load wallet from JSON file
-    pub fn init(name: &str) -> Result<Self, WalletError> {
+    pub fn create(chain_id: u64, name: &str) -> Result<Self, WalletError> {
+        let file = format!("{name}.json");
+        let wallet_file = Path::new(&file);
+
+        if wallet_file.is_file() {
+            Err(WalletError::WalletExists(file))
+        } else {
+            let wallet = Self::random(chain_id, Some(name.to_string()));
+            wallet.save()?;
+            Ok(wallet)
+        }
+    }
+
+    pub fn load(name: &str) -> Result<Self, WalletError> {
         let file = format!("{name}.json");
         let wallet_file = Path::new(&file);
 
@@ -102,9 +121,7 @@ impl Wallet {
             let json_str = fs::read_to_string(wallet_file)?;
             Ok(serde_json::from_str(&json_str)?)
         } else {
-            let wallet = Self::random(Some(name.to_string()));
-            wallet.save()?;
-            Ok(wallet)
+            Err(WalletError::FileNotFound(file))
         }
     }
 
@@ -465,7 +482,7 @@ mod wallet_tests {
     #[test]
     fn test_spend_note_selects_best_fit() {
         // Test that spend_note selects the note closest to requested amount
-        let mut wallet = Wallet::random(Some("test".to_string()));
+        let mut wallet = Wallet::random(55, Some("test".to_string()));
 
         // Add notes with values: 100, 500, 1000
         wallet.avail.insert(

@@ -20,7 +20,7 @@ use contracts::ConfirmationType;
 use ethereum_types::U256;
 use secp256k1::PublicKey;
 use web3::signing::{keccak256, SecretKey};
-use web3::types::{Address, H256};
+use web3::types::Address;
 
 use crate::rpc::{HealthResponse, ListTransactionsResponse, ListTxnsQuery};
 /// Singleton HTTP client shared across all NodeClient instances
@@ -89,11 +89,29 @@ impl NodeClientBuilder {
     }
 
     /// Build the NodeClient
-    pub fn build(self) -> Result<NodeClient> {
-        let base_url = format!("http://{}:{}/v0", self.host, self.port);
+    pub fn build(self, chain_id: u64, tls: bool, create_wallet: bool) -> Result<NodeClient> {
+        let proto = if tls {
+            "http"
+        } else {
+            "https"
+        };
+
+        let base_url = format!("{}://{}:{}/v0", proto, self.host, self.port);
+
         debug!("Building NodeClient for: {}", base_url);
 
-        let wallet = Wallet::init(&self.name)?;
+        let wallet = if create_wallet {
+            Wallet::create(chain_id, &self.name)?
+        } else {
+            let loaded_wallet = Wallet::load(&self.name)?;
+            if loaded_wallet.chain_id != chain_id {
+                return Err(color_eyre::eyre::eyre!(
+                "ChainId in loaded file is different to provided {}",
+                chain_id
+            ))
+            }
+            loaded_wallet
+        };
 
         Ok(NodeClient {
             base_url,
@@ -160,7 +178,7 @@ impl NodeClient {
             .host(host)
             .port(port)
             .timeout_secs(timeout_secs)
-            .build()
+            .build(5115, false, true)
     }
 
     /// Get the base URL of the node
@@ -394,40 +412,114 @@ impl NodeClient {
 
         Ok(())
     }
+}
 
-    pub async fn state(
-        &self,
-        geth_rpc: &str,
-        chain_id: u64,
-        secret: &str,
-        rollup: &str,
-    ) -> Result<()> {
-        let sk = SecretKey::from_str(secret)?;
-        let client = contracts::Client::new(geth_rpc, None);
-        let rollup = RollupContract::load(client, &chain_id, rollup, sk).await?;
-        let rh = rollup.root_hash().await?;
-        let b = rollup.block_height().await?;
-        let kind_wcbtc = H256::from_slice(
-            &hex::decode("000200000000000013fb8d0c9d1c17ae5e40fff9be350f57840e9e66cd930000")
-                .unwrap(),
+#[cfg(test)]
+mod client_tests {
+    use super::*;
+
+    // =====================================================================
+    // NodeClientBuilder — offline unit tests
+    // =====================================================================
+
+    #[test]
+    fn test_builder_default_host_and_port() {
+        let b = NodeClientBuilder::new();
+        assert_eq!(b.host, "127.0.0.1");
+        assert_eq!(b.port, 8091);
+    }
+
+    #[test]
+    fn test_builder_fluent_overrides() {
+        let b = NodeClientBuilder::new()
+            .host("example.com")
+            .port(9000)
+            .timeout_secs(30)
+            .name("bob");
+        assert_eq!(b.host, "example.com");
+        assert_eq!(b.port, 9000);
+        assert_eq!(b.timeout, Duration::from_secs(30));
+        assert_eq!(b.name, "bob");
+    }
+
+    /// The base URL must follow the pattern http://host:port/v0.
+    /// This test pins the format so that adding TLS support is a
+    /// deliberate change, not an accident.
+    ///
+    /// Note: port 443 (ciphera.satsbridge.com) requires https://.
+    /// NodeClientBuilder currently hardcodes http://, so connecting
+    /// to that host will fail until a .tls(bool) option is added.
+    #[test]
+    fn test_builder_base_url_scheme_is_http() {
+        // Build succeeds only if a wallet file exists or can be created.
+        // Use a temp name to avoid polluting real wallets.
+        let name = "test-scheme-check-wallet";
+        let file = format!("{name}.json");
+        let _ = std::fs::remove_file(&file);
+
+        let client = NodeClientBuilder::new()
+            .name(name)
+            .host("node.example.com")
+            .port(8091)
+            .build()
+            .expect("build with auto-created wallet");
+
+        let _ = std::fs::remove_file(&file);
+
+        assert!(
+            client.base_url().starts_with("http://node.example.com:8091"),
+            "unexpected base_url: {}",
+            client.base_url()
         );
+    }
 
-        let kind_usdc = H256::from_slice(
-            &hex::decode("000200000000000013fb52f74a8f9bdd29f77a5efd7f6cb44dcf6906a4b60000")
-                .unwrap(),
+    /// Regression: build() on a malformed wallet file must return an error
+    /// that describes the real cause (deserialization), not a generic one.
+    ///
+    /// Catches the bug in handle_note_spend where
+    ///   .map_err(|_| AppError::CantBuildClient())
+    /// silently drops the WalletError.
+    #[test]
+    fn test_builder_propagates_wallet_error_on_bad_file() {
+        let name = "bad-wallet-unit-test";
+        let file = format!("{name}.json");
+        std::fs::write(&file, b"{bad json}").unwrap();
+
+        let result = NodeClientBuilder::new().name(name).build();
+
+        let _ = std::fs::remove_file(&file);
+
+        let err = result.expect_err("should fail on malformed wallet JSON");
+        // The error chain must mention serialization/parsing, not vanish.
+        let msg = format!("{err:#}");
+        assert!(
+            msg.to_lowercase().contains("serial")
+                || msg.to_lowercase().contains("json")
+                || msg.to_lowercase().contains("parse"),
+            "error chain should mention JSON/serialization; got: {msg}"
         );
+    }
 
-        let token_wbtc = rollup.token(kind_wcbtc).await?;
-        let token_usdc = rollup.token(kind_usdc).await?;
+    /// Auto-creation: build() with no pre-existing wallet file must succeed
+    /// (Wallet::init creates a fresh wallet).
+    #[test]
+    fn test_builder_autocreates_missing_wallet() {
+        let name = "autocreate-unit-test-wallet";
+        let file = format!("{name}.json");
+        let _ = std::fs::remove_file(&file);
 
-        println!("\nRollup State Info\n");
-        println!("\tChain                :{chain_id} ");
-        println!("\tToken kind WBTC      :{token_wbtc:#x} ");
-        println!("\tToken kind USDC      :{token_usdc:#x} ");
+        let result = NodeClientBuilder::new().name(name).build();
 
-        println!("\tBlock                :{b} ");
-        println!("\tRoot hash            :{rh:#x} ");
+        let _ = std::fs::remove_file(&file);
 
-        Ok(())
+        assert!(result.is_ok(), "build should auto-create wallet: {:?}", result.err());
+    }
+
+    /// Timeout setter convenience: timeout_secs(n) equals timeout(Duration::from_secs(n)).
+    #[test]
+    fn test_builder_timeout_secs_matches_duration() {
+        let b1 = NodeClientBuilder::new().timeout_secs(42);
+        let b2 = NodeClientBuilder::new().timeout(Duration::from_secs(42));
+        assert_eq!(b1.timeout, b2.timeout);
     }
 }

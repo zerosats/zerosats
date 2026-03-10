@@ -1,8 +1,8 @@
 use clap::{Parser, Subcommand};
 use color_eyre::Result;
 use tracing::{debug, error};
-use web3::types::H160;
-
+use web3::types::{H160, H256};
+use web3::signing::SecretKey;
 use cli::address::citrea_ticker_from_contract;
 use cli::note_url::{decode_url, CipheraURL};
 use cli::NodeClient;
@@ -56,10 +56,7 @@ struct Cli {
 
 #[derive(Subcommand, Debug)]
 enum Commands {
-    Create {
-        #[arg(long)]
-        private_key: Option<String>,
-    },
+    Create {},
     /// Connect to a Ciphera node and check its health
     Sync {},
     Address {
@@ -86,12 +83,6 @@ enum Commands {
         only_snark: bool,
     },
     Burn {
-        #[arg(required = true, long, default_value = "rpc.testnet.citrea.xyz")]
-        geth_rpc: String,
-
-        #[arg(required = true, long, short)]
-        secret: String,
-
         #[arg(required = true, long)]
         address: String,
 
@@ -127,9 +118,6 @@ enum Commands {
     Contract {
         #[arg(required = true, long, short)]
         geth_rpc: String,
-
-        #[arg(required = true, long, short)]
-        secret: String,
     },
 }
 
@@ -157,7 +145,7 @@ pub enum AppError {
     WalletLoadError(#[from] color_eyre::Report),
 }
 
-async fn handle_create(name: &str, private_key: Option<String>) -> Result<(), AppError> {
+async fn handle_create(chain: u64,name: &str) -> Result<(), AppError> {
     let wallet_file = format!("{name}.json");
 
     // Check if wallet already exists
@@ -166,7 +154,7 @@ async fn handle_create(name: &str, private_key: Option<String>) -> Result<(), Ap
         println!("   Location: {wallet_file}");
     };
 
-    let mut wallet = Wallet::init(name)?;
+    let mut wallet = Wallet::create(chain, name)?;
 
     println!("\n✅ Wallet created successfully!");
     println!("\n📋 Wallet Details:");
@@ -191,7 +179,7 @@ async fn handle_create(name: &str, private_key: Option<String>) -> Result<(), Ap
 /// Handle the connect command
 ///
 /// Connects to a Ciphera node and performs health checks
-async fn handle_sync(name: &str, host: &str, port: u16, timeout_secs: u64) -> Result<()> {
+async fn handle_sync(chain: u64, name: &str, host: &str, port: u16, timeout_secs: u64) -> Result<()> {
     debug!(
         "Connecting wallet {} to Ciphera node at {}:{}",
         name, host, port
@@ -203,7 +191,7 @@ async fn handle_sync(name: &str, host: &str, port: u16, timeout_secs: u64) -> Re
         .host(host)
         .port(port)
         .timeout_secs(timeout_secs)
-        .build()?;
+        .build(chain, true, false)?;
 
     // Check health
     match client.check_health().await {
@@ -247,7 +235,7 @@ async fn handle_sync(name: &str, host: &str, port: u16, timeout_secs: u64) -> Re
 }
 
 async fn handle_address(name: &str, amount: u64, ticker: &str) -> Result<()> {
-    let mut wallet = Wallet::init(name)?;
+    let mut wallet = Wallet::load(name)?;
     let b = wallet.balance;
     let a = wallet.get_address(amount, ticker);
 
@@ -264,11 +252,9 @@ async fn handle_address(name: &str, amount: u64, ticker: &str) -> Result<()> {
 
 async fn handle_note_spend(name: &str, amount: u64, ticker: &str) -> Result<(), AppError> {
     // Build client with fluent API
-    let mut client = NodeClient::builder()
-        .name(name)
-        .build()?;
+    let mut wallet = Wallet::load(name)?;
 
-    let input_note = client.get_wallet_mut().spend_note(amount, ticker)?;
+    let input_note = wallet.spend_note(amount, ticker)?;
     let payload: CipheraURL = (&input_note).into();
 
     // Encode
@@ -284,6 +270,7 @@ async fn handle_note_spend(name: &str, amount: u64, ticker: &str) -> Result<(), 
 }
 
 async fn handle_spend_to(
+    chain: u64,
     name: &str,
     host: &str,
     port: u16,
@@ -301,7 +288,7 @@ async fn handle_spend_to(
         .host(host)
         .port(port)
         .timeout_secs(timeout_secs)
-        .build()?;
+        .build(chain, true, false)?;
 
     let utxo = client.get_wallet_mut().spend_to(address)?;
     let snark = utxo.prove().unwrap();
@@ -347,7 +334,7 @@ async fn handle_receive(
         .host(host)
         .port(port)
         .timeout_secs(timeout_secs)
-        .build()?;
+        .build(chain, true, false)?;
 
     // Check health
     match client.check_health().await {
@@ -383,7 +370,6 @@ async fn handle_receive(
             if notefile_path.is_file() {
                 println!("\n🗝 Found note file!");
                 let json_str = fs::read_to_string(notefile_path)?;
-                let json: serde_json::Value = serde_json::from_str(&json_str)?;
                 let input_note: InputNote = serde_json::from_str(&json_str)?;
                 input_note
             } else {
@@ -441,19 +427,15 @@ async fn handle_receive(
 }
 
 async fn handle_import(name: &str, notefile: &str) -> Result<()> {
-    let mut client = NodeClient::builder()
-        .name(name)
-        .build()?;
-
     let json_path = Path::new(&notefile);
     if json_path.is_file() {
         println!("\n🗝 Found note file!");
         let json_str = fs::read_to_string(json_path)?;
-        let json: serde_json::Value = serde_json::from_str(&json_str)?;
         let note: Note = serde_json::from_str(&json_str)?;
 
-        client.get_wallet_mut().import_note(&note)?;
-
+        let mut wallet = Wallet::load(name)?;
+        wallet.import_note(&note)?;
+        wallet.save()?;
         Ok(())
     } else {
         Err(AppError::FileNotFound(notefile.to_owned()).into())
@@ -479,7 +461,7 @@ async fn handle_mint(
         .host(host)
         .port(port)
         .timeout_secs(timeout_secs)
-        .build()?;
+        .build(chain, true, false)?;
 
     let note: Note = client.get_wallet_mut().receive_note(amount, ticker);
     let output_notes = [note.clone(), Note::padding_note()];
@@ -514,10 +496,7 @@ async fn handle_burn(
     host: &str,
     port: u16,
     timeout_secs: u64,
-    geth_rpc: &str,
     chain: u64,
-    rollup: &str,
-    secret: &str,
     address: &str,
     amount: u64,
     ticker: &str,
@@ -528,7 +507,7 @@ async fn handle_burn(
         .host(host)
         .port(port)
         .timeout_secs(timeout_secs)
-        .build()?;
+        .build(chain, true, false)?;
 
     let note = client.get_wallet_mut().spend_note(amount, ticker)?;
 
@@ -554,10 +533,34 @@ async fn handle_burn(
     }
 }
 
-async fn handle_rollup(geth_rpc: &str, secret: &str, chain: u64, rollup: &str) -> Result<()> {
-    // Build client with fluent API
-    let client = NodeClient::builder().build()?;
-    client.state(geth_rpc, chain, secret, rollup).await?;
+async fn handle_rollup(geth_rpc: &str, chain: u64, rollup: &str) -> Result<()> {
+    let sk = SecretKey::from_str("ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80")?;
+
+    let client = contracts::Client::new(geth_rpc, None);
+    let rollup = contracts::RollupContract::load(client, &chain, rollup, sk).await?;
+
+    let rh = rollup.root_hash().await?;
+    let b = rollup.block_height().await?;
+    let kind_wcbtc = H256::from_slice(
+        &hex::decode("000200000000000013fb8d0c9d1c17ae5e40fff9be350f57840e9e66cd930000")
+            .unwrap(),
+    );
+
+    let kind_usdc = H256::from_slice(
+        &hex::decode("000200000000000013fb52f74a8f9bdd29f77a5efd7f6cb44dcf6906a4b60000")
+            .unwrap(),
+    );
+
+    let token_wbtc = rollup.token(kind_wcbtc).await?;
+    let token_usdc = rollup.token(kind_usdc).await?;
+
+    println!("\nRollup State Info\n");
+    println!("\tChain                :{chain} ");
+    println!("\tToken kind WBTC      :{token_wbtc:#x} ");
+    println!("\tToken kind USDC      :{token_usdc:#x} ");
+
+    println!("\tBlock                :{b} ");
+    println!("\tRoot hash            :{rh:#x} ");
 
     Ok(())
 }
@@ -590,11 +593,11 @@ async fn main() -> Result<()> {
 
     // Execute command
     match cli.command {
-        Commands::Create { private_key } => {
-            handle_create(&cli.name, private_key).await?;
+        Commands::Create { } => {
+            handle_create(cli.chain, &cli.name).await?;
         }
         Commands::Sync {} => {
-            handle_sync(&cli.name, &cli.host, cli.port, cli.timeout).await?;
+            handle_sync(cli.chain, &cli.name, &cli.host, cli.port, cli.timeout).await?;
         }
         Commands::Address { amount, ticker } => {
             let ticker_normalized = ticker.to_uppercase();
@@ -605,7 +608,7 @@ async fn main() -> Result<()> {
             handle_note_spend(&cli.name, amount, &ticker_normalized).await?;
         }
         Commands::SpendTo { address } => {
-            handle_spend_to(&cli.name, &cli.host, cli.port, cli.timeout, &address).await?;
+            handle_spend_to(cli.chain, &cli.name, &cli.host, cli.port, cli.timeout, &address).await?;
         }
         Commands::Receive { note, link } => {
             handle_receive(
@@ -646,8 +649,6 @@ async fn main() -> Result<()> {
             .await?;
         }
         Commands::Burn {
-            geth_rpc,
-            secret,
             address,
             amount,
             ticker,
@@ -658,18 +659,15 @@ async fn main() -> Result<()> {
                 &cli.host,
                 cli.port,
                 cli.timeout,
-                &geth_rpc,
                 cli.chain,
-                &cli.rollup,
-                &secret,
                 &address,
                 amount,
                 &ticker_normalized,
             )
             .await?;
         }
-        Commands::Contract { geth_rpc, secret } => {
-            handle_rollup(&geth_rpc, &secret, cli.chain, &cli.rollup).await?;
+        Commands::Contract { geth_rpc } => {
+            handle_rollup(&geth_rpc, cli.chain, &cli.rollup).await?;
         }
     }
 
