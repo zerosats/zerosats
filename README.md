@@ -1,13 +1,14 @@
 # Zerosats
 
-A privacy-preserving appchain built on top of Citrea.
+A privacy-preserving appchain built on top of Citrea. It is a friendly fork of [Payy](https://github.com/polybase/payy) 
+project codebase.
 
-Payy services:
+Ciphera services for self-hosting:
 
 1) Citrea node + 2TB storage (\$150-\$200 USD)
 2) Testnet4 BTC full node (currently free, should be \$12)
-3) Payy Validator + Burner (currently free, should be \$12)
-4) Payy Prover (\$44, but we have to try \$84 instance with 4vCPU)
+3) Ciphera Validator + Burner (currently free, should be \$12)
+4) Ciphera Prover (\$44, but we have to try \$84 instance with 4vCPU)
 
 A plan for mainnet:
 
@@ -42,7 +43,7 @@ How to check if it is running:
 tail -f citrea-node.log
 ```
 
-## Running Payy Tests
+## Running Ciphera Tests
 
 _With Citrea, tests could finish successfully only in single threaded mode `--test-threads=1`_ 
 
@@ -59,8 +60,6 @@ LOG_HARDHAT_DEPLOY_OUTPUT=1 cargo test rpc::elements::list_elements_include_spen
 ```
 
 RUST_LOG=debug LOG_CITREA_OUTPUT=1 LOG_HARDHAT_DEPLOY_OUTPUT=1 cargo test tests::burn_to -- --test-threads=1
-
-
 
 fn run(&mut self, log_output: Option<bool>) {
 let mut command = Command::new(find_binary());
@@ -162,9 +161,9 @@ curl -H "Content-Type: application/json" -X POST --data '{"jsonrpc":"2.0","metho
 
 curl  -H "Content-Type: application/json" -X POST --data '{"jsonrpc":"2.0","method":"eth_getCode","params":["0x6019a8d435da34da0e709a30ba90560c440b7d89"],"id":1}' http://172.26.2.88:8080
 
-### Payy Network
+### Ciphera Network
 
-sudo docker run --rm -it --entrypoint bash satsbridge/ciphera:payy
+sudo docker run --rm -it --entrypoint bash satsbridge/ciphera:latest
 
 ./node -c config.toml --mode=validator --rpc-laddr=0.0.0.0:8091 --p2p-laddr=/ip4/0.0.0.0/tcp/5000 --p2p-dial=/ip4/0.0.0.0/tcp/5001
 ./node -c config.toml --mode=prover --rpc-laddr=0.0.0.0:8092 --p2p-laddr=/ip4/0.0.0.0/tcp/5001 --p2p-dial=/ip4/0.0.0.0/tcp/5000

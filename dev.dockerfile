@@ -36,7 +36,7 @@ RUN . /root/.bashrc && bbup -v 1.0.0-nightly.20250723
 
 # Create a workspace directory
 WORKDIR /app
-COPY ./payy .
+COPY ciphera .
 
 WORKDIR /app/citrea
 RUN npm ci
@@ -51,6 +51,6 @@ ENTRYPOINT ["/bin/bash", "--login"]
 CMD ["-i"]
 
 # Build metadata
-LABEL maintainer="Payy Development Team"
-LABEL description="Aztec Protocol base image with Rust 1.88.0 and Payy development environment"
+LABEL maintainer="Ciphera Development Team"
+LABEL description="Aztec Protocol base image with Rust 1.88.0 and Ciphera development environment"
 LABEL version="1.0"
