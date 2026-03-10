@@ -35,8 +35,8 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
-use tokio_stream::StreamExt;
 use tokio_stream::wrappers::UnboundedReceiverStream;
+use tokio_stream::StreamExt;
 use tracing::{debug, error, info, instrument};
 use zk_primitives::UtxoProof;
 
@@ -558,5 +558,13 @@ impl NodeShared {
 
     pub fn estimate_block_time(height: BlockHeight, max_height: BlockHeight) -> u64 {
         chrono::Utc::now().timestamp() as u64 - (max_height.saturating_sub(height.0))
+    }
+
+    pub(crate) fn rollup_contract(&self) -> String {
+        self.rollup_contract.address().to_string()
+    }
+
+    pub(crate) fn chain_id(&self) -> u64 {
+        self.config.chain_id
     }
 }

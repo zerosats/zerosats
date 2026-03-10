@@ -12,8 +12,10 @@ mod elements;
 mod error;
 mod height;
 mod transaction;
+mod network;
 
 pub use elements::*;
 pub use error::*;
 pub use height::*;
 pub use transaction::*;
+pub use network::*;

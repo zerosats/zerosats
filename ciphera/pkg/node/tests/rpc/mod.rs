@@ -5,6 +5,7 @@ mod smirk;
 mod sync;
 mod transaction;
 mod types;
+mod network;
 
 use barretenberg::Prove;
 use element::Element;
@@ -603,6 +604,22 @@ impl Server {
         }
 
         Ok(res.json().await.unwrap())
+    }
+
+    pub async fn network(&self) -> Result<NetworkResp, Error> {
+        let res = self
+            .client
+            .get(self.base_url().join("/v0/network").unwrap())
+            .send()
+            .await
+            .unwrap();
+
+        if !res.status().is_success() {
+            let err = res.json::<Error>().await.unwrap();
+            return Err(err);
+        }
+
+        Ok(res.json::<NetworkResp>().await.unwrap())
     }
 }
 
