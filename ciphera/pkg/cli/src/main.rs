@@ -86,7 +86,7 @@ enum Commands {
         only_snark: bool,
     },
     Burn {
-        #[arg(required = true, long, short)]
+        #[arg(required = true, long, default_value = "rpc.testnet.citrea.xyz")]
         geth_rpc: String,
 
         #[arg(required = true, long, short)]
@@ -153,6 +153,8 @@ pub enum AppError {
     NotSupportedYet(),
     #[error("Cant convert Element")]
     ConversionError(),
+    #[error("Wallet load error: {0}")]
+    WalletLoadError(#[from] color_eyre::Report),
 }
 
 async fn handle_create(name: &str, private_key: Option<String>) -> Result<(), AppError> {
@@ -264,29 +266,21 @@ async fn handle_note_spend(name: &str, amount: u64, ticker: &str) -> Result<(), 
     // Build client with fluent API
     let mut client = NodeClient::builder()
         .name(name)
-        .build()
-        .map_err(|_| AppError::CantBuildClient())?;
+        .build()?;
 
-    let wallet = Wallet::init(name)?;
-    let balance = wallet.balance;
+    let input_note = client.get_wallet_mut().spend_note(amount, ticker)?;
+    let payload: CipheraURL = (&input_note).into();
 
-    if amount <= balance {
-        let input_note = client.get_wallet_mut().spend_note(amount, ticker)?;
-        let payload: CipheraURL = (&input_note).into();
+    // Encode
+    let encoded = payload.encode_url();
+    let json_str = serde_json::to_string_pretty(&input_note)?;
 
-        // Encode
-        let encoded = payload.encode_url();
-        let json_str = serde_json::to_string_pretty(&input_note)?;
+    std::fs::write(format!("{name}-note.json"), &json_str)?;
 
-        std::fs::write(format!("{name}-note.json"), &json_str)?;
+    println!("\nSaved {input_note:?}");
+    println!("\nEncoded: {encoded}");
 
-        println!("\nSaved {input_note:?}");
-        println!("\nEncoded: {encoded}");
-
-        Ok(())
-    } else {
-        Err(AppError::NotEnoughBalance())
-    }
+    Ok(())
 }
 
 async fn handle_spend_to(
@@ -308,9 +302,6 @@ async fn handle_spend_to(
         .port(port)
         .timeout_secs(timeout_secs)
         .build()?;
-
-    let wallet = Wallet::init(name)?;
-    let balance = wallet.balance;
 
     let utxo = client.get_wallet_mut().spend_to(address)?;
     let snark = utxo.prove().unwrap();
@@ -452,8 +443,7 @@ async fn handle_receive(
 async fn handle_import(name: &str, notefile: &str) -> Result<()> {
     let mut client = NodeClient::builder()
         .name(name)
-        .build()
-        .map_err(|_| AppError::CantBuildClient())?;
+        .build()?;
 
     let json_path = Path::new(&notefile);
     if json_path.is_file() {
