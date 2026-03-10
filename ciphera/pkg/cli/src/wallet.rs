@@ -150,8 +150,7 @@ impl Wallet {
             .push(note);
     }
 
-    fn make_change_note(&self, spend_note: &Note, change_amount: u64) -> InputNote {
-        let pk = self.gen_pk();
+    fn make_change_note(&self, spend_note: &Note, pk: Element, change_amount: u64) -> InputNote {
         let self_address = hash_merge([pk, Element::ZERO]);
         InputNote::new(
             Note {
@@ -241,7 +240,7 @@ impl Wallet {
                     Note::padding_note(),
                 )
             } else {
-                let change_note = self.make_change_note(&input_note_1.note, change_amount);
+                let change_note = self.make_change_note(&input_note_1.note, pk, change_amount);
                 self.push_to_avail(&ticker, change_note.clone());
                 self.balance += change_amount;
 
@@ -252,7 +251,7 @@ impl Wallet {
             println!(
                 "Pulled note {amount_1}, requested {amount}, change {change_amount}"
             );
-            let change_note = self.make_change_note(&input_note_1.note, change_amount);
+            let change_note = self.make_change_note(&input_note_1.note, pk, change_amount);
             self.push_to_avail(&ticker, change_note.clone());
             self.balance += change_amount;
 
@@ -687,7 +686,7 @@ mod wallet_tests {
     // |100-150|=50 < |500-150|=350 < |1000-150|=850 → expect 500 (index 2).
     #[test]
     fn test_best_fit_selects_last_not_first() {
-        let mut wallet = Wallet::random(5115, Some("test".to_string()));
+        let mut wallet = Wallet::random(Some("test".to_string()));
         wallet.avail.insert(
             "WCBTC".to_string(),
             vec![
@@ -711,7 +710,7 @@ mod wallet_tests {
     // Buggy code returns 1000 (index 0).
     #[test]
     fn test_best_fit_selects_middle_not_first() {
-        let mut wallet = Wallet::random(5115,Some("test".to_string()));
+        let mut wallet = Wallet::random(Some("test".to_string()));
         wallet.avail.insert(
             "WCBTC".to_string(),
             vec![
@@ -735,7 +734,7 @@ mod wallet_tests {
     // Buggy code returns 800 (index 0).
     #[test]
     fn test_best_fit_two_notes_picks_second() {
-        let mut wallet = Wallet::random(5115, Some("test".to_string()));
+        let mut wallet = Wallet::random(Some("test".to_string()));
         wallet.avail.insert(
             "WCBTC".to_string(),
             vec![create_input_note(800), create_input_note(200)],
@@ -755,7 +754,7 @@ mod wallet_tests {
     // Buggy code returns 999 (index 0).
     #[test]
     fn test_best_fit_exact_match_not_at_index_0() {
-        let mut wallet = Wallet::random(5115, Some("test".to_string()));
+        let mut wallet = Wallet::random(Some("test".to_string()));
         wallet.avail.insert(
             "WCBTC".to_string(),
             vec![
@@ -777,7 +776,7 @@ mod wallet_tests {
     // Regression: existing best-fit test strengthened to assert the returned value.
     #[test]
     fn test_spend_note_selects_best_fit_value() {
-        let mut wallet = Wallet::random(5115, Some("test".to_string()));
+        let mut wallet = Wallet::random(Some("test".to_string()));
         wallet.avail.insert(
             "WCBTC".to_string(),
             vec![
@@ -804,7 +803,7 @@ mod wallet_tests {
     // Buggy change:   400+400-600 = 200  →  wallet.balance = 200.
     #[test]
     fn test_two_note_change_uses_second_note_value() {
-        let mut wallet = Wallet::random(5115, Some("test".to_string()));
+        let mut wallet = Wallet::random(Some("test".to_string()));
         wallet.avail.insert(
             "WCBTC".to_string(),
             vec![create_input_note(400), create_input_note(300)],
@@ -825,7 +824,7 @@ mod wallet_tests {
     // Buggy change:   500+500-700 = 300  →  wallet.balance = 300.
     #[test]
     fn test_two_note_change_large_value_gap() {
-        let mut wallet = Wallet::random(5115, Some("test".to_string()));
+        let mut wallet = Wallet::random(Some("test".to_string()));
         wallet.avail.insert(
             "WCBTC".to_string(),
             vec![create_input_note(500), create_input_note(250)],
@@ -846,7 +845,7 @@ mod wallet_tests {
     // Buggy code reads 400 for both notes → (400+400-600)=200, or may underflow.
     #[test]
     fn test_two_note_exact_sum_no_change() {
-        let mut wallet = Wallet::random(5115, Some("test".to_string()));
+        let mut wallet = Wallet::random(Some("test".to_string()));
         wallet.avail.insert(
             "WCBTC".to_string(),
             vec![create_input_note(400), create_input_note(200)],
