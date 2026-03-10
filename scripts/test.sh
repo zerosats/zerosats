@@ -18,6 +18,7 @@ CITREA_DIR="$REPO_ROOT/.citrea/$CITREA_VERSION"
 CITREA_BASE_IMAGE="satsbridge/ciphera:citrea"
 DOCKER_IMAGE="satsbridge/ciphera:dev"
 BB_VERSION="${BB_VERSION:-1.0.0-nightly.20250723}"
+DOCKER_PLATFORM="${DOCKER_PLATFORM:-linux/amd64}"
 
 # --- Parse args ---
 VERBOSE=0
@@ -127,6 +128,7 @@ if [[ "$USE_DOCKER" -eq 1 ]]; then
 
     echo "Building Citrea base image..."
     docker build \
+        --platform "$DOCKER_PLATFORM" \
         --build-arg CITREA_VERSION="$CITREA_VERSION" \
         -f "$REPO_ROOT/citrea.dockerfile" \
         -t "$CITREA_BASE_IMAGE" \
@@ -135,6 +137,7 @@ if [[ "$USE_DOCKER" -eq 1 ]]; then
     # Build dev image
     echo "Building dev image..."
     docker build \
+        --platform "$DOCKER_PLATFORM" \
         --build-arg CITREA_BASE_IMAGE="$CITREA_BASE_IMAGE" \
         --build-arg BB_VERSION="$BB_VERSION" \
         -f "$REPO_ROOT/dev.dockerfile" \
@@ -156,13 +159,14 @@ if [[ "$USE_DOCKER" -eq 1 ]]; then
 
     # Phase 2: integration tests
     if [[ -n "$TEST_FILTER" ]]; then
-        TEST_CMD+=" && echo 'Running integration test: $TEST_FILTER' && cargo test -p node --test e2e $TEST_FILTER -- --ignored --test-threads=1"
+        DOCKER_ENV+=(-e "CIPHERA_TEST_FILTER=$TEST_FILTER")
+        TEST_CMD+=" && printf 'Running integration test: %s\n' \"\$CIPHERA_TEST_FILTER\" && cargo test -p node --test e2e \"\$CIPHERA_TEST_FILTER\" -- --ignored --test-threads=1"
     else
         TEST_CMD+=" && echo 'Running full-stack integration tests...' && cargo test -p node --test e2e -- --ignored --test-threads=1"
     fi
 
     echo "Running tests in Docker..."
-    docker run --rm "${DOCKER_ENV[@]}" "$DOCKER_IMAGE" -c "$TEST_CMD"
+    docker run --rm --platform "$DOCKER_PLATFORM" "${DOCKER_ENV[@]}" "$DOCKER_IMAGE" -c "$TEST_CMD"
     exit $?
 fi
 
@@ -177,14 +181,15 @@ setup_citrea() {
     local genesis_root="${CIPHERA_TEST_CITREA_GENESIS_ROOT:-$CITREA_DIR/resources/genesis}"
 
     if [[ -x "$binary_path" && -d "$configs_root/mock" && -d "$genesis_root/mock" ]]; then
-        echo "Citrea $CITREA_VERSION already set up at $CITREA_DIR"
+        echo "Citrea $CITREA_VERSION already set up."
         return
     fi
 
-    mkdir -p "$CITREA_DIR/bin" "$CITREA_DIR/resources/configs/mock" "$CITREA_DIR/resources/genesis/mock"
+    mkdir -p "$configs_root/mock" "$genesis_root/mock"
 
     if [[ -z "${CIPHERA_TEST_CITREA_BIN:-}" ]]; then
         local platform binary_name url
+        mkdir -p "$CITREA_DIR/bin"
         platform="$(detect_platform)"
         binary_name="$(resolve_citrea_binary_name "$platform")" || {
             echo "No Citrea binary found for platform=$platform version=$CITREA_VERSION"
@@ -203,10 +208,10 @@ setup_citrea() {
 
     local base_url="https://raw.githubusercontent.com/chainwayxyz/citrea/${CITREA_VERSION}/resources"
     for f in sequencer_rollup_config.toml sequencer_config.toml; do
-        curl -fSL "$base_url/configs/mock/$f" -o "$CITREA_DIR/resources/configs/mock/$f"
+        curl -fSL "$base_url/configs/mock/$f" -o "$configs_root/mock/$f"
     done
     for f in accounts.json evm.json l2_block_rule_enforcer.json; do
-        curl -fSL "$base_url/genesis/mock/$f" -o "$CITREA_DIR/resources/genesis/mock/$f"
+        curl -fSL "$base_url/genesis/mock/$f" -o "$genesis_root/mock/$f"
     done
 
     echo "Citrea $CITREA_VERSION ready."

@@ -267,7 +267,6 @@ impl EthNode {
             .await
             .expect("Failed to wait for Citrea node");
 
-        #[allow(unused_mut)]
         let mut eth_node = eth_node;
         let eth_node = tokio::task::spawn_blocking(move || {
             // Deploy is flaky
