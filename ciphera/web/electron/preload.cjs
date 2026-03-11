@@ -115,23 +115,19 @@ contextBridge.exposeInMainWorld('ciphera', {
     /**
      * Create a new wallet
      * @param {string} name - Wallet name
-     * @param {string} [privateKey] - Optional private key to import
      */
-    createWallet: async (name, privateKey) => {
+    createWallet: async (name) => {
         const args = ['--name', name, 'create'];
-        if (privateKey) {
-            args.push('--private-key', privateKey);
-        }
         return ipcRenderer.invoke('cli:run', args);
     },
     
     /**
      * Connect to a node
      * @param {string} name - Wallet name
-     * @param {string} [host='63.176.138.198'] - Node host
+     * @param {string} [host='ciphera.satsbridge.com'] - Node host
      * @param {number} [port=8091] - Node port
      */
-    connect: async (name, host = '63.176.138.198', port = 8091) => {
+    connect: async (name, host = 'ciphera.satsbridge.com', port = 8091) => {
         const args = [
             '--name', name,
             '--host', host,
@@ -148,32 +144,72 @@ contextBridge.exposeInMainWorld('ciphera', {
      * @param {string} params.amount - Amount in wei
      * @param {string} params.secret - Citrea private key
      * @param {string} [params.gethRpc='https://rpc.testnet.citrea.xyz'] - RPC URL
-     * @param {string} [params.host='63.176.138.198'] - Node host
+     * @param {string} [params.ticker='WCBTC'] - Token ticker
+     * @param {string} [params.host='ciphera.satsbridge.com'] - Node host
      * @param {number} [params.port=8091] - Node port
      */
     mint: async (params) => {
         const args = [
             '--name', params.name,
-            '--host', params.host || '63.176.138.198',
+            '--host', params.host || 'ciphera.satsbridge.com',
             '--port', String(params.port || 8091),
             'mint',
             '--geth-rpc', params.gethRpc || 'https://rpc.testnet.citrea.xyz',
             '--secret', params.secret,
-            '--amount', params.amount,
+            '--amount', String(params.amount),
         ];
+        if (params.ticker) {
+            args.push('--ticker', params.ticker);
+        }
         return ipcRenderer.invoke('cli:run', args);
     },
-    
+
     /**
      * Spend (create a note for sending)
      * @param {string} name - Wallet name
-     * @param {string} amount - Amount to spend
+     * @param {string|number} amount - Amount to spend in wei
+     * @param {string} [ticker='WCBTC'] - Token ticker
      */
-    spend: async (name, amount) => {
+    spend: async (name, amount, ticker) => {
         const args = [
             '--name', name,
             'spend',
-            '--amount', amount,
+            '--amount', String(amount),
+        ];
+        if (ticker) {
+            args.push('--ticker', ticker);
+        }
+        return ipcRenderer.invoke('cli:run', args);
+    },
+
+    /**
+     * Send tokens directly to a Ciphera address
+     * @param {string} name - Wallet name
+     * @param {string} address - Recipient Ciphera address
+     * @param {string} [host='ciphera.satsbridge.com'] - Node host
+     * @param {number} [port=8091] - Node port
+     */
+    spendTo: async (name, address, host = 'ciphera.satsbridge.com', port = 8091) => {
+        const args = [
+            '--name', name,
+            '--host', host,
+            '--port', String(port),
+            'spend-to',
+            '--address', address,
+        ];
+        return ipcRenderer.invoke('cli:run', args);
+    },
+
+    /**
+     * Import a note file into the wallet
+     * @param {string} name - Wallet name
+     * @param {string} notePath - Path to the note JSON file
+     */
+    importNote: async (name, notePath) => {
+        const args = [
+            '--name', name,
+            'import',
+            '--note', notePath,
         ];
         return ipcRenderer.invoke('cli:run', args);
     },
@@ -184,13 +220,13 @@ contextBridge.exposeInMainWorld('ciphera', {
      * @param {string} params.name - Wallet name
      * @param {string} [params.noteFile] - Path to note file
      * @param {string} [params.link] - Note link
-     * @param {string} [params.host='63.176.138.198'] - Node host
+     * @param {string} [params.host='ciphera.satsbridge.com'] - Node host
      * @param {number} [params.port=8091] - Node port
      */
     receive: async (params) => {
         const args = [
             '--name', params.name,
-            '--host', params.host || '63.176.138.198',
+            '--host', params.host || 'ciphera.satsbridge.com',
             '--port', String(params.port || 8091),
             'receive',
         ];
@@ -208,24 +244,24 @@ contextBridge.exposeInMainWorld('ciphera', {
      * Burn tokens back to EVM
      * @param {object} params
      * @param {string} params.name - Wallet name
-     * @param {string} params.amount - Amount to burn
+     * @param {string} params.amount - Amount to burn (in wei)
      * @param {string} params.address - EVM address to receive
-     * @param {string} params.secret - Citrea private key
-     * @param {string} [params.gethRpc='https://rpc.testnet.citrea.xyz'] - RPC URL
-     * @param {string} [params.host='63.176.138.198'] - Node host
+     * @param {string} [params.ticker='WCBTC'] - Token ticker
+     * @param {string} [params.host='ciphera.satsbridge.com'] - Node host
      * @param {number} [params.port=8091] - Node port
      */
     burn: async (params) => {
         const args = [
             '--name', params.name,
-            '--host', params.host || '63.176.138.198',
+            '--host', params.host || 'ciphera.satsbridge.com',
             '--port', String(params.port || 8091),
             'burn',
-            '--geth-rpc', params.gethRpc || 'https://rpc.testnet.citrea.xyz',
-            '--secret', params.secret,
             '--address', params.address,
-            '--amount', params.amount,
+            '--amount', String(params.amount),
         ];
+        if (params.ticker) {
+            args.push('--ticker', params.ticker);
+        }
         return ipcRenderer.invoke('cli:run', args);
     },
 });

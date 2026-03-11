@@ -50,6 +50,8 @@ class CipheraApp {
             cliReady: false,
             pendingNote: null, // Stores note waiting to be saved
             nodeEndpoint: null, // Stores connected node endpoint for explorer
+            nodeHost: null,
+            nodePort: null,
         };
 
         // Prompt system state
@@ -859,7 +861,7 @@ class CipheraApp {
         this.terminal.log('CONNECT TO NODE', 'info');
         this.terminal.log('Type "clear" to return home', 'dim');
         this.startPromptSequence('sync', [
-            {key: 'host', label: 'Host:', placeholder: '63.176.138.198', default: '63.176.138.198'},
+            {key: 'host', label: 'Host:', placeholder: 'ciphera.satsbridge.com', default: 'ciphera.satsbridge.com'},
             {key: 'port', label: 'Port:', placeholder: '8091', default: '8091'}
         ]);
     }
@@ -888,8 +890,10 @@ class CipheraApp {
             return;
         }
 
-        // Store endpoint in state for explorer lookups
+        // Store endpoint in state for explorer lookups and future commands
         this.state.nodeEndpoint = `${answers.host}:${answers.port}`;
+        this.state.nodeHost = answers.host;
+        this.state.nodePort = parseInt(answers.port);
 
         this.updateConnectionStatus(true, `${answers.host}:${answers.port}`);
 
@@ -962,6 +966,8 @@ class CipheraApp {
             amount: amountWei,
             secret: answers.secret,
             gethRpc: answers.gethRpc,
+            host: this.state.nodeHost,
+            port: this.state.nodePort,
         });
 
         if (!result.success) {
@@ -1102,6 +1108,8 @@ class CipheraApp {
         const result = await window.ciphera.receive({
             name: this.state.walletName,
             noteFile: answers.noteFile,
+            host: this.state.nodeHost,
+            port: this.state.nodePort,
         });
 
         if (!result.success) {
@@ -1158,13 +1166,6 @@ class CipheraApp {
                 required: true
             },
             {key: 'address', label: 'EVM address:', placeholder: '0x...', required: true},
-            {key: 'secret', label: 'Citrea private key:', placeholder: '0x...', type: 'password', required: true},
-            {
-                key: 'gethRpc',
-                label: 'RPC URL:',
-                placeholder: 'https://rpc.testnet.citrea.xyz',
-                default: 'https://rpc.testnet.citrea.xyz'
-            },
         ]);
     }
 
@@ -1184,8 +1185,8 @@ class CipheraApp {
             name: this.state.walletName,
             amount: amountWei,
             address: answers.address,
-            secret: answers.secret,
-            gethRpc: answers.gethRpc,
+            host: this.state.nodeHost,
+            port: this.state.nodePort,
         });
 
         if (!result.success) {
