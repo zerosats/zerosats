@@ -1007,10 +1007,10 @@ class CipheraApp {
 
         // Show transaction IDs
         if (citreaTxHash) {
-            this.terminal.log(`Citrea Approve TX: ${this.shortenTxHash(citreaTxHash)}`, 'dim');
+            this.terminal.log(`Citrea Approve TX: ${citreaTxHash}`, 'dim');
         }
         if (citreaMintTxHash) {
-            this.terminal.log(`Citrea Mint TX:    ${this.shortenTxHash(citreaMintTxHash)}`, 'dim');
+            this.terminal.log(`Citrea Mint TX:    ${citreaMintTxHash}`, 'dim');
         }
         if (cipheraTxHash) {
             this.terminal.log(`Ciphera TX:        ${this.padTxHash(cipheraTxHash)}`, 'dim');
@@ -1258,13 +1258,6 @@ class CipheraApp {
         return match ? match[1] : null;
     }
 
-    /**
-     * Shorten a transaction hash for display
-     */
-    shortenTxHash(hash) {
-        if (!hash || hash.length < 16) return hash;
-        return `${hash.slice(0, 8)}...${hash.slice(-8)}`;
-    }
 
     /**
      * Pad a transaction hash to 64 characters (32 bytes)

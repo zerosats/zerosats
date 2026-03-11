@@ -19,7 +19,7 @@ use zk_primitives::{Note, UtxoProof};
 use contracts::ConfirmationType;
 use ethereum_types::U256;
 use secp256k1::PublicKey;
-use web3::signing::{keccak256, SecretKey};
+use web3::signing::{SecretKey, keccak256};
 use web3::types::Address;
 
 use crate::rpc::{HealthResponse, ListTransactionsResponse, ListTxnsQuery};
@@ -90,11 +90,7 @@ impl NodeClientBuilder {
 
     /// Build the NodeClient
     pub fn build(self, chain_id: u64, tls: bool, create_wallet: bool) -> Result<NodeClient> {
-        let proto = if tls {
-            "http"
-        } else {
-            "https"
-        };
+        let proto = if tls { "http" } else { "https" };
 
         let base_url = format!("{}://{}:{}/v0", proto, self.host, self.port);
 
@@ -106,9 +102,9 @@ impl NodeClientBuilder {
             let loaded_wallet = Wallet::load(&self.name)?;
             if loaded_wallet.chain_id != chain_id {
                 return Err(color_eyre::eyre::eyre!(
-                "ChainId in loaded file is different to provided {}",
-                chain_id
-            ))
+                    "ChainId in loaded file is different to provided {}",
+                    chain_id
+                ));
             }
             loaded_wallet
         };
@@ -484,7 +480,9 @@ mod client_tests {
         let _ = std::fs::remove_file(&file);
 
         assert!(
-            client.base_url().starts_with("https://node.example.com:443"),
+            client
+                .base_url()
+                .starts_with("https://node.example.com:443"),
             "tls=false should produce https:// (inverted flag); got: {}",
             client.base_url()
         );
@@ -530,7 +528,11 @@ mod client_tests {
 
         let _ = std::fs::remove_file(&file);
 
-        assert!(result.is_ok(), "create_wallet=true should succeed when file absent: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "create_wallet=true should succeed when file absent: {:?}",
+            result.err()
+        );
     }
 
     /// create_wallet=true fails with WalletExists when the file already exists.
@@ -577,7 +579,11 @@ mod client_tests {
 
         let _ = std::fs::remove_file(&file);
 
-        assert!(result.is_ok(), "create_wallet=false should load existing wallet: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "create_wallet=false should load existing wallet: {:?}",
+            result.err()
+        );
     }
 
     /// create_wallet=false fails with FileNotFound when file is absent.
@@ -613,9 +619,7 @@ mod client_tests {
             .expect("pre-create wallet");
 
         // Load with a different chain_id.
-        let result = NodeClientBuilder::new()
-            .name(name)
-            .build(9999, true, false);
+        let result = NodeClientBuilder::new().name(name).build(9999, true, false);
 
         let _ = std::fs::remove_file(&file);
 

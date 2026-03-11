@@ -1,12 +1,12 @@
 use clap::{Parser, Subcommand};
-use color_eyre::Result;
-use tracing::{debug, error};
-use web3::types::{H160, H256};
-use web3::signing::SecretKey;
-use cli::address::citrea_ticker_from_contract;
-use cli::note_url::{decode_url, CipheraURL};
 use cli::NodeClient;
 use cli::Wallet;
+use cli::address::citrea_ticker_from_contract;
+use cli::note_url::{CipheraURL, decode_url};
+use color_eyre::Result;
+use tracing::{debug, error};
+use web3::signing::SecretKey;
+use web3::types::{H160, H256};
 
 use barretenberg::Prove;
 use contracts::util::convert_h160_to_element;
@@ -145,7 +145,7 @@ pub enum AppError {
     WalletLoadError(#[from] color_eyre::Report),
 }
 
-async fn handle_create(chain: u64,name: &str) -> Result<(), AppError> {
+async fn handle_create(chain: u64, name: &str) -> Result<(), AppError> {
     let wallet_file = format!("{name}.json");
 
     // Check if wallet already exists
@@ -170,7 +170,9 @@ async fn handle_create(chain: u64,name: &str) -> Result<(), AppError> {
 
     println!("\n🚀 Next Steps:");
     println!("   1. Connect to network:  ciphera-cli --name {name} connect");
-    println!("   2. Mint tokens:         ciphera-cli --name {name} mint --amount <AMOUNT> --secret <YOUR_ETH_KEY> --geth-rpc <RPC_URL>");
+    println!(
+        "   2. Mint tokens:         ciphera-cli --name {name} mint --amount <AMOUNT> --secret <YOUR_ETH_KEY> --geth-rpc <RPC_URL>"
+    );
     println!("   3. Check balance:       cat {wallet_file}");
 
     Ok(())
@@ -179,7 +181,13 @@ async fn handle_create(chain: u64,name: &str) -> Result<(), AppError> {
 /// Handle the connect command
 ///
 /// Connects to a Ciphera node and performs health checks
-async fn handle_sync(chain: u64, name: &str, host: &str, port: u16, timeout_secs: u64) -> Result<()> {
+async fn handle_sync(
+    chain: u64,
+    name: &str,
+    host: &str,
+    port: u16,
+    timeout_secs: u64,
+) -> Result<()> {
     debug!(
         "Connecting wallet {} to Ciphera node at {}:{}",
         name, host, port
@@ -534,7 +542,8 @@ async fn handle_burn(
 }
 
 async fn handle_rollup(geth_rpc: &str, chain: u64, rollup: &str) -> Result<()> {
-    let sk = SecretKey::from_str("ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80")?;
+    let sk =
+        SecretKey::from_str("ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80")?;
 
     let client = contracts::Client::new(geth_rpc, None);
     let rollup = contracts::RollupContract::load(client, &chain, rollup, sk).await?;
@@ -542,13 +551,11 @@ async fn handle_rollup(geth_rpc: &str, chain: u64, rollup: &str) -> Result<()> {
     let rh = rollup.root_hash().await?;
     let b = rollup.block_height().await?;
     let kind_wcbtc = H256::from_slice(
-        &hex::decode("000200000000000013fb8d0c9d1c17ae5e40fff9be350f57840e9e66cd930000")
-            .unwrap(),
+        &hex::decode("000200000000000013fb8d0c9d1c17ae5e40fff9be350f57840e9e66cd930000").unwrap(),
     );
 
     let kind_usdc = H256::from_slice(
-        &hex::decode("000200000000000013fb52f74a8f9bdd29f77a5efd7f6cb44dcf6906a4b60000")
-            .unwrap(),
+        &hex::decode("000200000000000013fb52f74a8f9bdd29f77a5efd7f6cb44dcf6906a4b60000").unwrap(),
     );
 
     let token_wbtc = rollup.token(kind_wcbtc).await?;
@@ -593,7 +600,7 @@ async fn main() -> Result<()> {
 
     // Execute command
     match cli.command {
-        Commands::Create { } => {
+        Commands::Create {} => {
             handle_create(cli.chain, &cli.name).await?;
         }
         Commands::Sync {} => {
@@ -608,7 +615,15 @@ async fn main() -> Result<()> {
             handle_note_spend(&cli.name, amount, &ticker_normalized).await?;
         }
         Commands::SpendTo { address } => {
-            handle_spend_to(cli.chain, &cli.name, &cli.host, cli.port, cli.timeout, &address).await?;
+            handle_spend_to(
+                cli.chain,
+                &cli.name,
+                &cli.host,
+                cli.port,
+                cli.timeout,
+                &address,
+            )
+            .await?;
         }
         Commands::Receive { note, link } => {
             handle_receive(

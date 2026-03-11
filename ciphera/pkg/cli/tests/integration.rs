@@ -15,8 +15,8 @@
 //! Skip integration tests (unit tests only):
 //!   cargo test --lib
 
-use cli::rpc::ListTxnsQuery;
 use cli::NodeClient;
+use cli::rpc::ListTxnsQuery;
 
 const NODE_HOST: &str = "ciphera.satsbridge.com";
 const NODE_PORT: u16 = 80;
@@ -104,7 +104,10 @@ async fn test_list_transactions_with_limit() {
     let client = build_client(&name);
 
     let resp = client
-        .list_transactions(&ListTxnsQuery { limit: Some(5), ..Default::default() })
+        .list_transactions(&ListTxnsQuery {
+            limit: Some(5),
+            ..Default::default()
+        })
         .await
         .expect("list_transactions with limit=5 should succeed");
 
@@ -153,10 +156,16 @@ async fn test_sync_is_idempotent() {
         .await
         .expect("list_transactions");
 
-    client.get_wallet_mut().sync(&resp.txns).expect("first sync");
+    client
+        .get_wallet_mut()
+        .sync(&resp.txns)
+        .expect("first sync");
     let balance_after_first = client.get_wallet().balance;
 
-    client.get_wallet_mut().sync(&resp.txns).expect("second sync");
+    client
+        .get_wallet_mut()
+        .sync(&resp.txns)
+        .expect("second sync");
     let balance_after_second = client.get_wallet().balance;
 
     assert_eq!(
@@ -216,7 +225,11 @@ fn test_build_load_succeeds_when_wallet_exists() {
 
     let _ = std::fs::remove_file(&file);
 
-    assert!(result.is_ok(), "create_wallet=false should load existing wallet: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "create_wallet=false should load existing wallet: {:?}",
+        result.err()
+    );
 }
 
 /// create_wallet=false fails when the wallet file is absent.
@@ -250,9 +263,7 @@ fn test_build_load_rejects_wrong_chain_id() {
         .build(CHAIN_ID, HTTPS, true)
         .expect("pre-create with CHAIN_ID=5115");
 
-    let result = NodeClient::builder()
-        .name(name)
-        .build(9999, HTTPS, false); // different chain_id
+    let result = NodeClient::builder().name(name).build(9999, HTTPS, false); // different chain_id
 
     let _ = std::fs::remove_file(&file);
 
@@ -288,8 +299,11 @@ fn test_build_propagates_serialization_error_on_bad_json() {
     let err = result.expect_err("build must fail with malformed wallet file");
     let msg = format!("{err}");
     assert!(
-        msg.contains("Serialization") || msg.contains("JSON") || msg.contains("json")
-            || msg.contains("parse") || msg.contains("deserializ"),
+        msg.contains("Serialization")
+            || msg.contains("JSON")
+            || msg.contains("json")
+            || msg.contains("parse")
+            || msg.contains("deserializ"),
         "error should mention deserialization, not just 'Builder error': {msg}"
     );
 }

@@ -1,15 +1,15 @@
 use element::Element;
 use hash::hash_merge;
-use rand::{rngs::OsRng, RngCore};
+use rand::{RngCore, rngs::OsRng};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::num::ParseIntError;
 use std::path::Path;
 use zk_primitives::{InputNote, Note, Utxo};
 
+use crate::CipheraAddress;
 use crate::address::{citrea_ticker_from_contract, citrea_token_data, decode_address};
 use crate::rpc::TxnWithInfo;
-use crate::CipheraAddress;
 use std::collections::HashMap;
 
 // Error types for wallet operations
@@ -144,10 +144,7 @@ impl Wallet {
     }
 
     fn push_to_avail(&mut self, ticker: &str, note: InputNote) {
-        self.avail
-            .entry(ticker.to_string())
-            .or_default()
-            .push(note);
+        self.avail.entry(ticker.to_string()).or_default().push(note);
     }
 
     fn make_change_note(&self, spend_note: &Note, change_amount: u64) -> InputNote {
@@ -162,15 +159,21 @@ impl Wallet {
                 //psi: Element::secure_random(rand::thread_rng()),
                 value: Element::from(change_amount),
             },
-            pk
+            pk,
         )
     }
 
     pub fn spend_note(&mut self, amount: u64, ticker: &str) -> Result<InputNote, WalletError> {
-        let asset_notes = self.avail.get_mut(ticker).filter(|n| !n.is_empty())
-            .ok_or_else(|| WalletError::LowBalance(
-                format!("Wallet {} has 0 balance", self.name.as_deref().unwrap_or("Noname"))
-            ))?;
+        let asset_notes = self
+            .avail
+            .get_mut(ticker)
+            .filter(|n| !n.is_empty())
+            .ok_or_else(|| {
+                WalletError::LowBalance(format!(
+                    "Wallet {} has 0 balance",
+                    self.name.as_deref().unwrap_or("Noname")
+                ))
+            })?;
 
         let best_idx = asset_notes
             .iter()
@@ -190,8 +193,12 @@ impl Wallet {
             .ok_or(WalletError::CantPullNote())?;
 
         let input_note = asset_notes.remove(best_idx);
-        let note_amount = input_note.note.value.to_u64_array()
-            .first().copied()
+        let note_amount = input_note
+            .note
+            .value
+            .to_u64_array()
+            .first()
+            .copied()
             .ok_or(WalletError::CantReadNoteValue())?;
         self.balance -= note_amount;
         Ok(input_note)
@@ -245,18 +252,22 @@ impl Wallet {
                 self.push_to_avail(&ticker, change_note.clone());
                 self.balance += change_amount;
 
-                ([input_note_1.clone(), input_note_2.clone()], change_note.note)
+                (
+                    [input_note_1.clone(), input_note_2.clone()],
+                    change_note.note,
+                )
             }
         } else {
             let change_amount = amount_1 - amount;
-            println!(
-                "Pulled note {amount_1}, requested {amount}, change {change_amount}"
-            );
+            println!("Pulled note {amount_1}, requested {amount}, change {change_amount}");
             let change_note = self.make_change_note(&input_note_1.note, change_amount);
             self.push_to_avail(&ticker, change_note.clone());
             self.balance += change_amount;
 
-            ([input_note_1.clone(), InputNote::padding_note()], change_note.note)
+            (
+                [input_note_1.clone(), InputNote::padding_note()],
+                change_note.note,
+            )
         };
         Ok(Utxo::new_send(inputs, [note, change]))
     }
@@ -814,8 +825,7 @@ mod wallet_tests {
         let address = create_note_and_encode_address(600);
         wallet.spend_to(&address).unwrap();
         assert_eq!(
-            wallet.balance,
-            100,
+            wallet.balance, 100,
             "change should be 100 (400+300-600), not 200 (400+400-600)"
         );
     }
@@ -835,8 +845,7 @@ mod wallet_tests {
         let address = create_note_and_encode_address(700);
         wallet.spend_to(&address).unwrap();
         assert_eq!(
-            wallet.balance,
-            50,
+            wallet.balance, 50,
             "change should be 50 (500+250-700), not 300 (500+500-700)"
         );
     }
@@ -855,6 +864,9 @@ mod wallet_tests {
 
         let address = create_note_and_encode_address(600);
         wallet.spend_to(&address).unwrap();
-        assert_eq!(wallet.balance, 0, "exact two-note spend should leave zero balance");
+        assert_eq!(
+            wallet.balance, 0,
+            "exact two-note spend should leave zero balance"
+        );
     }
 }
