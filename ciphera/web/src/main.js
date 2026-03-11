@@ -864,7 +864,7 @@ class CipheraApp {
         this.terminal.log('Type "clear" to return home', 'dim');
         this.startPromptSequence('sync', [
             {key: 'host', label: 'Host:', placeholder: 'ciphera.satsbridge.com', default: 'ciphera.satsbridge.com'},
-            {key: 'port', label: 'Port:', placeholder: '8091', default: '8091'}
+            {key: 'port', label: 'Port:', placeholder: '443', default: '443'}
         ]);
     }
 
