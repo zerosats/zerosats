@@ -49,9 +49,10 @@ class CipheraApp {
             connected: false,
             cliReady: false,
             pendingNote: null, // Stores note waiting to be saved
-            nodeEndpoint: null, // Stores connected node endpoint for explorer
             nodeHost: null,
             nodePort: null,
+            chainId: null,
+            rollupContract: null,
         };
 
         // Prompt system state
@@ -329,7 +330,8 @@ class CipheraApp {
     updateConnectionStatus(connected, endpoint = null) {
         this.state.connected = connected;
         if (!connected) {
-            this.state.nodeEndpoint = null;
+            this.state.nodeHost = null;
+            this.state.nodePort = null;
             // Stop explorer polling when disconnected
             if (this.explorerPollInterval) {
                 clearInterval(this.explorerPollInterval);
@@ -515,7 +517,7 @@ class CipheraApp {
     // === Explorer Methods ===
 
     async lookupTransaction(hash) {
-        if (!this.state.connected || !this.state.nodeEndpoint) {
+        if (!this.state.connected || !this.state.nodeHost) {
             this.terminal.log('Connect to a node first (type "2" or "connect")', 'warning');
             return;
         }
@@ -525,7 +527,7 @@ class CipheraApp {
         this.updateStatus(`⏳ Fetching transaction ${hash.slice(0, 16)}...`);
 
         try {
-            const response = await fetch(`http://${this.state.nodeEndpoint}/v0/transactions/${hash}`);
+            const response = await fetch(`http://${this.state.nodeHost}:${this.state.nodePort}/v0/transactions/${hash}`);
 
             if (!response.ok) {
                 if (response.status === 404) {
@@ -564,7 +566,7 @@ class CipheraApp {
     }
 
     async lookupBlock(blockNum) {
-        if (!this.state.connected || !this.state.nodeEndpoint) {
+        if (!this.state.connected || !this.state.nodeHost) {
             this.terminal.log('Connect to a node first (type "2" or "connect")', 'warning');
             return;
         }
@@ -574,7 +576,7 @@ class CipheraApp {
         this.updateStatus(`⏳ Fetching block ${blockNum}...`);
 
         try {
-            const response = await fetch(`http://${this.state.nodeEndpoint}/v0/blocks/${blockNum}`);
+            const response = await fetch(`http://${this.state.nodeHost}:${this.state.nodePort}/v0/blocks/${blockNum}`);
 
             if (!response.ok) {
                 if (response.status === 404) {
@@ -890,14 +892,26 @@ class CipheraApp {
             return;
         }
 
-        // Store endpoint in state for explorer lookups and future commands
-        this.state.nodeEndpoint = `${answers.host}:${answers.port}`;
+        // Store node connection info in state
         this.state.nodeHost = answers.host;
         this.state.nodePort = parseInt(answers.port);
 
-        this.updateConnectionStatus(true, `${answers.host}:${answers.port}`);
+        // Fetch network info to get chain_id and rollup_contract
+        try {
+            const networkRes = await fetch(`http://${this.state.nodeHost}:${this.state.nodePort}/v0/network`);
+            if (networkRes.ok) {
+                const network = await networkRes.json();
+                this.state.chainId = network.chain_id;
+                this.state.rollupContract = network.rollup_contract;
+                this.terminal.log(`Chain ID: ${network.chain_id}  Rollup: ${network.rollup_contract}`, 'dim');
+            }
+        } catch (e) {
+            this.terminal.log(`Warning: could not fetch network info: ${e.message}`, 'warning');
+        }
 
-        this.completeStatus(true, `CONNECTED: ${answers.host}:${answers.port}`);
+        this.updateConnectionStatus(true, `${this.state.nodeHost}:${this.state.nodePort}`);
+
+        this.completeStatus(true, `CONNECTED: ${this.state.nodeHost}:${this.state.nodePort}`);
     }
 
     startMint() {
@@ -968,6 +982,8 @@ class CipheraApp {
             gethRpc: answers.gethRpc,
             host: this.state.nodeHost,
             port: this.state.nodePort,
+            chain: this.state.chainId,
+            rollup: this.state.rollupContract,
         });
 
         if (!result.success) {
@@ -1038,7 +1054,7 @@ class CipheraApp {
 
         this.updateStatus('⏳ SEND: Creating private note...');
 
-        const result = await window.ciphera.spend(this.state.walletName, amountWei);
+        const result = await window.ciphera.spend(this.state.walletName, amountWei, undefined, this.state.chainId);
 
         if (!result.success) {
             this.completeStatus(false, `SEND FAILED - ${result.error}`);
@@ -1110,6 +1126,7 @@ class CipheraApp {
             noteFile: answers.noteFile,
             host: this.state.nodeHost,
             port: this.state.nodePort,
+            chain: this.state.chainId,
         });
 
         if (!result.success) {
@@ -1187,6 +1204,7 @@ class CipheraApp {
             address: answers.address,
             host: this.state.nodeHost,
             port: this.state.nodePort,
+            chain: this.state.chainId,
         });
 
         if (!result.success) {
@@ -1357,11 +1375,11 @@ class CipheraApp {
     }
 
     async loadExplorerStats() {
-        if (!this.state.nodeEndpoint) return;
+        if (!this.state.nodeHost) return;
 
         try {
             // Fetch height
-            const heightRes = await fetch(`http://${this.state.nodeEndpoint}/v0/height`);
+            const heightRes = await fetch(`http://${this.state.nodeHost}:${this.state.nodePort}/v0/height`);
             if (heightRes.ok) {
                 const heightData = await heightRes.json();
                 if (this.elements.statHeight) {
@@ -1370,7 +1388,7 @@ class CipheraApp {
             }
 
             // Fetch stats
-            const statsRes = await fetch(`http://${this.state.nodeEndpoint}/v0/stats`);
+            const statsRes = await fetch(`http://${this.state.nodeHost}:${this.state.nodePort}/v0/stats`);
             if (statsRes.ok) {
                 const stats = await statsRes.json();
                 if (this.elements.statTxCount) {
@@ -1388,7 +1406,7 @@ class CipheraApp {
     async handleExplorerSearch(query) {
         if (!query) return;
 
-        if (!this.state.connected || !this.state.nodeEndpoint) {
+        if (!this.state.connected || !this.state.nodeHost) {
             this.showExplorerError('Connect to a node first (use WALLET tab → connect)');
             return;
         }
@@ -1476,14 +1494,14 @@ class CipheraApp {
         const paddedHash = cleanHash.padStart(64, '0');
 
         // Try plural endpoint first (v0/transactions/{hash})
-        let url = `http://${this.state.nodeEndpoint}/v0/transactions/${paddedHash}`;
+        let url = `http://${this.state.nodeHost}:${this.state.nodePort}/v0/transactions/${paddedHash}`;
         console.log('[Explorer] Trying:', url);
         let response = await fetch(url);
         console.log('[Explorer] Response:', response.status);
 
         // If not found, try singular endpoint (v0/transaction/{hash})
         if (!response.ok && response.status === 404) {
-            url = `http://${this.state.nodeEndpoint}/v0/transaction/${paddedHash}`;
+            url = `http://${this.state.nodeHost}:${this.state.nodePort}/v0/transaction/${paddedHash}`;
             console.log('[Explorer] Trying:', url);
             response = await fetch(url);
             console.log('[Explorer] Response:', response.status);
@@ -1503,7 +1521,7 @@ class CipheraApp {
     }
 
     async explorerLookupBlock(blockNum) {
-        const response = await fetch(`http://${this.state.nodeEndpoint}/v0/blocks/${blockNum}`);
+        const response = await fetch(`http://${this.state.nodeHost}:${this.state.nodePort}/v0/blocks/${blockNum}`);
 
         if (!response.ok) {
             if (response.status === 404) {
@@ -1522,7 +1540,7 @@ class CipheraApp {
         const cleanHash = hash.startsWith('0x') ? hash.slice(2) : hash;
         const paddedHash = cleanHash.padStart(64, '0');
 
-        const response = await fetch(`http://${this.state.nodeEndpoint}/v0/elements/${paddedHash}`);
+        const response = await fetch(`http://${this.state.nodeHost}:${this.state.nodePort}/v0/elements/${paddedHash}`);
 
         if (!response.ok) {
             if (response.status === 404) {

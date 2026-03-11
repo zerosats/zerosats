@@ -147,20 +147,24 @@ contextBridge.exposeInMainWorld('ciphera', {
      * @param {string} [params.ticker='WCBTC'] - Token ticker
      * @param {string} [params.host='ciphera.satsbridge.com'] - Node host
      * @param {number} [params.port=8091] - Node port
+     * @param {number} [params.chain] - Chain ID (from /v0/network)
+     * @param {string} [params.rollup] - Rollup contract address (from /v0/network)
      */
     mint: async (params) => {
         const args = [
             '--name', params.name,
             '--host', params.host || 'ciphera.satsbridge.com',
             '--port', String(params.port || 8091),
+        ];
+        if (params.chain) args.push('--chain', String(params.chain));
+        if (params.rollup) args.push('--rollup', params.rollup);
+        args.push(
             'mint',
             '--geth-rpc', params.gethRpc || 'https://rpc.testnet.citrea.xyz',
             '--secret', params.secret,
             '--amount', String(params.amount),
-        ];
-        if (params.ticker) {
-            args.push('--ticker', params.ticker);
-        }
+        );
+        if (params.ticker) args.push('--ticker', params.ticker);
         return ipcRenderer.invoke('cli:run', args);
     },
 
@@ -169,16 +173,13 @@ contextBridge.exposeInMainWorld('ciphera', {
      * @param {string} name - Wallet name
      * @param {string|number} amount - Amount to spend in wei
      * @param {string} [ticker='WCBTC'] - Token ticker
+     * @param {number} [chain] - Chain ID (from /v0/network)
      */
-    spend: async (name, amount, ticker) => {
-        const args = [
-            '--name', name,
-            'spend',
-            '--amount', String(amount),
-        ];
-        if (ticker) {
-            args.push('--ticker', ticker);
-        }
+    spend: async (name, amount, ticker, chain) => {
+        const args = ['--name', name];
+        if (chain) args.push('--chain', String(chain));
+        args.push('spend', '--amount', String(amount));
+        if (ticker) args.push('--ticker', ticker);
         return ipcRenderer.invoke('cli:run', args);
     },
 
@@ -188,15 +189,16 @@ contextBridge.exposeInMainWorld('ciphera', {
      * @param {string} address - Recipient Ciphera address
      * @param {string} [host='ciphera.satsbridge.com'] - Node host
      * @param {number} [port=8091] - Node port
+     * @param {number} [chain] - Chain ID (from /v0/network)
      */
-    spendTo: async (name, address, host = 'ciphera.satsbridge.com', port = 8091) => {
+    spendTo: async (name, address, host = 'ciphera.satsbridge.com', port = 8091, chain) => {
         const args = [
             '--name', name,
             '--host', host,
             '--port', String(port),
-            'spend-to',
-            '--address', address,
         ];
+        if (chain) args.push('--chain', String(chain));
+        args.push('spend-to', '--address', address);
         return ipcRenderer.invoke('cli:run', args);
     },
 
@@ -204,16 +206,15 @@ contextBridge.exposeInMainWorld('ciphera', {
      * Import a note file into the wallet
      * @param {string} name - Wallet name
      * @param {string} notePath - Path to the note JSON file
+     * @param {number} [chain] - Chain ID (from /v0/network)
      */
-    importNote: async (name, notePath) => {
-        const args = [
-            '--name', name,
-            'import',
-            '--note', notePath,
-        ];
+    importNote: async (name, notePath, chain) => {
+        const args = ['--name', name];
+        if (chain) args.push('--chain', String(chain));
+        args.push('import', '--note', notePath);
         return ipcRenderer.invoke('cli:run', args);
     },
-    
+
     /**
      * Receive a note
      * @param {object} params
@@ -222,24 +223,26 @@ contextBridge.exposeInMainWorld('ciphera', {
      * @param {string} [params.link] - Note link
      * @param {string} [params.host='ciphera.satsbridge.com'] - Node host
      * @param {number} [params.port=8091] - Node port
+     * @param {number} [params.chain] - Chain ID (from /v0/network)
      */
     receive: async (params) => {
         const args = [
             '--name', params.name,
             '--host', params.host || 'ciphera.satsbridge.com',
             '--port', String(params.port || 8091),
-            'receive',
         ];
-        
+        if (params.chain) args.push('--chain', String(params.chain));
+        args.push('receive');
+
         if (params.noteFile) {
             args.push('--note', params.noteFile);
         } else if (params.link) {
             args.push('--link', params.link);
         }
-        
+
         return ipcRenderer.invoke('cli:run', args);
     },
-    
+
     /**
      * Burn tokens back to EVM
      * @param {object} params
@@ -249,19 +252,17 @@ contextBridge.exposeInMainWorld('ciphera', {
      * @param {string} [params.ticker='WCBTC'] - Token ticker
      * @param {string} [params.host='ciphera.satsbridge.com'] - Node host
      * @param {number} [params.port=8091] - Node port
+     * @param {number} [params.chain] - Chain ID (from /v0/network)
      */
     burn: async (params) => {
         const args = [
             '--name', params.name,
             '--host', params.host || 'ciphera.satsbridge.com',
             '--port', String(params.port || 8091),
-            'burn',
-            '--address', params.address,
-            '--amount', String(params.amount),
         ];
-        if (params.ticker) {
-            args.push('--ticker', params.ticker);
-        }
+        if (params.chain) args.push('--chain', String(params.chain));
+        args.push('burn', '--address', params.address, '--amount', String(params.amount));
+        if (params.ticker) args.push('--ticker', params.ticker);
         return ipcRenderer.invoke('cli:run', args);
     },
 });
