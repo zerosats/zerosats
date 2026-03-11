@@ -90,7 +90,7 @@ impl NodeClientBuilder {
 
     /// Build the NodeClient
     pub fn build(self, chain_id: u64, tls: bool, create_wallet: bool) -> Result<NodeClient> {
-        let proto = if tls { "http" } else { "https" };
+        let proto = if tls { "https" } else { "http" };
 
         let base_url = format!("{}://{}:{}/v0", proto, self.host, self.port);
 

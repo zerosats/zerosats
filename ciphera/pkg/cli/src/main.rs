@@ -133,6 +133,8 @@ pub enum AppError {
     CantBuildClient(),
     #[error("Wallet error: {0}")]
     WalletError(#[from] cli::wallet::WalletError),
+    #[error("Cant parse address: {0}")]
+    InvalidAddress(String),
     #[error("File not found: {0}")]
     FileNotFound(String),
     #[error("Not enough balance")]
@@ -508,7 +510,7 @@ async fn handle_burn(
     address: &str,
     amount: u64,
     ticker: &str,
-) -> Result<()> {
+) -> Result<(), AppError> {
     // Build client with fluent API
     let mut client = NodeClient::builder()
         .name(name)
@@ -519,7 +521,13 @@ async fn handle_burn(
 
     let note = client.get_wallet_mut().spend_note(amount, ticker)?;
 
-    let evm_address = convert_h160_to_element(&H160::from_str(address).unwrap()); // TODO
+    let evm_address = match H160::from_str(address) {
+        Ok(a) =>  convert_h160_to_element(&a),
+        Err(e) => {
+            return Err(AppError::InvalidAddress(e.to_string()))
+        },
+    };
+
     let input_notes = [note.clone(), InputNote::padding_note()];
     let utxo = zk_primitives::Utxo::new_burn(input_notes, evm_address);
 
@@ -536,7 +544,7 @@ async fn handle_burn(
         }
         Err(e) => {
             eprintln!("\n❌ Could not send transaction!");
-            Err(e)
+            Err(AppError::WalletLoadError(e))
         }
     }
 }

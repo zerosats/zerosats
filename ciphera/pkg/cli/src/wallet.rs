@@ -97,7 +97,7 @@ impl Wallet {
         Element::from_be_bytes(bytes)
     }
 
-    /// Load wallet from JSON file
+    /// Creates wallet with random secret and saves JSON file
     pub fn create(chain_id: u64, name: &str) -> Result<Self, WalletError> {
         let file = format!("{name}.json");
         let wallet_file = Path::new(&file);
@@ -111,6 +111,7 @@ impl Wallet {
         }
     }
 
+    /// Load wallet from JSON file
     pub fn load(name: &str) -> Result<Self, WalletError> {
         let file = format!("{name}.json");
         let wallet_file = Path::new(&file);
@@ -179,16 +180,10 @@ impl Wallet {
             .iter()
             .enumerate()
             .filter_map(|(i, n)| {
-                n.note.value.to_u64_array().first().copied().map(|v| {
-                    let delta = v.abs_diff(amount);
-                    if v >= amount {
-                        (i, delta)
-                    } else {
-                        (i, u64::MAX)
-                    }
-                })
+                n.note.value.to_u64_array().first().copied().map(|v| (i, v))
             })
-            .min_by_key(|&(_, delta)| delta)
+            .filter(|(_, v)| *v >= amount)
+            .min_by_key(|(_, v)| v.abs_diff(amount))
             .map(|(i, _)| i)
             .ok_or(WalletError::CantPullNote())?;
 
@@ -713,7 +708,7 @@ mod wallet_tests {
         assert_eq!(
             note_value(&result),
             500,
-            "expected closest note (100) but got wrong note"
+            "expected closest note (500) but got wrong note"
         );
     }
 
@@ -742,7 +737,7 @@ mod wallet_tests {
     }
 
     // Notes [800, 200], request 250.
-    // |200-250|=50 < |800-250|=550 → expect 800 (index 1).
+    // |200-250|=-50 < |800-250|=550 → expect 800 (index 1).
     // Buggy code returns 800 (index 0).
     #[test]
     fn test_best_fit_two_notes_picks_second() {
@@ -757,7 +752,7 @@ mod wallet_tests {
         assert_eq!(
             note_value(&result),
             800,
-            "expected closest note (200) but got wrong note"
+            "expected closest note (800) but got wrong note"
         );
     }
 

@@ -899,11 +899,25 @@ class CipheraApp {
         // Fetch network info to get chain_id and rollup_contract
         try {
             const networkRes = await fetch(`http://${this.state.nodeHost}:${this.state.nodePort}/v0/network`);
-            if (networkRes.ok) {
-                const network = await networkRes.json();
+            if (!networkRes.ok) {
+                throw new Error(`HTTP ${networkRes.status}`);
+            }
+            const network = await networkRes.json();
+
+            // On first connect, store values. On reconnect, verify they haven't changed.
+            if (this.state.chainId === null && this.state.rollupContract === null) {
                 this.state.chainId = network.chain_id;
                 this.state.rollupContract = network.rollup_contract;
                 this.terminal.log(`Chain ID: ${network.chain_id}  Rollup: ${network.rollup_contract}`, 'dim');
+            } else {
+                if (network.chain_id !== this.state.chainId) {
+                    this.completeStatus(false, `DISCONNECT - chain_id mismatch: expected ${this.state.chainId}, got ${network.chain_id}. Create new a wallet for given node`);
+                    return;
+                }
+                if (network.rollup_contract.toLowerCase() !== this.state.rollupContract.toLowerCase()) {
+                    this.completeStatus(false, `DISCONNECT - rollup contract mismatch: expected ${this.state.rollupContract}, got ${network.rollup_contract}. Create a new wallet for given node`);
+                    return;
+                }
             }
         } catch (e) {
             this.terminal.log(`Warning: could not fetch network info: ${e.message}`, 'warning');

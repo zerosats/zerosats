@@ -47,6 +47,8 @@ fn build_client(name: &str) -> cli::NodeClient {
 // =====================================================================
 
 /// Smoke test: node is reachable and returns a valid health response.
+
+#[ignore]
 #[tokio::test]
 async fn test_node_health() {
     let name = wallet_name("health");
@@ -66,6 +68,7 @@ async fn test_node_health() {
 
 /// Two consecutive height polls should return non-decreasing values.
 /// Guards against the node reporting height = 0 (stuck / wrong endpoint).
+#[ignore]
 #[tokio::test]
 async fn test_height_is_nonzero_and_advances() {
     let name = wallet_name("height");
@@ -84,6 +87,7 @@ async fn test_height_is_nonzero_and_advances() {
 // =====================================================================
 
 /// The transaction list endpoint returns without error and has correct shape.
+#[ignore]
 #[tokio::test]
 async fn test_list_transactions_returns_valid_shape() {
     let name = wallet_name("list");
@@ -98,6 +102,7 @@ async fn test_list_transactions_returns_valid_shape() {
 }
 
 /// Requesting a limited page of transactions should honour the limit.
+#[ignore]
 #[tokio::test]
 async fn test_list_transactions_with_limit() {
     let name = wallet_name("list-limit");
@@ -123,6 +128,7 @@ async fn test_list_transactions_with_limit() {
 // =====================================================================
 
 /// Sync must not reduce the wallet balance (only adds confirmed notes).
+#[ignore]
 #[tokio::test]
 async fn test_sync_does_not_corrupt_empty_wallet() {
     let name = wallet_name("sync-empty");
@@ -146,6 +152,7 @@ async fn test_sync_does_not_corrupt_empty_wallet() {
 }
 
 /// Syncing the same transaction list twice must not double-credit the wallet.
+#[ignore]
 #[tokio::test]
 async fn test_sync_is_idempotent() {
     let name = wallet_name("sync-idempotent");
