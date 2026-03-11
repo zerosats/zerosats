@@ -991,8 +991,9 @@ class CipheraApp {
             return;
         }
 
-        // Extract Ciphera tx hash from CLI output
+        // Extract tx hashes from CLI output
         cipheraTxHash = this.extractCipheraTxHash(result.output);
+        const citreaMintTxHash = this.extractCitreaMintTxHash(result.output);
 
         // Step 4: Update wallet
         const walletData = await window.ciphera.readWallet(this.state.walletName);
@@ -1006,10 +1007,13 @@ class CipheraApp {
 
         // Show transaction IDs
         if (citreaTxHash) {
-            this.terminal.log(`Citrea TX: ${this.shortenTxHash(citreaTxHash)}`, 'dim');
+            this.terminal.log(`Citrea Approve TX: ${this.shortenTxHash(citreaTxHash)}`, 'dim');
+        }
+        if (citreaMintTxHash) {
+            this.terminal.log(`Citrea Mint TX:    ${this.shortenTxHash(citreaMintTxHash)}`, 'dim');
         }
         if (cipheraTxHash) {
-            this.terminal.log(`Ciphera TX: ${this.padTxHash(cipheraTxHash)}`, 'dim');
+            this.terminal.log(`Ciphera TX:        ${this.padTxHash(cipheraTxHash)}`, 'dim');
         }
     }
 
@@ -1226,7 +1230,7 @@ class CipheraApp {
         const shortAddress = `${answers.address.slice(0, 8)}...${answers.address.slice(-6)}`;
         this.completeStatus(true, `BURN COMPLETE: ${answers.amount} wcBTC → ${shortAddress}`);
 
-        // Show transaction ID
+        // Show transaction IDs
         if (cipheraTxHash) {
             this.terminal.log(`Ciphera TX: ${this.padTxHash(cipheraTxHash)}`, 'dim');
         }
@@ -1241,6 +1245,16 @@ class CipheraApp {
     extractCipheraTxHash(output) {
         if (!output) return null;
         const match = output.match(/Transaction\s+([a-fA-F0-9]+)\s+has been sent/);
+        return match ? match[1] : null;
+    }
+
+    /**
+     * Extract Citrea EVM transaction hash from CLI output
+     * CLI prints: "Submitted MINT tx 0x{hash}"
+     */
+    extractCitreaMintTxHash(output) {
+        if (!output) return null;
+        const match = output.match(/Submitted MINT tx (0x[a-fA-F0-9]+)/);
         return match ? match[1] : null;
     }
 
