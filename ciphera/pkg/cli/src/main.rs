@@ -264,7 +264,7 @@ async fn handle_note_spend(name: &str, amount: u64, ticker: &str) -> Result<(), 
     // Build client with fluent API
     let mut wallet = Wallet::load(name)?;
 
-    let input_note = wallet.spend_note(amount, ticker)?;
+    let input_note = wallet.find_note(amount, ticker)?;
     let payload: CipheraURL = (&input_note).into();
 
     // Encode
@@ -519,7 +519,7 @@ async fn handle_burn(
         .timeout_secs(timeout_secs)
         .build(chain, true, false)?;
 
-    let note = client.get_wallet_mut().spend_note(amount, ticker)?;
+    let note = client.get_wallet_mut().find_note(amount, ticker)?;
 
     let evm_address = match H160::from_str(address) {
         Ok(a) =>  convert_h160_to_element(&a),

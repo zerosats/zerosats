@@ -11,6 +11,7 @@ use crate::CipheraAddress;
 use crate::address::{citrea_ticker_from_contract, citrea_token_data, decode_address};
 use crate::rpc::TxnWithInfo;
 use std::collections::HashMap;
+use tracing::{info, debug, error};
 
 // Error types for wallet operations
 #[derive(Debug, thiserror::Error)]
@@ -144,17 +145,46 @@ impl Wallet {
         Ok(())
     }
 
-    fn push_to_avail(&mut self, ticker: &str, note: InputNote) {
-        self.avail.entry(ticker.to_string()).or_default().push(note);
+    fn push_to_avail(&mut self, ticker: &str, note: InputNote) -> Result<u64, WalletError> {
+        self.avail.entry(ticker.to_string()).or_default().push(note.clone());
+        let note_amount = note
+            .note
+            .value
+            .to_u64_array()
+            .first()
+            .copied()
+            .ok_or(WalletError::CantReadNoteValue())?;
+        self.balance += note_amount;
+        Ok(self.balance)
     }
 
-    fn make_change_note(&self, spend_note: &Note, change_amount: u64) -> InputNote {
+    fn pull_from_avail(&mut self, ticker: &str, note: InputNote) -> Result<u64, WalletError> {
+        let opt_balance = self.avail.get_mut(ticker).and_then(|notes| {
+            let pos = notes.iter().position(|n| n.secret_key == note.secret_key)?;
+            let removed_note = notes.remove(pos);
+            let note_amount = removed_note
+                .note
+                .value
+                .to_u64_array()
+                .first()
+                .copied()
+                .or(None)?;
+            self.balance -= note_amount;
+            Some(self.balance)
+        });
+        match opt_balance {
+            Some(b) => Ok(b),
+            None => Err(WalletError::CantPullNote())
+        }
+    }
+
+    fn make_change_note(&self, origin_note: &Note, change_amount: u64) -> InputNote {
         let pk = self.gen_pk();
         let self_address = hash_merge([pk, Element::ZERO]);
         InputNote::new(
             Note {
-                kind: spend_note.kind,
-                contract: spend_note.contract,
+                kind: origin_note.kind,
+                contract: origin_note.contract,
                 address: self_address,
                 psi: hash_merge([pk, pk]),
                 //psi: Element::secure_random(rand::thread_rng()),
@@ -164,7 +194,7 @@ impl Wallet {
         )
     }
 
-    pub fn spend_note(&mut self, amount: u64, ticker: &str) -> Result<InputNote, WalletError> {
+    pub fn find_note(&mut self, amount: u64, ticker: &str) -> Result<InputNote, WalletError> {
         let asset_notes = self
             .avail
             .get_mut(ticker)
@@ -182,21 +212,11 @@ impl Wallet {
             .filter_map(|(i, n)| {
                 n.note.value.to_u64_array().first().copied().map(|v| (i, v))
             })
-            .filter(|(_, v)| *v >= amount)
             .min_by_key(|(_, v)| v.abs_diff(amount))
             .map(|(i, _)| i)
-            .ok_or(WalletError::CantPullNote())?;
+            .ok_or(WalletError::LowBalance("No notes found".to_string()))?;
 
-        let input_note = asset_notes.remove(best_idx);
-        let note_amount = input_note
-            .note
-            .value
-            .to_u64_array()
-            .first()
-            .copied()
-            .ok_or(WalletError::CantReadNoteValue())?;
-        self.balance -= note_amount;
-        Ok(input_note)
+        Ok(asset_notes[best_idx].clone())
     }
 
     pub fn spend_to(&mut self, address: &str) -> Result<Utxo, WalletError> {
@@ -215,11 +235,15 @@ impl Wallet {
             )));
         }
 
-        let input_note_1 = self.spend_note(amount.to_owned(), &ticker)?;
+        let input_note_1 = self.find_note(amount.to_owned(), &ticker)?;
+
         let values = input_note_1.note.value.to_u64_array();
         let Some(amount_1) = values.first() else {
             return Err(WalletError::CantPullNote());
         };
+
+        let b = self.pull_from_avail(&ticker, input_note_1.clone())?;
+        debug!(balance=b, "pulled first input note");
 
         let (inputs, change) = if *amount_1 == *amount {
             (
@@ -227,16 +251,19 @@ impl Wallet {
                 Note::padding_note(),
             )
         } else if *amount_1 < *amount {
-            println!("Pulling additional note. Requested {amount}, available {amount_1}");
+            info!("Requested {amount}, found {amount_1}. Pulling additional note");
             let delta = amount - amount_1;
-            let input_note_2 = self.spend_note(delta, &ticker)?;
+            let input_note_2 = self.find_note(delta, &ticker)?;
 
             let values = input_note_2.note.value.to_u64_array();
             let Some(amount_2) = values.first() else {
                 return Err(WalletError::CantPullNote());
             };
             let change_amount = (amount_1 + amount_2) - amount;
-            println!("Pulled {amount_2}, change {change_amount}");
+
+            let b = self.pull_from_avail(&ticker, input_note_2.clone())?;
+            debug!(balance=b, "pulled second input note");
+
             if change_amount == 0 {
                 (
                     [input_note_1.clone(), input_note_2.clone()],
@@ -244,9 +271,9 @@ impl Wallet {
                 )
             } else {
                 let change_note = self.make_change_note(&input_note_1.note, change_amount);
-                self.push_to_avail(&ticker, change_note.clone());
-                self.balance += change_amount;
 
+                let b = self.push_to_avail(&ticker, change_note.clone())?;
+                debug!(balance=b, "added change");
                 (
                     [input_note_1.clone(), input_note_2.clone()],
                     change_note.note,
@@ -254,16 +281,16 @@ impl Wallet {
             }
         } else {
             let change_amount = amount_1 - amount;
-            println!("Pulled note {amount_1}, requested {amount}, change {change_amount}");
+            info!("requested {amount}, change {change_amount}");
             let change_note = self.make_change_note(&input_note_1.note, change_amount);
-            self.push_to_avail(&ticker, change_note.clone());
-            self.balance += change_amount;
-
+            let b = self.push_to_avail(&ticker, change_note.clone())?;
+            debug!(balance=b, "updated wallet balance");
             (
                 [input_note_1.clone(), InputNote::padding_note()],
                 change_note.note,
             )
         };
+
         Ok(Utxo::new_send(inputs, [note, change]))
     }
 
@@ -281,10 +308,6 @@ impl Wallet {
             //psi: Element::secure_random(rand::thread_rng()),
             value: Element::from(amount),
         };
-
-        self.push_to_avail(&ticker, InputNote::new(note.clone(), pk));
-
-        self.balance += amount;
         note
     }
 
@@ -300,9 +323,12 @@ impl Wallet {
 
                 let ticker = citrea_ticker_from_contract(note.contract);
 
-                self.push_to_avail(&ticker, InputNote::new(note.clone(), pk));
+                debug!(ticker=ticker, amount=amount, "importing note");
 
-                self.balance += amount;
+                let b = self.push_to_avail(&ticker, InputNote::new(note.clone(), pk))?;
+
+                debug!(balance=b, "updated wallet balance");
+
                 self.keys.remove(i);
                 return Ok(());
             }
@@ -448,29 +474,31 @@ mod wallet_tests {
     }
 
     // =====================================================================
-    // spend_note Tests
+    // find_note Tests
     // =====================================================================
 
     #[test]
-    fn test_spend_note_success_single_note() {
+    fn test_find_note_success_single_note() {
         let mut wallet = create_test_wallet(1000, 1);
 
-        let result = wallet.spend_note(1000, "WCBTC");
+        let result = wallet.find_note(1000, "WCBTC");
         assert!(result.is_ok());
+        let _ = wallet.pull_from_avail("WCBTC", result.unwrap()).unwrap();
+        assert_eq!(wallet.balance, 0); // Balance updated
         if let Some(asset_notes) = wallet.avail.get("WCBTC") {
             assert_eq!(asset_notes.len(), 0); // Note was removed
         } else {
             panic!();
         };
-        assert_eq!(wallet.balance, 0); // Balance updated
     }
 
     #[test]
-    fn test_spend_note_success_multiple_notes() {
+    fn test_find_note_success_multiple_notes() {
         let mut wallet = create_test_wallet(1200, 3);
 
-        let result = wallet.spend_note(400, "WCBTC");
+        let result = wallet.find_note(400, "WCBTC");
         assert!(result.is_ok());
+        let _ = wallet.pull_from_avail("WCBTC", result.unwrap()).unwrap();
         if let Some(asset_notes) = wallet.avail.get("WCBTC") {
             assert_eq!(asset_notes.len(), 2); // One note removed
         } else {
@@ -480,8 +508,8 @@ mod wallet_tests {
     }
 
     #[test]
-    fn test_spend_note_selects_best_fit() {
-        // Test that spend_note selects the note closest to requested amount
+    fn test_find_note_selects_best_fit() {
+        // Test that find_note selects the note closest to requested amount
         let mut wallet = Wallet::random(5115, Some("test".to_string()));
 
         // Add notes with values: 100, 500, 1000
@@ -496,8 +524,10 @@ mod wallet_tests {
         wallet.balance = 1600;
 
         // Request 450 - should select 500 (delta=50) over 1000 (delta=550)
-        let result = wallet.spend_note(450, "WCBTC");
+        let result = wallet.find_note(450, "WCBTC");
         assert!(result.is_ok());
+        let _ = wallet.pull_from_avail("WCBTC", result.unwrap()).unwrap();
+
         if let Some(asset_notes) = wallet.avail.get("WCBTC") {
             assert_eq!(asset_notes.len(), 2);
         } else {
@@ -506,10 +536,10 @@ mod wallet_tests {
     }
 
     #[test]
-    fn test_spend_note_empty_wallet() {
+    fn test_find_note_empty_wallet() {
         let mut wallet = Wallet::random(5115, Some("test".to_string()));
 
-        let result = wallet.spend_note(100, "WCBTC");
+        let result = wallet.find_note(100, "WCBTC");
         assert!(result.is_err());
         match result {
             Err(WalletError::LowBalance(_)) => (),
@@ -518,12 +548,15 @@ mod wallet_tests {
     }
 
     #[test]
-    fn test_spend_note_exact_match() {
+    fn test_find_note_exact_match() {
         let mut wallet = create_test_wallet(1000, 1);
 
-        let result = wallet.spend_note(1000, "WCBTC");
+        let result = wallet.find_note(1000, "WCBTC");
         assert!(result.is_ok());
+        let _ = wallet.pull_from_avail("WCBTC", result.unwrap()).unwrap();
+
         assert_eq!(wallet.balance, 0);
+
         if let Some(asset_notes) = wallet.avail.get("WCBTC") {
             assert_eq!(asset_notes.len(), 0);
         } else {
@@ -532,12 +565,15 @@ mod wallet_tests {
     }
 
     #[test]
-    fn test_spend_note_with_none_amount() {
+    fn test_find_note_with_none_amount() {
         // Test behavior when None is passed as amount
         let mut wallet = create_test_wallet(1000, 2);
 
-        let result = wallet.spend_note(1, "WCBTC");
+        let result = wallet.find_note(1, "WCBTC");
         assert!(result.is_ok());
+
+        let _ = wallet.pull_from_avail("WCBTC", result.unwrap()).unwrap();
+
         if let Some(asset_notes) = wallet.avail.get("WCBTC") {
             assert_eq!(asset_notes.len(), 1); // One note removed
         } else {
@@ -546,12 +582,13 @@ mod wallet_tests {
     }
 
     #[test]
-    fn test_spend_note_large_request_small_note() {
+    fn test_find_note_large_request_small_note() {
         let mut wallet = create_test_wallet(100, 1);
 
-        let result = wallet.spend_note(1000, "WCBTC");
-        // Should still remove the note even though amount requested > available
+        let result = wallet.find_note(1000, "WCBTC");
         assert!(result.is_ok());
+
+        let _ = wallet.pull_from_avail("WCBTC", result.unwrap()).unwrap();
         assert_eq!(wallet.balance, 0);
     }
 
@@ -669,15 +706,18 @@ mod wallet_tests {
     // =====================================================================
 
     #[test]
-    fn test_consecutive_spend_notes() {
+    fn test_consecutive_find_notes() {
         let mut wallet = create_test_wallet(2000, 2);
 
-        let result1 = wallet.spend_note(1000, "WCBTC");
-        let result2 = wallet.spend_note(1000, "WCBTC");
-        let result3 = wallet.spend_note(500, "WCBTC");
-
+        let result1 = wallet.find_note(1000, "WCBTC");
         assert!(result1.is_ok());
+        let _ = wallet.pull_from_avail("WCBTC", result1.unwrap()).unwrap();
+
+        let result2 = wallet.find_note(1000, "WCBTC");
         assert!(result2.is_ok());
+        let _ = wallet.pull_from_avail("WCBTC", result2.unwrap()).unwrap();
+
+        let result3 = wallet.find_note(500, "WCBTC");
         assert!(result3.is_err()); // Should fail - no notes left
     }
 
@@ -690,7 +730,7 @@ mod wallet_tests {
     }
 
     // Notes [1000, 500, 100], request 150.
-    // |100-150|=50 < |500-150|=350 < |1000-150|=850 → expect 500 (index 2).
+    // |100-150|=50 < |500-150|=350 < |1000-150|=850 → expect 100.
     #[test]
     fn test_best_fit_selects_last_not_first() {
         let mut wallet = Wallet::random(5115, Some("test".to_string()));
@@ -704,11 +744,11 @@ mod wallet_tests {
         );
         wallet.balance = 1600;
 
-        let result = wallet.spend_note(150, "WCBTC").unwrap();
+        let result = wallet.find_note(150, "WCBTC").unwrap();
         assert_eq!(
             note_value(&result),
-            500,
-            "expected closest note (500) but got wrong note"
+            100,
+            "expected closest note (100) but got wrong note"
         );
     }
 
@@ -728,7 +768,7 @@ mod wallet_tests {
         );
         wallet.balance = 1550;
 
-        let result = wallet.spend_note(400, "WCBTC").unwrap();
+        let result = wallet.find_note(400, "WCBTC").unwrap();
         assert_eq!(
             note_value(&result),
             450,
@@ -737,8 +777,7 @@ mod wallet_tests {
     }
 
     // Notes [800, 200], request 250.
-    // |200-250|=-50 < |800-250|=550 → expect 800 (index 1).
-    // Buggy code returns 800 (index 0).
+    // |200-250|=-50 < |800-250|=550 → expect 200.
     #[test]
     fn test_best_fit_two_notes_picks_second() {
         let mut wallet = Wallet::random(5115, Some("test".to_string()));
@@ -748,11 +787,11 @@ mod wallet_tests {
         );
         wallet.balance = 1000;
 
-        let result = wallet.spend_note(250, "WCBTC").unwrap();
+        let result = wallet.find_note(250, "WCBTC").unwrap();
         assert_eq!(
             note_value(&result),
-            800,
-            "expected closest note (800) but got wrong note"
+            200,
+            "expected closest note (200) but got wrong note"
         );
     }
 
@@ -772,7 +811,7 @@ mod wallet_tests {
         );
         wallet.balance = 1999;
 
-        let result = wallet.spend_note(500, "WCBTC").unwrap();
+        let result = wallet.find_note(500, "WCBTC").unwrap();
         assert_eq!(
             note_value(&result),
             500,
@@ -782,7 +821,7 @@ mod wallet_tests {
 
     // Regression: existing best-fit test strengthened to assert the returned value.
     #[test]
-    fn test_spend_note_selects_best_fit_value() {
+    fn test_find_note_selects_best_fit_value() {
         let mut wallet = Wallet::random(5115, Some("test".to_string()));
         wallet.avail.insert(
             "WCBTC".to_string(),
@@ -795,17 +834,19 @@ mod wallet_tests {
         wallet.balance = 1600;
 
         // |500-450|=50 beats |100-450|=350 and |1000-450|=550
-        let result = wallet.spend_note(450, "WCBTC").unwrap();
+        let note = wallet.find_note(450, "WCBTC").unwrap();
         assert_eq!(
-            note_value(&result),
+            note_value(&note),
             500,
-            "spend_note must select the closest note, not index 0"
+            "find_note must select the closest note, not index 0"
         );
+
+        let _ = wallet.pull_from_avail("WCBTC", note).unwrap();
         assert_eq!(wallet.avail["WCBTC"].len(), 2);
     }
 
     // Wallet: notes [400, 300] (total 700), spend_to 600.
-    // Best fit for 600 → 400 (delta=200), then spend_note(200) → 300.
+    // Best fit for 600 → 400 (delta=200), then find_note(200) → 300.
     // Correct change: 400+300-600 = 100  →  wallet.balance = 100.
     // Buggy change:   400+400-600 = 200  →  wallet.balance = 200.
     #[test]

@@ -457,8 +457,8 @@ mod client_tests {
         let _ = std::fs::remove_file(&file);
 
         assert!(
-            client.base_url().starts_with("http://node.example.com:80"),
-            "tls=true should produce http:// (inverted flag); got: {}",
+            client.base_url().starts_with("https://node.example.com:80"),
+            "tls=true should produce https://; got: {}",
             client.base_url()
         );
     }
@@ -482,8 +482,8 @@ mod client_tests {
         assert!(
             client
                 .base_url()
-                .starts_with("https://node.example.com:443"),
-            "tls=false should produce https:// (inverted flag); got: {}",
+                .starts_with("http://node.example.com:443"),
+            "tls=false should produce http://; got: {}",
             client.base_url()
         );
     }
