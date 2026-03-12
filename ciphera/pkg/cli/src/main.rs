@@ -49,7 +49,7 @@ struct Cli {
     #[arg(
         global = true,
         long,
-        default_value = "0xcac0d0901ac8806160acc8ef373117898a51dfe7"
+        default_value = "0xbd57b7d47d66934509f9ca31248598eb6cb3fafd"
     )]
     rollup: String,
 }

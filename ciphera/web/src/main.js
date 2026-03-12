@@ -905,19 +905,24 @@ class CipheraApp {
             const network = await networkRes.json();
 
             // On first connect, store values. On reconnect, verify they haven't changed.
-            if (this.state.chainId === null && this.state.rollupContract === null) {
+            if (this.state.chainId === null) {
                 this.state.chainId = network.chain_id;
+                this.terminal.log(`Chain ID: ${network.chain_id}`, 'dim');
+            }
+
+            if (this.state.rollupContract === null) {
                 this.state.rollupContract = network.rollup_contract;
-                this.terminal.log(`Chain ID: ${network.chain_id}  Rollup: ${network.rollup_contract}`, 'dim');
-            } else {
-                if (network.chain_id !== this.state.chainId) {
-                    this.completeStatus(false, `DISCONNECT - chain_id mismatch: expected ${this.state.chainId}, got ${network.chain_id}. Create new a wallet for given node`);
-                    return;
-                }
-                if (network.rollup_contract.toLowerCase() !== this.state.rollupContract.toLowerCase()) {
-                    this.completeStatus(false, `DISCONNECT - rollup contract mismatch: expected ${this.state.rollupContract}, got ${network.rollup_contract}. Create a new wallet for given node`);
-                    return;
-                }
+                this.terminal.log(`Rollup: ${network.rollup_contract}`, 'dim');
+            }
+
+            if (network.chain_id !== this.state.chainId) {
+                this.completeStatus(false, `DISCONNECT - chain_id mismatch: expected ${this.state.chainId}, got ${network.chain_id}. Create new a wallet for given node`);
+                return;
+            }
+
+            if (network.rollup_contract.toLowerCase() !== this.state.rollupContract.toLowerCase()) {
+                this.completeStatus(false, `DISCONNECT - rollup contract mismatch: expected ${this.state.rollupContract}, got ${network.rollup_contract}. Create a new wallet for given node`);
+                return;
             }
         } catch (e) {
             this.terminal.log(`Warning: could not fetch network info: ${e.message}`, 'warning');
