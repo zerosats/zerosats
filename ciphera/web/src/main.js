@@ -1077,7 +1077,7 @@ class CipheraApp {
 
         this.updateStatus('⏳ SEND: Creating private note...');
 
-        const result = await window.ciphera.spend(this.state.walletName, amountWei, undefined, this.state.chainId);
+        const result = await window.ciphera.spend(this.state.walletName, amountWei, undefined, this.state.chainId, this.state.nodeHost, this.state.nodePort);
 
         if (!result.success) {
             this.completeStatus(false, `SEND FAILED - ${result.error}`);

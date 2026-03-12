@@ -174,9 +174,15 @@ contextBridge.exposeInMainWorld('ciphera', {
      * @param {string|number} amount - Amount to spend in wei
      * @param {string} [ticker='WCBTC'] - Token ticker
      * @param {number} [chain] - Chain ID (from /v0/network)
+     * @param {string} [host='ciphera.satsbridge.com'] - Node host
+     * @param {number} [port=8091] - Node port
      */
-    spend: async (name, amount, ticker, chain) => {
-        const args = ['--name', name];
+    spend: async (name, amount, ticker, chain, host, port) => {
+        const args = [
+            '--name', name,
+            '--host', host || 'ciphera.satsbridge.com',
+            '--port', String(port || 8091),
+        ];
         if (chain) args.push('--chain', String(chain));
         args.push('spend', '--amount', String(amount));
         if (ticker) args.push('--ticker', ticker);
