@@ -1,15 +1,15 @@
 use element::Element;
 use hash::hash_merge;
-use rand::{rngs::OsRng, RngCore};
+use rand::{RngCore, rngs::OsRng};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::num::ParseIntError;
 use std::path::Path;
 use zk_primitives::{InputNote, Note, Utxo};
 
+use crate::CipheraAddress;
 use crate::address::{citrea_ticker_from_contract, citrea_token_data};
 use crate::rpc::TxnWithInfo;
-use crate::CipheraAddress;
 use std::collections::HashMap;
 use tracing::{debug, error, info};
 
@@ -146,7 +146,10 @@ impl Wallet {
     }
 
     fn push_to_avail(&mut self, ticker: &str, note: InputNote) -> Result<u64, WalletError> {
-        self.avail.entry(ticker.to_string()).or_default().push(note.clone());
+        self.avail
+            .entry(ticker.to_string())
+            .or_default()
+            .push(note.clone());
         let note_amount = note
             .note
             .value
@@ -174,7 +177,7 @@ impl Wallet {
         });
         match opt_balance {
             Some(b) => Ok(b),
-            None => Err(WalletError::CantPullNote)
+            None => Err(WalletError::CantPullNote),
         }
     }
 
@@ -194,18 +197,19 @@ impl Wallet {
         )
     }
 
-    fn select_input_notes(&mut self, ticker: &str, amount: u64) -> Result<([InputNote; 2], Note), WalletError> {
+    fn select_input_notes(
+        &mut self,
+        ticker: &str,
+        amount: u64,
+    ) -> Result<([InputNote; 2], Note), WalletError> {
         let input_note_1 = self.find_note(amount, ticker)?;
         let amount_1 = self.get_note_amount(&input_note_1.note)?;
-
-        let b = self.pull_from_avail(&ticker, input_note_1.clone())?;
-        debug!(balance=b, "pulled first input note");
 
         if amount_1 == amount {
             return Ok((
                 [input_note_1.clone(), InputNote::padding_note()],
                 Note::padding_note(),
-            ))
+            ));
         } else if amount_1 < amount {
             info!("Requested {amount}, found {amount_1}. Pulling additional note");
             let delta = amount - amount_1;
@@ -213,33 +217,51 @@ impl Wallet {
             let input_note_2 = self.find_note(delta, &ticker)?;
             let amount_2 = self.get_note_amount(&input_note_2.note)?;
 
-            let change_amount = (amount_1 + amount_2) - amount;
+            if delta == amount_2 {
+                // 2 inputs, no change
+                let b = self.pull_from_avail(&ticker, input_note_1.clone())?;
+                debug!(balance = b, "pulled first input note");
+                let b = self.pull_from_avail(&ticker, input_note_2.clone())?;
+                debug!(balance = b, "pulled second input note");
 
-            let b = self.pull_from_avail(&ticker, input_note_2.clone())?;
-            debug!(balance=b, "pulled second input note");
+                return Ok((
+                    [input_note_1.clone(), input_note_2.clone()],
+                    Note::padding_note(),
+                ));
+            } else if delta < amount_2 {
+                // 2 inputs with our change
+                let change_amount = (amount_1 + amount_2) - amount;
+                let b = self.pull_from_avail(&ticker, input_note_1.clone())?;
+                debug!(balance = b, "pulled first input note");
+                let b = self.pull_from_avail(&ticker, input_note_2.clone())?;
+                debug!(balance = b, "pulled second input note");
 
-            if change_amount == 0 {
-                return Ok(
-                    ([input_note_1.clone(), input_note_2.clone()], Note::padding_note())
-                )
-            } else {
                 let change_note = self.make_change_note(&input_note_1.note, change_amount);
-
                 let b = self.push_to_avail(&ticker, change_note.clone())?;
-                debug!(balance=b, "added change");
-                return Ok(
-                    ([input_note_1.clone(), input_note_2.clone()], change_note.note)
-                )
+                debug!(balance = b, "added change");
+                return Ok((
+                    [input_note_1.clone(), input_note_2.clone()],
+                    change_note.note,
+                ));
+            } else {
+                // 2 inputs, not enough money
+                return Err(WalletError::LowBalance(
+                    "Too many small notes, consolidate first".to_string(),
+                ));
             }
         } else {
+            // 1 input, out change
             let change_amount = amount_1 - amount;
             info!("requested {amount}, change {change_amount}");
+            let b = self.pull_from_avail(&ticker, input_note_1.clone())?;
+            debug!(balance = b, "pulled first input note");
             let change_note = self.make_change_note(&input_note_1.note, change_amount);
             let b = self.push_to_avail(&ticker, change_note.clone())?;
-            debug!(balance=b, "updated wallet balance");
-            return Ok(
-                ([input_note_1.clone(), InputNote::padding_note()], change_note.note)
-            )
+            debug!(balance = b, "updated wallet balance");
+            return Ok((
+                [input_note_1.clone(), InputNote::padding_note()],
+                change_note.note,
+            ));
         }
     }
 
@@ -258,9 +280,7 @@ impl Wallet {
         let best_idx = asset_notes
             .iter()
             .enumerate()
-            .filter_map(|(i, n)| {
-                n.note.value.to_u64_array().first().copied().map(|v| (i, v))
-            })
+            .filter_map(|(i, n)| n.note.value.to_u64_array().first().copied().map(|v| (i, v)))
             .min_by_key(|(_, v)| v.abs_diff(amount))
             .map(|(i, _)| i)
             .ok_or(WalletError::LowBalance("No notes found".to_string()))?;
@@ -268,7 +288,7 @@ impl Wallet {
         Ok(asset_notes[best_idx].clone())
     }
 
-    fn get_note_amount(&self, note: &Note) -> Result<u64, WalletError> {
+    pub fn get_note_amount(&self, note: &Note) -> Result<u64, WalletError> {
         let values = note.value.to_u64_array();
         let Some(amount) = values.first() else {
             return Err(WalletError::CantPullNote);
@@ -299,7 +319,7 @@ impl Wallet {
         let received_note: InputNote = self.receive_note(amount, &ticker);
 
         let b = self.push_to_avail(&ticker, received_note.clone())?;
-        debug!(balance=b, "updated wallet balance");
+        debug!(balance = b, "updated wallet balance");
 
         Ok(Utxo::new_send(
             [input_note.clone(), InputNote::padding_note()],
@@ -311,20 +331,28 @@ impl Wallet {
         let received_note: InputNote = self.receive_note(amount, ticker);
 
         let b = self.push_to_avail(&ticker, received_note.clone())?;
-        debug!(balance=b, "updated wallet balance");
+        debug!(balance = b, "updated wallet balance");
 
-        Ok(Utxo::new_mint(
-            [received_note.note.clone(), Note::padding_note()]
-        ))
+        Ok(Utxo::new_mint([
+            received_note.note.clone(),
+            Note::padding_note(),
+        ]))
     }
 
-    pub fn burn(&mut self, burner_note: &InputNote, evm_address: &Element) -> Result<Utxo, WalletError> {
+    pub fn burn(
+        &mut self,
+        burner_note: &InputNote,
+        evm_address: &Element,
+    ) -> Result<Utxo, WalletError> {
         let ticker = citrea_ticker_from_contract(burner_note.note.contract);
 
         let b = self.pull_from_avail(&ticker, burner_note.to_owned())?;
-        debug!(balance=b, "pulled first input note");
+        debug!(balance = b, "pulled first input note");
 
-        Ok(Utxo::new_burn([burner_note.to_owned(), InputNote::padding_note()], evm_address.to_owned()))
+        Ok(Utxo::new_burn(
+            [burner_note.to_owned(), InputNote::padding_note()],
+            evm_address.to_owned(),
+        ))
     }
 
     pub fn receive_note(&mut self, amount: u64, ticker: &str) -> InputNote {
@@ -355,11 +383,11 @@ impl Wallet {
 
                 let ticker = citrea_ticker_from_contract(note.contract);
 
-                debug!(ticker=ticker, amount=amount, "importing note");
+                debug!(ticker = ticker, amount = amount, "importing note");
 
                 let b = self.push_to_avail(&ticker, InputNote::new(note.clone(), pk))?;
 
-                debug!(balance=b, "updated wallet balance");
+                debug!(balance = b, "updated wallet balance");
 
                 self.keys.remove(i);
                 return Ok(());
@@ -367,12 +395,6 @@ impl Wallet {
             i += 1
         }
         Err(WalletError::KeyNotFound(format!("Cant import {note:?}")))
-    }
-
-    pub fn address(&mut self) -> Element {
-        let pk = self.gen_pk();
-        self.keys.push(pk);
-        hash_merge([pk, Element::ZERO])
     }
 
     pub fn get_address(&mut self, amount: u64, ticker: &str) -> CipheraAddress {
@@ -422,7 +444,7 @@ impl Wallet {
                     for n in new_notes {
                         let ticker = citrea_ticker_from_contract(n.note.contract);
                         let b = self.push_to_avail(&ticker, n.clone())?;
-                        debug!(balance=b, "added note");
+                        debug!(balance = b, "added note");
                     }
                 }
             }

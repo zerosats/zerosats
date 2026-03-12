@@ -1,8 +1,9 @@
 use clap::{Parser, Subcommand};
 use cli::NodeClient;
 use cli::Wallet;
-use cli::note_url::{CipheraURL, decode_url};
 use cli::address::decode_address;
+use cli::note_url::{CipheraURL, decode_url};
+use cli::address::citrea_ticker_from_contract;
 
 use color_eyre::Result;
 use tracing::{debug, error};
@@ -156,13 +157,12 @@ async fn handle_create(chain: u64, name: &str) -> Result<(), AppError> {
         println!("   Location: {wallet_file}");
     };
 
-    let mut wallet = Wallet::create(chain, name)?;
+    let wallet = Wallet::create(chain, name)?;
 
     println!("\n✅ Wallet created successfully!");
     println!("\n📋 Wallet Details:");
     println!("   Name: {name}");
     println!("   File: {wallet_file}");
-    println!("   Address: {}", wallet.address());
     println!("   Private Key: {}", wallet.pk);
     println!("   Balance: {} sats", wallet.balance);
 
@@ -260,23 +260,55 @@ async fn handle_address(name: &str, amount: u64, ticker: &str) -> Result<()> {
     Ok(())
 }
 
-async fn handle_note_spend(name: &str, amount: u64, ticker: &str) -> Result<(), AppError> {
+async fn handle_note_spend(
+    chain: u64,
+    name: &str,
+    host: &str,
+    port: u16,
+    timeout_secs: u64,
+    amount: u64,
+    ticker: &str,
+) -> Result<()> {
     // Build client with fluent API
-    let mut wallet = Wallet::load(name)?;
+    let mut client = NodeClient::builder()
+        .name(name)
+        .host(host)
+        .port(port)
+        .timeout_secs(timeout_secs)
+        .build(chain, true, false)?;
 
-    let input_note = wallet.find_note(amount, ticker)?;
-    let payload: CipheraURL = (&input_note).into();
+    // Prepare transfer. A case, when wallet already has exactly matching note, will be ignored
+    let transfer_note: InputNote = client.get_wallet_mut().receive_note(amount, ticker);
+    let transfer_utxo = client.get_wallet_mut().spend_to(&transfer_note.note)?;
+    let snark = transfer_utxo.prove().unwrap();
 
-    // Encode
-    let encoded = payload.encode_url();
-    let json_str = serde_json::to_string_pretty(&input_note)?;
+    match client.transaction(&snark).await {
+        Ok(tx) => {
+            println!("\n✅ Transaction {} has been sent!", tx.txn_hash);
+            println!("   Height: {}", tx.height);
+            println!("   Root hash: {}", tx.root_hash);
 
-    std::fs::write(format!("{name}-note.json"), &json_str)?;
+            let payload: CipheraURL = (&transfer_note).into();
 
-    println!("\nSaved {input_note:?}");
-    println!("\nEncoded: {encoded}");
+            // Encode
+            let encoded = payload.encode_url();
+            let json_str = serde_json::to_string_pretty(&transfer_note)?;
 
-    Ok(())
+            std::fs::write(format!("{name}-note.json"), &json_str)?;
+
+            println!("\nSaved {transfer_note:?}");
+            println!("\nEncoded: {encoded}");
+
+            let b = client.get_wallet().balance;
+            println!("\nBalance {b} {ticker}");
+            let _ = client.get_wallet().save();
+            Ok(())
+        }
+        Err(e) => {
+            eprintln!("\n❌ Could not send transaction!");
+            Err(e)
+        }
+    }
 }
 
 async fn handle_spend_to(
@@ -303,6 +335,7 @@ async fn handle_spend_to(
     // Spend to UX leverages a variant of NoteURL encoding for providing an "address" with address
     // and amount needed for UTXO construction
     let note = Note::from(&decode_address(address));
+    let ticker = citrea_ticker_from_contract(note.contract);
 
     let utxo = client.get_wallet_mut().spend_to(&note)?;
     let snark = utxo.prove().unwrap();
@@ -319,6 +352,10 @@ async fn handle_spend_to(
             println!("\n✅ Transaction {} has been sent!", tx.txn_hash);
             println!("   Height: {}", tx.height);
             println!("   Root hash: {}", tx.root_hash);
+
+            let b = client.get_wallet().balance;
+            println!("\nBalance {b} {ticker}");
+            let _ = client.get_wallet().save();
             Ok(())
         }
         Err(e) => {
@@ -398,6 +435,8 @@ async fn handle_receive(
         _ => return Err(AppError::NotEnoughBalance().into()),
     };
 
+    let ticker = citrea_ticker_from_contract(input_note.note.contract);
+
     let utxo = client.get_wallet_mut().receive(&input_note)?;
     let snark = utxo.prove().unwrap();
 
@@ -406,6 +445,10 @@ async fn handle_receive(
             println!("\n✅ Transaction {} has been sent!", tx.txn_hash);
             println!("   Height: {}", tx.height);
             println!("   Root hash: {}", tx.root_hash);
+
+            let b = client.get_wallet().balance;
+            println!("\nBalance {b} {ticker}");
+            let _ = client.get_wallet().save();
             Ok(())
         }
         Err(e) => {
@@ -457,7 +500,14 @@ async fn handle_mint(
 
     if !only_snark {
         client
-            .admin_mint(geth_rpc, chain, secret, rollup, &utxo.output_notes[0], &snark)
+            .admin_mint(
+                geth_rpc,
+                chain,
+                secret,
+                rollup,
+                &utxo.output_notes[0],
+                &snark,
+            )
             .await?;
     }
 
@@ -466,16 +516,17 @@ async fn handle_mint(
             println!("\n✅ Transaction {} has been sent!", tx.txn_hash);
             println!("   Height: {}", tx.height);
             println!("   Root hash: {}", tx.root_hash);
+
+            let b = client.get_wallet().balance;
+            println!("\nBalance {b} {ticker}");
+            let _ = client.get_wallet().save();
+            Ok(())
         }
         Err(e) => {
             eprintln!("\n❌ Could not send transaction!");
             Err(e)
         }
     }
-
-    let _ = client.get_wallet().save();
-    let _ = client.get_wallet().save();
-    Ok(())
 }
 
 async fn handle_burn(
@@ -509,7 +560,7 @@ async fn handle_burn(
         }
         Err(e) => {
             eprintln!("\n❌ Could not send transaction!");
-            return Err(AppError::WalletLoadError(e))
+            return Err(AppError::WalletLoadError(e));
         }
     }
 
@@ -518,10 +569,8 @@ async fn handle_burn(
     let _ = client.get_wallet_mut().save()?;
 
     let evm_address = match H160::from_str(address) {
-        Ok(a) =>  convert_h160_to_element(&a),
-        Err(e) => {
-            return Err(AppError::InvalidAddress(e.to_string()))
-        },
+        Ok(a) => convert_h160_to_element(&a),
+        Err(e) => return Err(AppError::InvalidAddress(e.to_string())),
     };
 
     let burner_utxo = client.get_wallet_mut().burn(&burner_note, &evm_address)?;
@@ -535,11 +584,11 @@ async fn handle_burn(
         }
         Err(e) => {
             eprintln!("\n❌ Could not send transaction!");
-            return Err(AppError::WalletLoadError(e))
+            return Err(AppError::WalletLoadError(e));
         }
     }
     Ok(())
-/*    let input_notes = [note.clone(), InputNote::padding_note()];
+    /*    let input_notes = [note.clone(), InputNote::padding_note()];
     let utxo = zk_primitives::Utxo::new_burn(input_notes, evm_address);
 
     let snark = utxo.prove().unwrap();
@@ -631,7 +680,16 @@ async fn main() -> Result<()> {
         }
         Commands::Spend { amount, ticker } => {
             let ticker_normalized = ticker.to_uppercase();
-            handle_note_spend(&cli.name, amount, &ticker_normalized).await?;
+            handle_note_spend(
+                cli.chain,
+                &cli.name,
+                &cli.host,
+                cli.port,
+                cli.timeout,
+                amount,
+                &ticker_normalized,
+            )
+            .await?;
         }
         Commands::SpendTo { address } => {
             handle_spend_to(

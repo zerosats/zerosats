@@ -480,9 +480,7 @@ mod client_tests {
         let _ = std::fs::remove_file(&file);
 
         assert!(
-            client
-                .base_url()
-                .starts_with("http://node.example.com:443"),
+            client.base_url().starts_with("http://node.example.com:443"),
             "tls=false should produce http://; got: {}",
             client.base_url()
         );
