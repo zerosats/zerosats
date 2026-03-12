@@ -1,17 +1,17 @@
 use element::Element;
 use hash::hash_merge;
-use rand::{RngCore, rngs::OsRng};
+use rand::{rngs::OsRng, RngCore};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::num::ParseIntError;
 use std::path::Path;
 use zk_primitives::{InputNote, Note, Utxo};
 
-use crate::CipheraAddress;
-use crate::address::{citrea_ticker_from_contract, citrea_token_data, decode_address};
+use crate::address::{citrea_ticker_from_contract, citrea_token_data};
 use crate::rpc::TxnWithInfo;
+use crate::CipheraAddress;
 use std::collections::HashMap;
-use tracing::{info, debug, error};
+use tracing::{debug, error, info};
 
 // Error types for wallet operations
 #[derive(Debug, thiserror::Error)]
@@ -194,6 +194,55 @@ impl Wallet {
         )
     }
 
+    fn select_input_notes(&mut self, ticker: &str, amount: u64) -> Result<([InputNote; 2], Note), WalletError> {
+        let input_note_1 = self.find_note(amount, ticker)?;
+        let amount_1 = self.get_note_amount(&input_note_1.note)?;
+
+        let b = self.pull_from_avail(&ticker, input_note_1.clone())?;
+        debug!(balance=b, "pulled first input note");
+
+        if amount_1 == amount {
+            return Ok((
+                [input_note_1.clone(), InputNote::padding_note()],
+                Note::padding_note(),
+            ))
+        } else if amount_1 < amount {
+            info!("Requested {amount}, found {amount_1}. Pulling additional note");
+            let delta = amount - amount_1;
+
+            let input_note_2 = self.find_note(delta, &ticker)?;
+            let amount_2 = self.get_note_amount(&input_note_2.note)?;
+
+            let change_amount = (amount_1 + amount_2) - amount;
+
+            let b = self.pull_from_avail(&ticker, input_note_2.clone())?;
+            debug!(balance=b, "pulled second input note");
+
+            if change_amount == 0 {
+                return Ok(
+                    ([input_note_1.clone(), input_note_2.clone()], Note::padding_note())
+                )
+            } else {
+                let change_note = self.make_change_note(&input_note_1.note, change_amount);
+
+                let b = self.push_to_avail(&ticker, change_note.clone())?;
+                debug!(balance=b, "added change");
+                return Ok(
+                    ([input_note_1.clone(), input_note_2.clone()], change_note.note)
+                )
+            }
+        } else {
+            let change_amount = amount_1 - amount;
+            info!("requested {amount}, change {change_amount}");
+            let change_note = self.make_change_note(&input_note_1.note, change_amount);
+            let b = self.push_to_avail(&ticker, change_note.clone())?;
+            debug!(balance=b, "updated wallet balance");
+            return Ok(
+                ([input_note_1.clone(), InputNote::padding_note()], change_note.note)
+            )
+        }
+    }
+
     pub fn find_note(&mut self, amount: u64, ticker: &str) -> Result<InputNote, WalletError> {
         let asset_notes = self
             .avail
@@ -227,8 +276,7 @@ impl Wallet {
         Ok(amount.to_owned())
     }
 
-    pub fn spend_to(&mut self, address: &str) -> Result<Utxo, WalletError> {
-        let note = Note::from(&decode_address(address));
+    pub fn spend_to(&mut self, note: &Note) -> Result<Utxo, WalletError> {
         let ticker = citrea_ticker_from_contract(note.contract);
         let amount = self.get_note_amount(&note)?;
 
@@ -240,62 +288,49 @@ impl Wallet {
             )));
         }
 
-        let input_note_1 = self.find_note(amount.to_owned(), &ticker)?;
-        let amount_1 = self.get_note_amount(&input_note_1.note)?;
+        let (inputs, change) = self.select_input_notes(&ticker, amount)?;
 
-        let b = self.pull_from_avail(&ticker, input_note_1.clone())?;
-        debug!(balance=b, "pulled first input note");
-
-        let (inputs, change) = if amount_1 == amount {
-            (
-                [input_note_1.clone(), InputNote::padding_note()],
-                Note::padding_note(),
-            )
-        } else if amount_1 < amount {
-            info!("Requested {amount}, found {amount_1}. Pulling additional note");
-            let delta = amount - amount_1;
-
-            let input_note_2 = self.find_note(delta, &ticker)?;
-            let amount_2 = self.get_note_amount(&input_note_2.note)?;
-
-            let change_amount = (amount_1 + amount_2) - amount;
-
-            let b = self.pull_from_avail(&ticker, input_note_2.clone())?;
-            debug!(balance=b, "pulled second input note");
-
-            if change_amount == 0 {
-                (
-                    [input_note_1.clone(), input_note_2.clone()],
-                    Note::padding_note(),
-                )
-            } else {
-                let change_note = self.make_change_note(&input_note_1.note, change_amount);
-
-                let b = self.push_to_avail(&ticker, change_note.clone())?;
-                debug!(balance=b, "added change");
-                (
-                    [input_note_1.clone(), input_note_2.clone()],
-                    change_note.note,
-                )
-            }
-        } else {
-            let change_amount = amount_1 - amount;
-            info!("requested {amount}, change {change_amount}");
-            let change_note = self.make_change_note(&input_note_1.note, change_amount);
-            let b = self.push_to_avail(&ticker, change_note.clone())?;
-            debug!(balance=b, "updated wallet balance");
-            (
-                [input_note_1.clone(), InputNote::padding_note()],
-                change_note.note,
-            )
-        };
-
-        Ok(Utxo::new_send(inputs, [note, change]))
+        Ok(Utxo::new_send(inputs, [note.to_owned(), change]))
     }
 
-    pub fn receive_note(&mut self, amount: u64, ticker: &str) -> Note {
+    pub fn receive(&mut self, input_note: &InputNote) -> Result<Utxo, WalletError> {
+        let ticker = citrea_ticker_from_contract(input_note.note.contract);
+        let amount = self.get_note_amount(&input_note.note)?;
+        let received_note: InputNote = self.receive_note(amount, &ticker);
+
+        let b = self.push_to_avail(&ticker, received_note.clone())?;
+        debug!(balance=b, "updated wallet balance");
+
+        Ok(Utxo::new_send(
+            [input_note.clone(), InputNote::padding_note()],
+            [received_note.note, Note::padding_note()],
+        ))
+    }
+
+    pub fn mint(&mut self, amount: u64, ticker: &str) -> Result<Utxo, WalletError> {
+        let received_note: InputNote = self.receive_note(amount, ticker);
+
+        let b = self.push_to_avail(&ticker, received_note.clone())?;
+        debug!(balance=b, "updated wallet balance");
+
+        Ok(Utxo::new_mint(
+            [received_note.note.clone(), Note::padding_note()]
+        ))
+    }
+
+    pub fn burn(&mut self, burner_note: &InputNote, evm_address: &Element) -> Result<Utxo, WalletError> {
+        let ticker = citrea_ticker_from_contract(burner_note.note.contract);
+
+        let b = self.pull_from_avail(&ticker, burner_note.to_owned())?;
+        debug!(balance=b, "pulled first input note");
+
+        Ok(Utxo::new_burn([burner_note.to_owned(), InputNote::padding_note()], evm_address.to_owned()))
+    }
+
+    pub fn receive_note(&mut self, amount: u64, ticker: &str) -> InputNote {
         let pk = self.gen_pk();
         let self_address = hash_merge([pk, Element::ZERO]);
+        self.keys.push(pk);
 
         let (kind, contract) = citrea_token_data(ticker);
 
@@ -307,7 +342,8 @@ impl Wallet {
             //psi: Element::secure_random(rand::thread_rng()),
             value: Element::from(amount),
         };
-        note
+
+        InputNote::new(note.clone(), pk)
     }
 
     pub fn import_note(&mut self, note: &Note) -> Result<(), WalletError> {
@@ -408,6 +444,7 @@ impl Drop for Wallet {
 #[cfg(test)]
 mod wallet_tests {
     use super::*;
+    use crate::address::decode_address;
     use element::Element;
     use zk_primitives::InputNote;
 
@@ -594,8 +631,9 @@ mod wallet_tests {
     fn test_spend_to_exact_amount() {
         let mut wallet = create_test_wallet(1000, 1);
         let address = create_note_and_encode_address(1000);
+        let note = Note::from(&decode_address(address));
 
-        let result = wallet.spend_to(&address);
+        let result = wallet.spend_to(&note);
         assert!(result.is_ok());
 
         if let Some(asset_notes) = wallet.avail.get("WCBTC") {
@@ -609,8 +647,9 @@ mod wallet_tests {
     fn test_spend_to_with_change() {
         let mut wallet = create_test_wallet(1000, 1);
         let address = create_note_and_encode_address(100);
+        let note = Note::from(&decode_address(address));
 
-        let result = wallet.spend_to(&address);
+        let result = wallet.spend_to(&note);
         assert!(result.is_ok());
 
         // Balance should be updated with change
