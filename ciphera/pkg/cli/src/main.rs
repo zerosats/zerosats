@@ -340,12 +340,12 @@ async fn handle_spend_to(
     let utxo = client.get_wallet_mut().spend_to(&note)?;
     let snark = utxo.prove().unwrap();
 
-    let recepient_note = utxo.output_notes[0].clone();
-    let json_str = serde_json::to_string_pretty(&recepient_note)?;
+    let recipient_note = utxo.output_notes[0].clone();
+    let json_str = serde_json::to_string_pretty(&recipient_note)?;
 
     std::fs::write(format!("from-{name}-note.json"), &json_str)?;
 
-    println!("\nSaved {recepient_note:?}");
+    println!("\nSaved {recipient_note:?}");
 
     match client.transaction(&snark).await {
         Ok(tx) => {
