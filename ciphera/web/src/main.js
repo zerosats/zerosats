@@ -898,9 +898,9 @@ class CipheraApp {
 
         // Fetch network info to get chain_id and rollup_contract
         try {
-            const networkRes = await fetch(`http://${this.state.nodeHost}:${this.state.nodePort}/v0/network`);
+            const networkRes = await fetch(`https://${this.state.nodeHost}:${this.state.nodePort}/v0/network`);
             if (!networkRes.ok) {
-                throw new Error(`HTTP ${networkRes.status}`);
+                throw new Error(`HTTPs ${networkRes.status}`);
             }
             const network = await networkRes.json();
 
