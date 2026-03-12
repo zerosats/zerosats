@@ -433,14 +433,11 @@ mod client_tests {
 
     // =====================================================================
     // build() — URL scheme (tls flag)
-    // NOTE: the tls parameter is currently inverted in the implementation:
-    //   tls=true  → "http://"
-    //   tls=false → "https://"
-    // Tests document the *actual* (inverted) behaviour so a future fix
-    // will cause exactly these tests to fail, making the correction obvious.
+    //   tls=true  → "https://"
+    //   tls=false → "http://"
     // =====================================================================
 
-    /// tls=true produces http:// (current inverted behaviour).
+    /// tls=true produces https://
     #[test]
     fn test_build_tls_true_gives_http_scheme() {
         let name = "scheme-http-test-wallet";
@@ -463,7 +460,7 @@ mod client_tests {
         );
     }
 
-    /// tls=false produces https:// (current inverted behaviour).
+    /// tls=false produces http://
     #[test]
     fn test_build_tls_false_gives_https_scheme() {
         let name = "scheme-https-test-wallet";
