@@ -1333,18 +1333,45 @@ class CipheraApp {
         }
     }
 
-    handleSettingsAction(action) {
+    async handleSettingsAction(action) {
         switch (action) {
             case 'export':
                 this.terminal.log('Export wallet feature coming soon...', 'info');
                 break;
             case 'import':
-                this.terminal.log('Import wallet feature coming soon...', 'info');
+                await this.importWallet();
                 break;
             case 'about':
                 this.showAbout();
                 break;
         }
+    }
+
+    async importWallet() {
+        const fileResult = await window.ciphera.openFileDialog();
+        if (fileResult.canceled) return;
+
+        this.terminal.separator();
+        this.updateStatus('⏳ IMPORT: Reading wallet file...');
+
+        const result = await window.ciphera.importWallet(fileResult.filePath);
+
+        if (!result.success) {
+            this.completeStatus(false, `IMPORT FAILED - ${result.error}`);
+            return;
+        }
+
+        const wallet = result.wallet;
+        this.state.walletName = wallet.name;
+        this.state.walletAddress = wallet.pk;
+        this.state.balance = wallet.balance || 0;
+        this.updateWalletDisplay();
+        this.updateBalanceDisplay();
+
+        this.completeStatus(true, `WALLET IMPORTED: ${wallet.name}`);
+        this.terminal.log(`Address: ${this.truncateAddress(wallet.pk)}`, 'dim');
+        this.terminal.log(`Balance: ${this.formatBalance(this.state.balance)} wcBTC`, 'dim');
+        this.terminal.log('Connect to a node to sync (type "2" or "connect")', 'info');
     }
 
     async showAbout() {

@@ -97,6 +97,13 @@ contextBridge.exposeInMainWorld('ciphera', {
      * @returns {Promise<{canceled: boolean, filePath?: string}>}
      */
     openFileDialog: () => ipcRenderer.invoke('dialog:openFile'),
+
+    /**
+     * Import a wallet JSON file from an arbitrary path into the app working directory
+     * @param {string} filePath - Absolute path to the wallet JSON file
+     * @returns {Promise<{success: boolean, wallet?: object, error?: string}>}
+     */
+    importWallet: (filePath) => ipcRenderer.invoke('wallet:import', filePath),
     
     // ==========================================================================
     // APP INFO
