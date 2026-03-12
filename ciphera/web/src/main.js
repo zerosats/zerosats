@@ -527,7 +527,7 @@ class CipheraApp {
         this.updateStatus(`⏳ Fetching transaction ${hash.slice(0, 16)}...`);
 
         try {
-            const response = await fetch(`http://${this.state.nodeHost}:${this.state.nodePort}/v0/transactions/${hash}`);
+            const response = await fetch(`https://${this.state.nodeHost}:${this.state.nodePort}/v0/transactions/${hash}`);
 
             if (!response.ok) {
                 if (response.status === 404) {
@@ -576,7 +576,7 @@ class CipheraApp {
         this.updateStatus(`⏳ Fetching block ${blockNum}...`);
 
         try {
-            const response = await fetch(`http://${this.state.nodeHost}:${this.state.nodePort}/v0/blocks/${blockNum}`);
+            const response = await fetch(`https://${this.state.nodeHost}:${this.state.nodePort}/v0/blocks/${blockNum}`);
 
             if (!response.ok) {
                 if (response.status === 404) {
@@ -1466,7 +1466,7 @@ class CipheraApp {
 
         try {
             // Fetch height
-            const heightRes = await fetch(`http://${this.state.nodeHost}:${this.state.nodePort}/v0/height`);
+            const heightRes = await fetch(`https://${this.state.nodeHost}:${this.state.nodePort}/v0/height`);
             if (heightRes.ok) {
                 const heightData = await heightRes.json();
                 if (this.elements.statHeight) {
@@ -1475,7 +1475,7 @@ class CipheraApp {
             }
 
             // Fetch stats
-            const statsRes = await fetch(`http://${this.state.nodeHost}:${this.state.nodePort}/v0/stats`);
+            const statsRes = await fetch(`https://${this.state.nodeHost}:${this.state.nodePort}/v0/stats`);
             if (statsRes.ok) {
                 const stats = await statsRes.json();
                 if (this.elements.statTxCount) {
@@ -1581,14 +1581,14 @@ class CipheraApp {
         const paddedHash = cleanHash.padStart(64, '0');
 
         // Try plural endpoint first (v0/transactions/{hash})
-        let url = `http://${this.state.nodeHost}:${this.state.nodePort}/v0/transactions/${paddedHash}`;
+        let url = `https://${this.state.nodeHost}:${this.state.nodePort}/v0/transactions/${paddedHash}`;
         console.log('[Explorer] Trying:', url);
         let response = await fetch(url);
         console.log('[Explorer] Response:', response.status);
 
         // If not found, try singular endpoint (v0/transaction/{hash})
         if (!response.ok && response.status === 404) {
-            url = `http://${this.state.nodeHost}:${this.state.nodePort}/v0/transaction/${paddedHash}`;
+            url = `https://${this.state.nodeHost}:${this.state.nodePort}/v0/transaction/${paddedHash}`;
             console.log('[Explorer] Trying:', url);
             response = await fetch(url);
             console.log('[Explorer] Response:', response.status);
@@ -1608,7 +1608,7 @@ class CipheraApp {
     }
 
     async explorerLookupBlock(blockNum) {
-        const response = await fetch(`http://${this.state.nodeHost}:${this.state.nodePort}/v0/blocks/${blockNum}`);
+        const response = await fetch(`https://${this.state.nodeHost}:${this.state.nodePort}/v0/blocks/${blockNum}`);
 
         if (!response.ok) {
             if (response.status === 404) {
@@ -1627,7 +1627,7 @@ class CipheraApp {
         const cleanHash = hash.startsWith('0x') ? hash.slice(2) : hash;
         const paddedHash = cleanHash.padStart(64, '0');
 
-        const response = await fetch(`http://${this.state.nodeHost}:${this.state.nodePort}/v0/elements/${paddedHash}`);
+        const response = await fetch(`https://${this.state.nodeHost}:${this.state.nodePort}/v0/elements/${paddedHash}`);
 
         if (!response.ok) {
             if (response.status === 404) {
