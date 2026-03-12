@@ -10,7 +10,7 @@
 # Usage:
 #   export SECRET="your_secret_key"
 #   export BURN_ADDRESS="0xyour_address"
-#   bash ciphera_wallet_test.sh
+#   bash scripts/test-wallets.sh
 #
 # ============================================================================
 
@@ -71,8 +71,8 @@ validate_env() {
 
 # Check if command exists
 check_command() {
-    if ! command -v cargo &> /dev/null; then
-        log_error "cargo not found in PATH"
+    if ! command -v $CLI_BIN &> /dev/null; then
+        log_error "${CLI_BIN} not found in PATH"
         exit 1
     fi
 }
