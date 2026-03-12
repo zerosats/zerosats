@@ -163,7 +163,7 @@ impl Wallet {
 
     fn pull_from_avail(&mut self, ticker: &str, note: InputNote) -> Result<u64, WalletError> {
         let opt_balance = self.avail.get_mut(ticker).and_then(|notes| {
-            let pos = notes.iter().position(|n| n.secret_key == note.secret_key)?;
+            let pos = notes.iter().position(|n| n.note == note.note)?;
             let removed_note = notes.remove(pos);
             println!("{:?}", removed_note);
             let note_amount = removed_note

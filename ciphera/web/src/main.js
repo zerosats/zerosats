@@ -1014,11 +1014,17 @@ class CipheraApp {
         cipheraTxHash = this.extractCipheraTxHash(result.output);
         const citreaMintTxHash = this.extractCitreaMintTxHash(result.output);
 
-        // Step 4: Update wallet
-        const walletData = await window.ciphera.readWallet(this.state.walletName);
-        if (walletData.exists) {
-            this.state.balance = walletData.wallet.balance || 0;
+        // Step 4: Update wallet balance
+        const mintedBalance = this.extractBalance(result.output);
+        if (mintedBalance !== null) {
+            this.state.balance += mintedBalance;
             this.updateBalanceDisplay();
+        } else {
+            const walletData = await window.ciphera.readWallet(this.state.walletName);
+            if (walletData.exists) {
+                this.state.balance = walletData.wallet.balance || 0;
+                this.updateBalanceDisplay();
+            }
         }
 
         // Complete!
@@ -1087,11 +1093,17 @@ class CipheraApp {
         // Check for note file
         const noteData = await window.ciphera.readNote(this.state.walletName);
 
-        // Update wallet
-        const walletData = await window.ciphera.readWallet(this.state.walletName);
-        if (walletData.exists) {
-            this.state.balance = walletData.wallet.balance || 0;
+        // Update wallet balance
+        const sentBalance = this.extractBalance(result.output);
+        if (sentBalance !== null) {
+            this.state.balance = sentBalance;
             this.updateBalanceDisplay();
+        } else {
+            const walletData = await window.ciphera.readWallet(this.state.walletName);
+            if (walletData.exists) {
+                this.state.balance = walletData.wallet.balance || 0;
+                this.updateBalanceDisplay();
+            }
         }
 
         // Complete!
@@ -1160,11 +1172,17 @@ class CipheraApp {
         // Extract Ciphera tx hash from CLI output
         const cipheraTxHash = this.extractCipheraTxHash(result.output);
 
-        // Update wallet
-        const walletData = await window.ciphera.readWallet(this.state.walletName);
-        if (walletData.exists) {
-            this.state.balance = walletData.wallet.balance || 0;
+        // Update wallet balance
+        const receivedBalance = this.extractBalance(result.output);
+        if (receivedBalance !== null) {
+            this.state.balance = receivedBalance;
             this.updateBalanceDisplay();
+        } else {
+            const walletData = await window.ciphera.readWallet(this.state.walletName);
+            if (walletData.exists) {
+                this.state.balance = walletData.wallet.balance || 0;
+                this.updateBalanceDisplay();
+            }
         }
 
         // Complete!
@@ -1238,11 +1256,17 @@ class CipheraApp {
         // Extract Ciphera tx hash from CLI output
         const cipheraTxHash = this.extractCipheraTxHash(result.output);
 
-        // Update wallet
-        const walletData = await window.ciphera.readWallet(this.state.walletName);
-        if (walletData.exists) {
-            this.state.balance = walletData.wallet.balance || 0;
+        // Update wallet balance
+        const burnedBalance = this.extractBalance(result.output);
+        if (burnedBalance !== null) {
+            this.state.balance = burnedBalance;
             this.updateBalanceDisplay();
+        } else {
+            const walletData = await window.ciphera.readWallet(this.state.walletName);
+            if (walletData.exists) {
+                this.state.balance = walletData.wallet.balance || 0;
+                this.updateBalanceDisplay();
+            }
         }
 
         // Complete!
@@ -1265,6 +1289,16 @@ class CipheraApp {
         if (!output) return null;
         const match = output.match(/Transaction\s+([a-fA-F0-9]+)\s+has been sent/);
         return match ? match[1] : null;
+    }
+
+    /**
+     * Extract balance from CLI output
+     * CLI prints: "Balance {amount} {TICKER}"
+     */
+    extractBalance(output) {
+        if (!output) return null;
+        const match = output.match(/Balance\s+(\d+)\s+\w+/);
+        return match ? Number(match[1]) : null;
     }
 
     /**
