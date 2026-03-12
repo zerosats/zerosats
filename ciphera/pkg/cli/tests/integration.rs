@@ -1,10 +1,9 @@
 //! Integration tests for the CLI module.
 //!
 //! These tests connect to the live Ciphera testnet node (port 80, plain HTTPS).
-//! The `tls` flag in `build(chain_id, tls, create_wallet)` is currently inverted:
-//!   tls=true  → http://
-//!   tls=false → https://
-//! All integration tests use tls=true to get http:// for port 80.
+//!   tls=true  → https://
+//!   tls=false → http://
+//! All integration tests use tls=false to get http:// for port 80.
 //!
 //! Run all integration tests:
 //!   cargo test --test integration -- --nocapture
