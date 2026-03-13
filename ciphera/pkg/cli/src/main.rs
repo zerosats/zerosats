@@ -231,7 +231,8 @@ async fn handle_sync(
     match client.list_transactions(&Default::default()).await {
         Ok(list) => {
             println!("   Obtained transactions list size: {}", list.txns.len());
-            let (synced_wallet, _) = client.get_wallet().prepare_sync(&list.txns)?;
+            let (mut synced_wallet, _) = client.get_wallet().prepare_sync(&list.txns)?;
+            synced_wallet.chain_id = Some(chain);
             synced_wallet.save()?;
             client.replace_wallet(synced_wallet);
         }

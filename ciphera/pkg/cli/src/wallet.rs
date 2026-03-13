@@ -63,7 +63,8 @@ pub struct Wallet {
     pub avail: HashMap<String, Vec<InputNote>>,
     pub name: Option<String>,
     pub balance: u64,
-    pub chain_id: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chain_id: Option<u64>,
     #[serde(skip)]
     storage_path: Option<PathBuf>,
 }
@@ -78,7 +79,7 @@ impl Wallet {
             avail: HashMap::new(),
             name,
             balance: 0,
-            chain_id,
+            chain_id: Some(chain_id),
             storage_path: None,
         }
     }
@@ -94,7 +95,7 @@ impl Wallet {
             avail: HashMap::new(),
             name,
             balance: 0,
-            chain_id,
+            chain_id: Some(chain_id),
             storage_path: None,
         }
     }
@@ -529,6 +530,7 @@ mod wallet_tests {
     use super::*;
     use crate::address::decode_address;
     use element::Element;
+    use tempdir::TempDir;
     use zk_primitives::InputNote;
 
     // Helper function to create a test wallet with known balance
@@ -570,6 +572,50 @@ mod wallet_tests {
             value: Element::from(amount),
         };
         InputNote::new(note, Element::ZERO)
+    }
+
+    #[test]
+    fn test_load_legacy_wallet_without_chain_id() {
+        let wallet_dir = TempDir::new("legacy-wallet-load").unwrap();
+        let wallet_path = Wallet::wallet_path_in(wallet_dir.path(), "legacy");
+
+        let wallet = Wallet::random(5115, Some("legacy".to_string()));
+        let mut wallet_json = serde_json::to_value(&wallet).unwrap();
+        wallet_json.as_object_mut().unwrap().remove("chain_id");
+        std::fs::write(
+            &wallet_path,
+            serde_json::to_string_pretty(&wallet_json).unwrap(),
+        )
+        .unwrap();
+
+        let loaded_wallet = Wallet::load_from(wallet_dir.path(), "legacy").unwrap();
+        assert_eq!(loaded_wallet.chain_id, None);
+    }
+
+    #[test]
+    fn test_save_legacy_wallet_persists_chain_id_once_bound() {
+        let wallet_dir = TempDir::new("legacy-wallet-save").unwrap();
+        let wallet_path = Wallet::wallet_path_in(wallet_dir.path(), "legacy");
+
+        let wallet = Wallet::random(5115, Some("legacy".to_string()));
+        let mut wallet_json = serde_json::to_value(&wallet).unwrap();
+        wallet_json.as_object_mut().unwrap().remove("chain_id");
+        std::fs::write(
+            &wallet_path,
+            serde_json::to_string_pretty(&wallet_json).unwrap(),
+        )
+        .unwrap();
+
+        let mut loaded_wallet = Wallet::load_from(wallet_dir.path(), "legacy").unwrap();
+        loaded_wallet.chain_id = Some(5115);
+        loaded_wallet.save().unwrap();
+
+        let saved_wallet_json: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&wallet_path).unwrap()).unwrap();
+        assert_eq!(
+            saved_wallet_json.get("chain_id"),
+            Some(&serde_json::json!(5115))
+        );
     }
 
     // =====================================================================

@@ -108,11 +108,15 @@ impl NodeClientBuilder {
             Wallet::create_in(&self.wallet_dir, chain_id, &self.name)?
         } else {
             let loaded_wallet = Wallet::load_from(&self.wallet_dir, &self.name)?;
-            if loaded_wallet.chain_id != chain_id {
-                return Err(color_eyre::eyre::eyre!(
-                    "ChainId in loaded file is different to provided {}",
-                    chain_id
-                ));
+            // Legacy wallet files may omit chain_id entirely. In that case we
+            // defer chain binding until the wallet is explicitly synced.
+            if let Some(loaded_chain_id) = loaded_wallet.chain_id {
+                if loaded_chain_id != chain_id {
+                    return Err(color_eyre::eyre::eyre!(
+                        "ChainId in loaded file is different to provided {}",
+                        chain_id
+                    ));
+                }
             }
             loaded_wallet
         };
@@ -408,6 +412,7 @@ impl NodeClient {
 #[cfg(test)]
 mod client_tests {
     use super::*;
+    use tempdir::TempDir;
 
     const CHAIN_ID: u64 = 5115; // Citrea testnet
 
@@ -636,6 +641,31 @@ mod client_tests {
             msg.contains("ChainId") || msg.contains("chain") || msg.contains("different"),
             "error should mention chain_id mismatch; got: {msg}"
         );
+    }
+
+    /// create_wallet=false accepts legacy wallet files that predate chain_id.
+    #[test]
+    fn test_build_load_wallet_accepts_legacy_wallet_without_chain_id() {
+        let name = "legacy-chainless-test-wallet";
+        let wallet_dir = TempDir::new("legacy-chainless-wallet").unwrap();
+        let wallet_path = Wallet::wallet_path_in(wallet_dir.path(), name);
+
+        let wallet = Wallet::random(CHAIN_ID, Some(name.to_string()));
+        let mut wallet_json = serde_json::to_value(&wallet).unwrap();
+        wallet_json.as_object_mut().unwrap().remove("chain_id");
+        std::fs::write(
+            &wallet_path,
+            serde_json::to_string_pretty(&wallet_json).unwrap(),
+        )
+        .unwrap();
+
+        let client = NodeClientBuilder::new()
+            .name(name)
+            .wallet_dir(wallet_dir.path())
+            .build(CHAIN_ID, true, false)
+            .expect("legacy wallet without chain_id must still load");
+
+        assert_eq!(client.get_wallet().chain_id, None);
     }
 
     // =====================================================================
