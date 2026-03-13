@@ -105,16 +105,29 @@ impl Client {
         let base_fee = fee_history
             .base_fee_per_gas
             .last()
-            .ok_or_else(|| web3::Error::Internal)?
+            .ok_or_else(|| {
+                web3::Error::InvalidResponse(
+                    "fee_history.base_fee_per_gas was empty (no base fee in latest block)".to_string(),
+                )
+            })?
             .clone();
 
         // Extract priority fee from rewards
         let priority_fee = fee_history
             .reward
-            .ok_or_else(|| web3::Error::Internal)?
+            .ok_or_else(|| {
+                web3::Error::InvalidResponse(
+                    "fee_history.reward was missing in eth_feeHistory response".to_string(),
+                )
+            })?
             .last()
             .and_then(|inner_vec| inner_vec.first())
-            .ok_or_else(|| web3::Error::Internal)?
+            .ok_or_else(|| {
+                web3::Error::InvalidResponse(
+                    "fee_history.reward was empty or lacked a first entry for the requested percentile"
+                        .to_string(),
+                )
+            })?
             .clone();
 
         // Calculate max fee with buffer for next block's base fee
