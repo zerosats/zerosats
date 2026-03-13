@@ -5,12 +5,12 @@ use ethereum_types::{Address, H256, U64};
 use testutil::eth::EthNode;
 use tokio::time::interval;
 use web3::{
-    Web3,
-    contract::{Contract, Options, tokens::Tokenize},
+    contract::{tokens::Tokenize, Contract, Options},
     ethabi,
     signing::SecretKey,
     transports::Http,
-    types::{Transaction, U256},
+    types::{BlockId, BlockNumber, Transaction, U256},
+    Web3,
 };
 
 /// Configuration for different types of transaction confirmation requirements.
@@ -96,7 +96,7 @@ impl Client {
             .eth()
             .fee_history(
                 U256::from(4),
-                web3::types::BlockNumber::Latest,
+                BlockNumber::Latest,
                 Some(vec![strategy.percentile()]),
             )
             .await?;
@@ -174,7 +174,7 @@ impl Client {
     pub async fn get_nonce(
         &self,
         address: Address,
-        block: web3::types::BlockNumber,
+        block: BlockNumber,
     ) -> Result<U256, web3::Error> {
         self.client
             .eth()
@@ -188,8 +188,8 @@ impl Client {
             self.get_nonce(
                 address,
                 match self.use_latest_for_nonce {
-                    true => web3::types::BlockNumber::Latest,
-                    false => web3::types::BlockNumber::Pending,
+                    true => BlockNumber::Latest,
+                    false => BlockNumber::Pending,
                 },
             )
         })
@@ -235,7 +235,7 @@ impl Client {
                 func,
                 params,
                 web3::contract::Options {
-                    gas: Some(gas + gas / 2),
+                    gas: Some(gas.saturating_add(gas / 10)),
                     ..options
                 },
                 signer,
@@ -514,7 +514,7 @@ pub(crate) async fn retry_on_network_failure<
 
 #[cfg(test)]
 mod tests {
-    use std::sync::{Arc, atomic::AtomicU16};
+    use std::sync::{atomic::AtomicU16, Arc};
 
     use web3::error::Error;
     use web3::error::TransportError;
