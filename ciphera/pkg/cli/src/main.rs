@@ -1,20 +1,21 @@
 use clap::{Parser, Subcommand};
-use color_eyre::Result;
-use tracing::{debug, error};
-use web3::types::H160;
-
-use cli::address::citrea_ticker_from_contract;
-use cli::note_url::{decode_url, CipheraURL};
 use cli::NodeClient;
 use cli::Wallet;
+use cli::address::decode_address;
+use cli::note_url::{CipheraURL, decode_url};
+use cli::address::citrea_ticker_from_contract;
+
+use color_eyre::Result;
+use tracing::{debug, error};
+use web3::signing::SecretKey;
+use web3::types::{H160, H256};
 
 use barretenberg::Prove;
 use contracts::util::convert_h160_to_element;
 use std::fs;
 use std::path::Path;
 use std::str::FromStr;
-use zk_primitives::InputNote;
-use zk_primitives::{Note, Utxo};
+use zk_primitives::{InputNote, Note};
 
 #[derive(Parser, Debug)]
 #[command(name = "ciphera-cli")]
@@ -49,17 +50,14 @@ struct Cli {
     #[arg(
         global = true,
         long,
-        default_value = "0xcac0d0901ac8806160acc8ef373117898a51dfe7"
+        default_value = "0xbd57b7d47d66934509f9ca31248598eb6cb3fafd"
     )]
     rollup: String,
 }
 
 #[derive(Subcommand, Debug)]
 enum Commands {
-    Create {
-        #[arg(long)]
-        private_key: Option<String>,
-    },
+    Create {},
     /// Connect to a Ciphera node and check its health
     Sync {},
     Address {
@@ -86,12 +84,6 @@ enum Commands {
         only_snark: bool,
     },
     Burn {
-        #[arg(required = true, long, short)]
-        geth_rpc: String,
-
-        #[arg(required = true, long, short)]
-        secret: String,
-
         #[arg(required = true, long)]
         address: String,
 
@@ -127,9 +119,6 @@ enum Commands {
     Contract {
         #[arg(required = true, long, short)]
         geth_rpc: String,
-
-        #[arg(required = true, long, short)]
-        secret: String,
     },
 }
 
@@ -145,6 +134,8 @@ pub enum AppError {
     CantBuildClient(),
     #[error("Wallet error: {0}")]
     WalletError(#[from] cli::wallet::WalletError),
+    #[error("Cant parse address: {0}")]
+    InvalidAddress(String),
     #[error("File not found: {0}")]
     FileNotFound(String),
     #[error("Not enough balance")]
@@ -153,9 +144,11 @@ pub enum AppError {
     NotSupportedYet(),
     #[error("Cant convert Element")]
     ConversionError(),
+    #[error("Wallet load error: {0}")]
+    WalletLoadError(#[from] color_eyre::Report),
 }
 
-async fn handle_create(name: &str, private_key: Option<String>) -> Result<(), AppError> {
+async fn handle_create(chain: u64, name: &str) -> Result<(), AppError> {
     let wallet_file = format!("{name}.json");
 
     // Check if wallet already exists
@@ -164,13 +157,12 @@ async fn handle_create(name: &str, private_key: Option<String>) -> Result<(), Ap
         println!("   Location: {wallet_file}");
     };
 
-    let mut wallet = Wallet::init(name)?;
+    let wallet = Wallet::create(chain, name)?;
 
     println!("\n✅ Wallet created successfully!");
     println!("\n📋 Wallet Details:");
     println!("   Name: {name}");
     println!("   File: {wallet_file}");
-    println!("   Address: {}", wallet.address());
     println!("   Private Key: {}", wallet.pk);
     println!("   Balance: {} sats", wallet.balance);
 
@@ -180,7 +172,9 @@ async fn handle_create(name: &str, private_key: Option<String>) -> Result<(), Ap
 
     println!("\n🚀 Next Steps:");
     println!("   1. Connect to network:  ciphera-cli --name {name} connect");
-    println!("   2. Mint tokens:         ciphera-cli --name {name} mint --amount <AMOUNT> --secret <YOUR_ETH_KEY> --geth-rpc <RPC_URL>");
+    println!(
+        "   2. Mint tokens:         ciphera-cli --name {name} mint --amount <AMOUNT> --secret <YOUR_ETH_KEY> --geth-rpc <RPC_URL>"
+    );
     println!("   3. Check balance:       cat {wallet_file}");
 
     Ok(())
@@ -189,7 +183,13 @@ async fn handle_create(name: &str, private_key: Option<String>) -> Result<(), Ap
 /// Handle the connect command
 ///
 /// Connects to a Ciphera node and performs health checks
-async fn handle_sync(name: &str, host: &str, port: u16, timeout_secs: u64) -> Result<()> {
+async fn handle_sync(
+    chain: u64,
+    name: &str,
+    host: &str,
+    port: u16,
+    timeout_secs: u64,
+) -> Result<()> {
     debug!(
         "Connecting wallet {} to Ciphera node at {}:{}",
         name, host, port
@@ -201,7 +201,7 @@ async fn handle_sync(name: &str, host: &str, port: u16, timeout_secs: u64) -> Re
         .host(host)
         .port(port)
         .timeout_secs(timeout_secs)
-        .build()?;
+        .build(chain, true, false)?;
 
     // Check health
     match client.check_health().await {
@@ -245,7 +245,7 @@ async fn handle_sync(name: &str, host: &str, port: u16, timeout_secs: u64) -> Re
 }
 
 async fn handle_address(name: &str, amount: u64, ticker: &str) -> Result<()> {
-    let mut wallet = Wallet::init(name)?;
+    let mut wallet = Wallet::load(name)?;
     let b = wallet.balance;
     let a = wallet.get_address(amount, ticker);
 
@@ -260,36 +260,59 @@ async fn handle_address(name: &str, amount: u64, ticker: &str) -> Result<()> {
     Ok(())
 }
 
-async fn handle_note_spend(name: &str, amount: u64, ticker: &str) -> Result<(), AppError> {
+async fn handle_note_spend(
+    chain: u64,
+    name: &str,
+    host: &str,
+    port: u16,
+    timeout_secs: u64,
+    amount: u64,
+    ticker: &str,
+) -> Result<()> {
     // Build client with fluent API
     let mut client = NodeClient::builder()
         .name(name)
-        .build()
-        .map_err(|_| AppError::CantBuildClient())?;
+        .host(host)
+        .port(port)
+        .timeout_secs(timeout_secs)
+        .build(chain, true, false)?;
 
-    let wallet = Wallet::init(name)?;
-    let balance = wallet.balance;
+    // Prepare transfer. A case, when wallet already has exactly matching note, will be ignored
+    let transfer_note: InputNote = client.get_wallet_mut().receive_note(amount, ticker);
+    let transfer_utxo = client.get_wallet_mut().spend_to(&transfer_note.note)?;
+    let snark = transfer_utxo.prove().unwrap();
 
-    if amount <= balance {
-        let input_note = client.get_wallet_mut().spend_note(amount, ticker)?;
-        let payload: CipheraURL = (&input_note).into();
+    match client.transaction(&snark).await {
+        Ok(tx) => {
+            println!("\n✅ Transaction {} has been sent!", tx.txn_hash);
+            println!("   Height: {}", tx.height);
+            println!("   Root hash: {}", tx.root_hash);
 
-        // Encode
-        let encoded = payload.encode_url();
-        let json_str = serde_json::to_string_pretty(&input_note)?;
+            let payload: CipheraURL = (&transfer_note).into();
 
-        std::fs::write(format!("{name}-note.json"), &json_str)?;
+            // Encode
+            let encoded = payload.encode_url();
+            let json_str = serde_json::to_string_pretty(&transfer_note)?;
 
-        println!("\nSaved {input_note:?}");
-        println!("\nEncoded: {encoded}");
+            std::fs::write(format!("{name}-note.json"), &json_str)?;
 
-        Ok(())
-    } else {
-        Err(AppError::NotEnoughBalance())
+            println!("\nSaved {transfer_note:?}");
+            println!("\nEncoded: {encoded}");
+
+            let b = client.get_wallet().balance;
+            println!("\nBalance {b} {ticker}");
+            let _ = client.get_wallet().save();
+            Ok(())
+        }
+        Err(e) => {
+            eprintln!("\n❌ Could not send transaction!");
+            Err(e)
+        }
     }
 }
 
 async fn handle_spend_to(
+    chain: u64,
     name: &str,
     host: &str,
     port: u16,
@@ -307,26 +330,32 @@ async fn handle_spend_to(
         .host(host)
         .port(port)
         .timeout_secs(timeout_secs)
-        .build()?;
+        .build(chain, true, false)?;
 
-    let wallet = Wallet::init(name)?;
-    let balance = wallet.balance;
+    // Spend to UX leverages a variant of NoteURL encoding for providing an "address" with address
+    // and amount needed for UTXO construction
+    let note = Note::from(&decode_address(address));
+    let ticker = citrea_ticker_from_contract(note.contract);
 
-    let utxo = client.get_wallet_mut().spend_to(address)?;
+    let utxo = client.get_wallet_mut().spend_to(&note)?;
     let snark = utxo.prove().unwrap();
 
-    let receiver_note = utxo.output_notes[0].clone();
-    let json_str = serde_json::to_string_pretty(&receiver_note)?;
+    let recipient_note = utxo.output_notes[0].clone();
+    let json_str = serde_json::to_string_pretty(&recipient_note)?;
 
     std::fs::write(format!("from-{name}-note.json"), &json_str)?;
 
-    println!("\nSaved {receiver_note:?}");
+    println!("\nSaved {recipient_note:?}");
 
     match client.transaction(&snark).await {
         Ok(tx) => {
             println!("\n✅ Transaction {} has been sent!", tx.txn_hash);
             println!("   Height: {}", tx.height);
             println!("   Root hash: {}", tx.root_hash);
+
+            let b = client.get_wallet().balance;
+            println!("\nBalance {b} {ticker}");
+            let _ = client.get_wallet().save();
             Ok(())
         }
         Err(e) => {
@@ -356,7 +385,7 @@ async fn handle_receive(
         .host(host)
         .port(port)
         .timeout_secs(timeout_secs)
-        .build()?;
+        .build(chain, true, false)?;
 
     // Check health
     match client.check_health().await {
@@ -392,7 +421,6 @@ async fn handle_receive(
             if notefile_path.is_file() {
                 println!("\n🗝 Found note file!");
                 let json_str = fs::read_to_string(notefile_path)?;
-                let json: serde_json::Value = serde_json::from_str(&json_str)?;
                 let input_note: InputNote = serde_json::from_str(&json_str)?;
                 input_note
             } else {
@@ -407,32 +435,9 @@ async fn handle_receive(
         _ => return Err(AppError::NotEnoughBalance().into()),
     };
 
-    let values = input_note.note.value.to_u64_array();
-    let Some(amount) = values.first() else {
-        return Err(AppError::ConversionError().into());
-    };
-
     let ticker = citrea_ticker_from_contract(input_note.note.contract);
 
-    let note: Note = client
-        .get_wallet_mut()
-        .receive_note(amount.to_owned(), &ticker);
-
-    /*
-    let note = Note {
-        kind: input_note.note.kind,
-        contract: input_note.note.contract,
-        address: client.get_wallet().address(),
-        psi: Element::new(0),
-        value: input_note.note.value,
-    };
-    */
-
-    let utxo = Utxo::new_send(
-        [input_note.clone(), InputNote::padding_note()],
-        [note, Note::padding_note()],
-    );
-
+    let utxo = client.get_wallet_mut().receive(&input_note)?;
     let snark = utxo.prove().unwrap();
 
     match client.transaction(&snark).await {
@@ -440,6 +445,10 @@ async fn handle_receive(
             println!("\n✅ Transaction {} has been sent!", tx.txn_hash);
             println!("   Height: {}", tx.height);
             println!("   Root hash: {}", tx.root_hash);
+
+            let b = client.get_wallet().balance;
+            println!("\nBalance {b} {ticker}");
+            let _ = client.get_wallet().save();
             Ok(())
         }
         Err(e) => {
@@ -450,20 +459,15 @@ async fn handle_receive(
 }
 
 async fn handle_import(name: &str, notefile: &str) -> Result<()> {
-    let mut client = NodeClient::builder()
-        .name(name)
-        .build()
-        .map_err(|_| AppError::CantBuildClient())?;
-
     let json_path = Path::new(&notefile);
     if json_path.is_file() {
         println!("\n🗝 Found note file!");
         let json_str = fs::read_to_string(json_path)?;
-        let json: serde_json::Value = serde_json::from_str(&json_str)?;
         let note: Note = serde_json::from_str(&json_str)?;
 
-        client.get_wallet_mut().import_note(&note)?;
-
+        let mut wallet = Wallet::load(name)?;
+        wallet.import_note(&note)?;
+        wallet.save()?;
         Ok(())
     } else {
         Err(AppError::FileNotFound(notefile.to_owned()).into())
@@ -489,19 +493,21 @@ async fn handle_mint(
         .host(host)
         .port(port)
         .timeout_secs(timeout_secs)
-        .build()?;
+        .build(chain, true, false)?;
 
-    let note: Note = client.get_wallet_mut().receive_note(amount, ticker);
-    let output_notes = [note.clone(), Note::padding_note()];
-    let utxo = zk_primitives::Utxo::new_mint(output_notes.clone());
-
+    let utxo = client.get_wallet_mut().mint(amount, ticker)?;
     let snark = utxo.prove().unwrap();
-
-    let _ = client.get_wallet().save();
 
     if !only_snark {
         client
-            .admin_mint(geth_rpc, chain, secret, rollup, ticker, &note, &snark)
+            .admin_mint(
+                geth_rpc,
+                chain,
+                secret,
+                rollup,
+                &utxo.output_notes[0],
+                &snark,
+            )
             .await?;
     }
 
@@ -510,6 +516,10 @@ async fn handle_mint(
             println!("\n✅ Transaction {} has been sent!", tx.txn_hash);
             println!("   Height: {}", tx.height);
             println!("   Root hash: {}", tx.root_hash);
+
+            let b = client.get_wallet().balance;
+            println!("\nBalance {b} {ticker}");
+            let _ = client.get_wallet().save();
             Ok(())
         }
         Err(e) => {
@@ -524,26 +534,61 @@ async fn handle_burn(
     host: &str,
     port: u16,
     timeout_secs: u64,
-    geth_rpc: &str,
     chain: u64,
-    rollup: &str,
-    secret: &str,
     address: &str,
     amount: u64,
     ticker: &str,
-) -> Result<()> {
+) -> Result<(), AppError> {
     // Build client with fluent API
     let mut client = NodeClient::builder()
         .name(name)
         .host(host)
         .port(port)
         .timeout_secs(timeout_secs)
-        .build()?;
+        .build(chain, true, false)?;
 
-    let note = client.get_wallet_mut().spend_note(amount, ticker)?;
+    // Prepare burn
+    let burner_note: InputNote = client.get_wallet_mut().receive_note(amount, ticker);
+    let burner_utxo = client.get_wallet_mut().spend_to(&burner_note.note)?;
+    let snark = burner_utxo.prove().unwrap();
 
-    let evm_address = convert_h160_to_element(&H160::from_str(address).unwrap()); // TODO
-    let input_notes = [note.clone(), InputNote::padding_note()];
+    match client.transaction(&snark).await {
+        Ok(tx) => {
+            println!("\n✅ Transaction {} has been sent!", tx.txn_hash);
+            println!("   Height: {}", tx.height);
+            println!("   Root hash: {}", tx.root_hash);
+        }
+        Err(e) => {
+            eprintln!("\n❌ Could not send transaction!");
+            return Err(AppError::WalletLoadError(e));
+        }
+    }
+
+    // Saving just in case
+    let _ = client.get_wallet_mut().import_note(&burner_note.note);
+    let _ = client.get_wallet_mut().save()?;
+
+    let evm_address = match H160::from_str(address) {
+        Ok(a) => convert_h160_to_element(&a),
+        Err(e) => return Err(AppError::InvalidAddress(e.to_string())),
+    };
+
+    let burner_utxo = client.get_wallet_mut().burn(&burner_note, &evm_address)?;
+    let snark = burner_utxo.prove().unwrap();
+
+    match client.transaction(&snark).await {
+        Ok(tx) => {
+            println!("\n✅ Transaction {} has been sent!", tx.txn_hash);
+            println!("   Height: {}", tx.height);
+            println!("   Root hash: {}", tx.root_hash);
+        }
+        Err(e) => {
+            eprintln!("\n❌ Could not send transaction!");
+            return Err(AppError::WalletLoadError(e));
+        }
+    }
+    Ok(())
+    /*    let input_notes = [note.clone(), InputNote::padding_note()];
     let utxo = zk_primitives::Utxo::new_burn(input_notes, evm_address);
 
     let snark = utxo.prove().unwrap();
@@ -559,15 +604,38 @@ async fn handle_burn(
         }
         Err(e) => {
             eprintln!("\n❌ Could not send transaction!");
-            Err(e)
+            Err(AppError::WalletLoadError(e))
         }
-    }
+    }*/
 }
 
-async fn handle_rollup(geth_rpc: &str, secret: &str, chain: u64, rollup: &str) -> Result<()> {
-    // Build client with fluent API
-    let client = NodeClient::builder().build()?;
-    client.state(geth_rpc, chain, secret, rollup).await?;
+async fn handle_rollup(geth_rpc: &str, chain: u64, rollup: &str) -> Result<()> {
+    let sk =
+        SecretKey::from_str("ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80")?;
+
+    let client = contracts::Client::new(geth_rpc, None);
+    let rollup = contracts::RollupContract::load(client, &chain, rollup, sk).await?;
+
+    let rh = rollup.root_hash().await?;
+    let b = rollup.block_height().await?;
+    let kind_wcbtc = H256::from_slice(
+        &hex::decode("000200000000000013fb8d0c9d1c17ae5e40fff9be350f57840e9e66cd930000").unwrap(),
+    );
+
+    let kind_usdc = H256::from_slice(
+        &hex::decode("000200000000000013fb52f74a8f9bdd29f77a5efd7f6cb44dcf6906a4b60000").unwrap(),
+    );
+
+    let token_wbtc = rollup.token(kind_wcbtc).await?;
+    let token_usdc = rollup.token(kind_usdc).await?;
+
+    println!("\nRollup State Info\n");
+    println!("\tChain                :{chain} ");
+    println!("\tToken kind WBTC      :{token_wbtc:#x} ");
+    println!("\tToken kind USDC      :{token_usdc:#x} ");
+
+    println!("\tBlock                :{b} ");
+    println!("\tRoot hash            :{rh:#x} ");
 
     Ok(())
 }
@@ -600,11 +668,11 @@ async fn main() -> Result<()> {
 
     // Execute command
     match cli.command {
-        Commands::Create { private_key } => {
-            handle_create(&cli.name, private_key).await?;
+        Commands::Create {} => {
+            handle_create(cli.chain, &cli.name).await?;
         }
         Commands::Sync {} => {
-            handle_sync(&cli.name, &cli.host, cli.port, cli.timeout).await?;
+            handle_sync(cli.chain, &cli.name, &cli.host, cli.port, cli.timeout).await?;
         }
         Commands::Address { amount, ticker } => {
             let ticker_normalized = ticker.to_uppercase();
@@ -612,10 +680,27 @@ async fn main() -> Result<()> {
         }
         Commands::Spend { amount, ticker } => {
             let ticker_normalized = ticker.to_uppercase();
-            handle_note_spend(&cli.name, amount, &ticker_normalized).await?;
+            handle_note_spend(
+                cli.chain,
+                &cli.name,
+                &cli.host,
+                cli.port,
+                cli.timeout,
+                amount,
+                &ticker_normalized,
+            )
+            .await?;
         }
         Commands::SpendTo { address } => {
-            handle_spend_to(&cli.name, &cli.host, cli.port, cli.timeout, &address).await?;
+            handle_spend_to(
+                cli.chain,
+                &cli.name,
+                &cli.host,
+                cli.port,
+                cli.timeout,
+                &address,
+            )
+            .await?;
         }
         Commands::Receive { note, link } => {
             handle_receive(
@@ -656,8 +741,6 @@ async fn main() -> Result<()> {
             .await?;
         }
         Commands::Burn {
-            geth_rpc,
-            secret,
             address,
             amount,
             ticker,
@@ -668,18 +751,15 @@ async fn main() -> Result<()> {
                 &cli.host,
                 cli.port,
                 cli.timeout,
-                &geth_rpc,
                 cli.chain,
-                &cli.rollup,
-                &secret,
                 &address,
                 amount,
                 &ticker_normalized,
             )
             .await?;
         }
-        Commands::Contract { geth_rpc, secret } => {
-            handle_rollup(&geth_rpc, &secret, cli.chain, &cli.rollup).await?;
+        Commands::Contract { geth_rpc } => {
+            handle_rollup(&geth_rpc, cli.chain, &cli.rollup).await?;
         }
     }
 

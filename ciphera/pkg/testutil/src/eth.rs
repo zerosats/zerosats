@@ -235,17 +235,14 @@ impl EthNode {
         // Parse DEPLOY_OUTPUT={"rollupProxy":"0x...","erc20":"0x...",...}
         for line in stdout.lines() {
             if let Some(json_str) = line.strip_prefix("DEPLOY_OUTPUT=") {
-                let v: serde_json::Value = serde_json::from_str(json_str)
-                    .expect("Failed to parse DEPLOY_OUTPUT JSON");
+                let v: serde_json::Value =
+                    serde_json::from_str(json_str).expect("Failed to parse DEPLOY_OUTPUT JSON");
                 self.deployed = Some(DeployedAddresses {
                     rollup_proxy: v["rollupProxy"]
                         .as_str()
                         .expect("missing rollupProxy")
                         .to_string(),
-                    erc20: v["erc20"]
-                        .as_str()
-                        .expect("missing erc20")
-                        .to_string(),
+                    erc20: v["erc20"].as_str().expect("missing erc20").to_string(),
                 });
                 return Ok(());
             }

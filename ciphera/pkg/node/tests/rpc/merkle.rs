@@ -11,9 +11,11 @@ use super::erc20_contract;
 #[tokio::test(flavor = "multi_thread")]
 async fn merkle() {
     let eth_node = EthNode::default().run_and_deploy().await;
-    let server =
-        super::Server::setup_and_wait(ServerConfig::single_node(false, &eth_node), Arc::clone(&eth_node))
-            .await;
+    let server = super::Server::setup_and_wait(
+        ServerConfig::single_node(false, &eth_node),
+        Arc::clone(&eth_node),
+    )
+    .await;
     let rollup = rollup_contract(server.rollup_contract_addr, &eth_node).await;
     let usdc = erc20_contract(&rollup, &eth_node).await;
 

@@ -267,6 +267,32 @@ ipcMain.handle('wallet:read', async (event, name) => {
 });
 
 /**
+ * Import a wallet file from an arbitrary path into the working directory
+ */
+ipcMain.handle('wallet:import', async (event, filePath) => {
+    try {
+        if (!filePath || !fs.existsSync(filePath)) {
+            return { success: false, error: 'File not found' };
+        }
+
+        const content = fs.readFileSync(filePath, 'utf8');
+        const wallet = JSON.parse(content);
+
+        if (!wallet.name || !wallet.pk) {
+            return { success: false, error: 'Invalid wallet file (missing name or pk)' };
+        }
+
+        const cwd = getWorkingDirectory();
+        const destPath = path.join(cwd, `${wallet.name}.json`);
+        fs.writeFileSync(destPath, content, 'utf8');
+
+        return { success: true, wallet };
+    } catch (e) {
+        return { success: false, error: e.message };
+    }
+});
+
+/**
  * List wallet files
  */
 ipcMain.handle('wallet:list', async () => {

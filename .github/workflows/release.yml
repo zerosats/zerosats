@@ -3,13 +3,16 @@ name: Release Binaries
 on:
   push:
     tags:
-      - 'v*'
+      - "v*"
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Tag to build'
+        description: "Tag to build"
         required: true
-        default: 'v0.0.6'
+        default: "v0.0.8"
+
+env:
+  RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
 
 jobs:
   build:
@@ -28,7 +31,7 @@ jobs:
             electron_arch: arm64
             electron_cmd: electron:build:mac
           # Linux
-          - os: ubuntu-latest
+          - os: ubicloud-standard-16
             target: x86_64-unknown-linux-gnu
             artifact_name: ciphera-cli
             asset_name: ciphera-cli-linux-amd64
@@ -38,8 +41,8 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with:
-          lfs: false         # Has limits. Not needed when bb is archived
-          fetch-depth: 0     # Optional: full history if needed
+          lfs: false # Has limits. Not needed when bb is archived
+          fetch-depth: 0 # Optional: full history if needed
 
       - name: Setup Rust
         run: |
@@ -80,16 +83,16 @@ jobs:
           # TODO: fix quick patch
           cp target/${{ matrix.target }}/release/${{ matrix.artifact_name }} target/release/${{ matrix.artifact_name }}
           chmod +x ${{ matrix.asset_name }}
-          gh release create ${{ github.ref_name }} -R zerosats/zerosats || true
-          gh release upload ${{ github.ref_name }} ${{ matrix.asset_name }} -R zerosats/zerosats --clobber
+          gh release create ${{ env.RELEASE_TAG }} -R zerosats/zerosats || true
+          gh release upload ${{ env.RELEASE_TAG }} ${{ matrix.asset_name }} -R zerosats/zerosats --clobber
 
         shell: bash
 
       - name: Setup Node.js
         uses: actions/setup-node@v3
         with:
-          node-version: '20'
-          cache: 'npm'
+          node-version: "22"
+          cache: "npm"
           cache-dependency-path: ciphera/web/package-lock.json
 
       - name: Install npm dependencies
@@ -100,7 +103,7 @@ jobs:
         working-directory: ciphera/web
         run: |
           if [[ "${{ github.ref_type }}" == "tag" ]]; then
-            npm version ${{ github.ref_name }} --no-git-tag-version
+            npm version ${{ env.RELEASE_TAG }} --no-git-tag-version
           elif [[ "${{ github.event.inputs.tag }}" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             npm version "${{ github.event.inputs.tag }}-${{ github.sha }}" --no-git-tag-version
           else
@@ -114,10 +117,10 @@ jobs:
           USE_HARD_LINKS: false
         working-directory: ciphera/web
         run: |
-          tar -xvzf binaries/darwin/barretenberg-arm64-darwin.tar.gz -C binaries/darwin 
+          tar -xvzf binaries/darwin/barretenberg-arm64-darwin.tar.gz -C binaries/darwin
           chmod +x binaries/darwin/bb
           npm run electron:build:mac -- --${{ matrix.electron_arch }} --publish never
-          gh release upload ${{ github.ref_name }} release/*.dmg -R zerosats/zerosats --clobber
+          gh release upload ${{ env.RELEASE_TAG }} release/*.dmg -R zerosats/zerosats --clobber
 
       - name: Build Electron app (Linux)
         if: runner.os == 'Linux'
@@ -126,33 +129,32 @@ jobs:
           USE_HARD_LINKS: false
         working-directory: ciphera/web
         run: |
-          tar -xvzf binaries/linux64/barretenberg-amd64-linux.tar.gz -C binaries/linux64          
+          tar -xvzf binaries/linux64/barretenberg-amd64-linux.tar.gz -C binaries/linux64
           chmod +x binaries/linux64/bb
           npm run electron:build:linux -- --publish never
-          gh release upload ${{ github.ref_name }} release/*.AppImage -R zerosats/zerosats --clobber
+          gh release upload ${{ env.RELEASE_TAG }} release/*.AppImage -R zerosats/zerosats --clobber
 
       - name: Publish Electron app
         env:
           GH_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
         working-directory: ciphera/web
         run: |
-          gh release create ${{ github.ref_name }} -R zerosats/ciphera-wallet || true
-          # gh release upload ${{ github.ref_name }} release/*.dmg release/*.AppImage -R zerosats/ciphera-wallet --clobber
-          # gh release upload ${{ github.ref_name }} binaries/darwin/barretenberg-arm64-darwin.tar.gz -R zerosats/ciphera-wallet --clobber
-
+          gh release create ${{ env.RELEASE_TAG }} -R zerosats/ciphera-wallet || true
+          # gh release upload ${{ env.RELEASE_TAG }} release/*.dmg release/*.AppImage -R zerosats/ciphera-wallet --clobber
+          # gh release upload ${{ env.RELEASE_TAG }} binaries/darwin/barretenberg-arm64-darwin.tar.gz -R zerosats/ciphera-wallet --clobber
 
   test-dmg:
-    runs-on: macos-latest  # Free for public repos
-    needs: [ build ]
+    runs-on: macos-latest # Free for public repos
+    needs: [build]
     steps:
       - name: Download DMG
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release download ${{ github.ref_name }} \
+          gh release download ${{ env.RELEASE_TAG }} \
              --repo zerosats/zerosats \
              --pattern "*arm64.dmg"
-          
+
           ls -la *.dmg
           file *.dmg
 
@@ -160,29 +162,28 @@ jobs:
         run: |
           # Refer to package.lock artifactName field
           hdiutil attach Ciphera-arm64.dmg
-          
+
           # Check binaries exist and are executable
           ls -la /Volumes/Ciphera/Ciphera.app/Contents/Resources/bin/
           file /Volumes/Ciphera/Ciphera.app/Contents/Resources/bin/bb
           file /Volumes/Ciphera/Ciphera.app/Contents/Resources/bin/ciphera-cli
-          
+
           # Test CLI
-          
+
           /Volumes/Ciphera/Ciphera.app/Contents/Resources/bin/bb --version
           /Volumes/Ciphera/Ciphera.app/Contents/Resources/bin/ciphera-cli create
-          
+
           hdiutil detach /Volumes/Ciphera
-     
-          
+
   test-appimage:
     runs-on: ubuntu-latest
-    needs: [ build ]
+    needs: [build]
     steps:
       - name: Download AppImage
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release download ${{ github.ref_name }} \
+          gh release download ${{ env.RELEASE_TAG }} \
              --repo zerosats/zerosats \
              --pattern "*.AppImage"
 
