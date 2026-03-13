@@ -138,8 +138,7 @@ impl Client {
         // Apply minimum gas price if configured
         let max_fee = match self.minimum_gas_price {
             Some(min_price) if max_fee < min_price => min_price,
-            Some(_) => max_fee,
-            None => max_fee,
+            _ => max_fee,
         };
 
         Ok(Eip1559Fees {
