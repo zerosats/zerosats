@@ -101,7 +101,7 @@ impl Client {
             )
             .await?;
 
-        // Extract base fee from most recent block
+        // Extract base fee from the block to be mined
         let base_fee = fee_history
             .base_fee_per_gas
             .last()

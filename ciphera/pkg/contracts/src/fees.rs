@@ -36,7 +36,7 @@ impl FeeStrategy {
     /// Get base fee buffer for this strategy
     pub fn base_fee_buffer_percent(&self) -> u64 {
         match self {
-            Self::Lowest => 101,   // 10% buffer
+            Self::Lowest => 101,   // 1% buffer
             Self::Slow => 110,     // 10% buffer
             Self::Standard => 125, // 25% buffer
             Self::Fast => 150,     // 50% buffer
