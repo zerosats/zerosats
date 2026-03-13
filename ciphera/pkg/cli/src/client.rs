@@ -10,6 +10,7 @@ use hash::hash_merge;
 use node_interface::{HeightResponse, TransactionResponse};
 use once_cell::sync::Lazy;
 use serde_json::json;
+use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
@@ -41,6 +42,7 @@ pub struct NodeClientBuilder {
     host: String,
     port: u16,
     timeout: Duration,
+    wallet_dir: PathBuf,
 }
 
 impl NodeClientBuilder {
@@ -56,6 +58,7 @@ impl NodeClientBuilder {
             host: "127.0.0.1".to_string(),
             port: 8091,
             timeout: Duration::from_secs(10),
+            wallet_dir: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
         }
     }
 
@@ -88,6 +91,11 @@ impl NodeClientBuilder {
         self
     }
 
+    pub fn wallet_dir(mut self, wallet_dir: impl Into<PathBuf>) -> Self {
+        self.wallet_dir = wallet_dir.into();
+        self
+    }
+
     /// Build the NodeClient
     pub fn build(self, chain_id: u64, tls: bool, create_wallet: bool) -> Result<NodeClient> {
         let proto = if tls { "https" } else { "http" };
@@ -97,9 +105,9 @@ impl NodeClientBuilder {
         debug!("Building NodeClient for: {}", base_url);
 
         let wallet = if create_wallet {
-            Wallet::create(chain_id, &self.name)?
+            Wallet::create_in(&self.wallet_dir, chain_id, &self.name)?
         } else {
-            let loaded_wallet = Wallet::load(&self.name)?;
+            let loaded_wallet = Wallet::load_from(&self.wallet_dir, &self.name)?;
             if loaded_wallet.chain_id != chain_id {
                 return Err(color_eyre::eyre::eyre!(
                     "ChainId in loaded file is different to provided {}",
@@ -181,6 +189,10 @@ impl NodeClient {
 
     pub fn get_wallet_mut(&mut self) -> &mut Wallet {
         &mut self.wallet
+    }
+
+    pub fn replace_wallet(&mut self, wallet: Wallet) {
+        self.wallet = wallet;
     }
 
     /// Check the health of the node

@@ -231,7 +231,9 @@ async fn handle_sync(
     match client.list_transactions(&Default::default()).await {
         Ok(list) => {
             println!("   Obtained transactions list size: {}", list.txns.len());
-            client.get_wallet_mut().sync(&list.txns)?;
+            let (synced_wallet, _) = client.get_wallet().prepare_sync(&list.txns)?;
+            synced_wallet.save()?;
+            client.replace_wallet(synced_wallet);
         }
         Err(e) => {
             eprintln!("   Warning: Could not obtain transactions: {e}");
@@ -244,9 +246,10 @@ async fn handle_sync(
 }
 
 async fn handle_address(name: &str, amount: u64, ticker: &str) -> Result<()> {
-    let mut wallet = Wallet::load(name)?;
+    let wallet = Wallet::load(name)?;
     let b = wallet.balance;
-    let a = wallet.get_address(amount, ticker);
+    let (wallet, a) = wallet.prepare_get_address(amount, ticker);
+    wallet.save()?;
 
     println!("\nWallet {name} has been found:");
     println!("\tBalance: {b:?}");
@@ -277,8 +280,10 @@ async fn handle_note_spend(
         .build(chain, true, false)?;
 
     // Prepare transfer. A case, when wallet already has exactly matching note, will be ignored
-    let transfer_note: InputNote = client.get_wallet_mut().receive_note(amount, ticker);
-    let transfer_utxo = client.get_wallet_mut().spend_to(&transfer_note.note)?;
+    let (wallet_with_transfer_note, transfer_note) =
+        client.get_wallet().prepare_receive_note(amount, ticker);
+    let (prepared_wallet, transfer_utxo) =
+        wallet_with_transfer_note.prepare_spend_to(&transfer_note.note)?;
     let snark = transfer_utxo.prove().unwrap();
 
     match client.transaction(&snark).await {
@@ -286,6 +291,9 @@ async fn handle_note_spend(
             println!("\n✅ Transaction {} has been sent!", tx.txn_hash);
             println!("   Height: {}", tx.height);
             println!("   Root hash: {}", tx.root_hash);
+
+            prepared_wallet.save()?;
+            client.replace_wallet(prepared_wallet);
 
             let payload: CipheraURL = (&transfer_note).into();
 
@@ -300,7 +308,6 @@ async fn handle_note_spend(
 
             let b = client.get_wallet().balance;
             println!("\nBalance {b} {ticker}");
-            let _ = client.get_wallet().save();
             Ok(())
         }
         Err(e) => {
@@ -336,15 +343,10 @@ async fn handle_spend_to(
     let note = Note::from(&decode_address(address));
     let ticker = citrea_ticker_from_contract(note.contract);
 
-    let utxo = client.get_wallet_mut().spend_to(&note)?;
+    let (prepared_wallet, utxo) = client.get_wallet().prepare_spend_to(&note)?;
     let snark = utxo.prove().unwrap();
 
     let recipient_note = utxo.output_notes[0].clone();
-    let json_str = serde_json::to_string_pretty(&recipient_note)?;
-
-    std::fs::write(format!("from-{name}-note.json"), &json_str)?;
-
-    println!("\nSaved {recipient_note:?}");
 
     match client.transaction(&snark).await {
         Ok(tx) => {
@@ -352,9 +354,16 @@ async fn handle_spend_to(
             println!("   Height: {}", tx.height);
             println!("   Root hash: {}", tx.root_hash);
 
+            prepared_wallet.save()?;
+            client.replace_wallet(prepared_wallet);
+
+            let json_str = serde_json::to_string_pretty(&recipient_note)?;
+            std::fs::write(format!("from-{name}-note.json"), &json_str)?;
+
+            println!("\nSaved {recipient_note:?}");
+
             let b = client.get_wallet().balance;
             println!("\nBalance {b} {ticker}");
-            let _ = client.get_wallet().save();
             Ok(())
         }
         Err(e) => {
@@ -436,7 +445,7 @@ async fn handle_receive(
 
     let ticker = citrea_ticker_from_contract(input_note.note.contract);
 
-    let utxo = client.get_wallet_mut().receive(&input_note)?;
+    let (prepared_wallet, utxo) = client.get_wallet().prepare_receive(&input_note)?;
     let snark = utxo.prove().unwrap();
 
     match client.transaction(&snark).await {
@@ -445,9 +454,11 @@ async fn handle_receive(
             println!("   Height: {}", tx.height);
             println!("   Root hash: {}", tx.root_hash);
 
+            prepared_wallet.save()?;
+            client.replace_wallet(prepared_wallet);
+
             let b = client.get_wallet().balance;
             println!("\nBalance {b} {ticker}");
-            let _ = client.get_wallet().save();
             Ok(())
         }
         Err(e) => {
@@ -464,8 +475,8 @@ async fn handle_import(name: &str, notefile: &str) -> Result<()> {
         let json_str = fs::read_to_string(json_path)?;
         let note: Note = serde_json::from_str(&json_str)?;
 
-        let mut wallet = Wallet::load(name)?;
-        wallet.import_note(&note)?;
+        let wallet = Wallet::load(name)?;
+        let (wallet, _) = wallet.prepare_import_note(&note)?;
         wallet.save()?;
         Ok(())
     } else {
@@ -494,7 +505,7 @@ async fn handle_mint(
         .timeout_secs(timeout_secs)
         .build(chain, true, false)?;
 
-    let utxo = client.get_wallet_mut().mint(amount, ticker)?;
+    let (prepared_wallet, utxo) = client.get_wallet().prepare_mint(amount, ticker)?;
     let snark = utxo.prove().unwrap();
 
     if !only_snark {
@@ -516,9 +527,11 @@ async fn handle_mint(
             println!("   Height: {}", tx.height);
             println!("   Root hash: {}", tx.root_hash);
 
+            prepared_wallet.save()?;
+            client.replace_wallet(prepared_wallet);
+
             let b = client.get_wallet().balance;
             println!("\nBalance {b} {ticker}");
-            let _ = client.get_wallet().save();
             Ok(())
         }
         Err(e) => {
@@ -547,8 +560,10 @@ async fn handle_burn(
         .build(chain, true, false)?;
 
     // Prepare burn
-    let burner_note: InputNote = client.get_wallet_mut().receive_note(amount, ticker);
-    let burner_utxo = client.get_wallet_mut().spend_to(&burner_note.note)?;
+    let (wallet_with_burner_key, burner_note) =
+        client.get_wallet().prepare_receive_note(amount, ticker);
+    let (wallet_after_burner_transfer, burner_utxo) =
+        wallet_with_burner_key.prepare_spend_to(&burner_note.note)?;
     let snark = burner_utxo.prove().unwrap();
 
     match client.transaction(&snark).await {
@@ -556,6 +571,9 @@ async fn handle_burn(
             println!("\n✅ Transaction {} has been sent!", tx.txn_hash);
             println!("   Height: {}", tx.height);
             println!("   Root hash: {}", tx.root_hash);
+
+            wallet_after_burner_transfer.save()?;
+            client.replace_wallet(wallet_after_burner_transfer);
         }
         Err(e) => {
             eprintln!("\n❌ Could not send transaction!");
@@ -563,16 +581,19 @@ async fn handle_burn(
         }
     }
 
-    // Saving just in case
-    let _ = client.get_wallet_mut().import_note(&burner_note.note);
-    let _ = client.get_wallet_mut().save()?;
+    let (wallet_with_burner_note, _) =
+        client.get_wallet().prepare_import_note(&burner_note.note)?;
+    wallet_with_burner_note.save()?;
+    client.replace_wallet(wallet_with_burner_note);
 
     let evm_address = match H160::from_str(address) {
         Ok(a) => convert_h160_to_element(&a),
         Err(e) => return Err(AppError::InvalidAddress(e.to_string())),
     };
 
-    let burner_utxo = client.get_wallet_mut().burn(&burner_note, &evm_address)?;
+    let (wallet_after_burn, burner_utxo) = client
+        .get_wallet()
+        .prepare_burn(&burner_note, &evm_address)?;
     let snark = burner_utxo.prove().unwrap();
 
     match client.transaction(&snark).await {
@@ -580,6 +601,8 @@ async fn handle_burn(
             println!("\n✅ Transaction {} has been sent!", tx.txn_hash);
             println!("   Height: {}", tx.height);
             println!("   Root hash: {}", tx.root_hash);
+            wallet_after_burn.save()?;
+            client.replace_wallet(wallet_after_burn);
         }
         Err(e) => {
             eprintln!("\n❌ Could not send transaction!");

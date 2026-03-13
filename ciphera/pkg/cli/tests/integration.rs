@@ -15,7 +15,10 @@
 //!   cargo test --lib
 
 use cli::NodeClient;
+use cli::Wallet;
 use cli::rpc::ListTxnsQuery;
+use std::path::Path;
+use tempdir::TempDir;
 
 const NODE_HOST: &str = "ciphera.satsbridge.com";
 const NODE_PORT: u16 = 80;
@@ -29,16 +32,26 @@ fn wallet_name(suffix: &str) -> String {
 
 /// Build a fresh NodeClient for each test, creating the wallet if absent.
 /// Uses a unique name per test to avoid cross-test file conflicts.
-fn build_client(name: &str) -> cli::NodeClient {
-    // If wallet already exists from a prior run, load it; otherwise create.
-    let file = format!("{name}.json");
-    let create = !std::path::Path::new(&file).exists();
+fn temp_wallet_dir() -> TempDir {
+    TempDir::new("ciphera-cli-wallet").unwrap()
+}
+
+fn build_client_in(wallet_dir: &Path, name: &str) -> cli::NodeClient {
+    let wallet_path = Wallet::wallet_path_in(wallet_dir, name);
+    let create = !wallet_path.exists();
     NodeClient::builder()
         .name(name)
         .host(NODE_HOST)
         .port(NODE_PORT)
+        .wallet_dir(wallet_dir)
         .build(CHAIN_ID, HTTPS, create)
         .unwrap_or_else(|e| panic!("NodeClient::build failed for '{name}': {e}"))
+}
+
+fn build_client(name: &str) -> (TempDir, cli::NodeClient) {
+    let wallet_dir = temp_wallet_dir();
+    let client = build_client_in(wallet_dir.path(), name);
+    (wallet_dir, client)
 }
 
 // =====================================================================
@@ -51,7 +64,7 @@ fn build_client(name: &str) -> cli::NodeClient {
 #[tokio::test]
 async fn test_node_health() {
     let name = wallet_name("health");
-    let client = build_client(&name);
+    let (_wallet_dir, client) = build_client(&name);
 
     let health = client
         .check_health()
@@ -71,7 +84,7 @@ async fn test_node_health() {
 #[tokio::test]
 async fn test_height_is_nonzero_and_advances() {
     let name = wallet_name("height");
-    let client = build_client(&name);
+    let (_wallet_dir, client) = build_client(&name);
 
     let h1 = client.get_height().await.expect("first height call");
     tokio::time::sleep(std::time::Duration::from_secs(2)).await;
@@ -90,7 +103,7 @@ async fn test_height_is_nonzero_and_advances() {
 #[tokio::test]
 async fn test_list_transactions_returns_valid_shape() {
     let name = wallet_name("list");
-    let client = build_client(&name);
+    let (_wallet_dir, client) = build_client(&name);
 
     let resp = client
         .list_transactions(&ListTxnsQuery::default())
@@ -105,7 +118,7 @@ async fn test_list_transactions_returns_valid_shape() {
 #[tokio::test]
 async fn test_list_transactions_with_limit() {
     let name = wallet_name("list-limit");
-    let client = build_client(&name);
+    let (_wallet_dir, client) = build_client(&name);
 
     let resp = client
         .list_transactions(&ListTxnsQuery {
@@ -131,7 +144,7 @@ async fn test_list_transactions_with_limit() {
 #[tokio::test]
 async fn test_sync_does_not_corrupt_empty_wallet() {
     let name = wallet_name("sync-empty");
-    let mut client = build_client(&name);
+    let (_wallet_dir, mut client) = build_client(&name);
     let initial_balance = client.get_wallet().balance;
 
     let resp = client
@@ -139,10 +152,11 @@ async fn test_sync_does_not_corrupt_empty_wallet() {
         .await
         .expect("list_transactions");
 
-    client
-        .get_wallet_mut()
-        .sync(&resp.txns)
+    let (synced_wallet, _) = client
+        .get_wallet()
+        .prepare_sync(&resp.txns)
         .expect("sync should not fail on a fresh wallet");
+    client.replace_wallet(synced_wallet);
 
     assert!(
         client.get_wallet().balance >= initial_balance,
@@ -155,23 +169,25 @@ async fn test_sync_does_not_corrupt_empty_wallet() {
 #[tokio::test]
 async fn test_sync_is_idempotent() {
     let name = wallet_name("sync-idempotent");
-    let mut client = build_client(&name);
+    let (_wallet_dir, mut client) = build_client(&name);
 
     let resp = client
         .list_transactions(&ListTxnsQuery::default())
         .await
         .expect("list_transactions");
 
-    client
-        .get_wallet_mut()
-        .sync(&resp.txns)
+    let (synced_wallet, _) = client
+        .get_wallet()
+        .prepare_sync(&resp.txns)
         .expect("first sync");
+    client.replace_wallet(synced_wallet);
     let balance_after_first = client.get_wallet().balance;
 
-    client
-        .get_wallet_mut()
-        .sync(&resp.txns)
+    let (synced_wallet, _) = client
+        .get_wallet()
+        .prepare_sync(&resp.txns)
         .expect("second sync");
+    client.replace_wallet(synced_wallet);
     let balance_after_second = client.get_wallet().balance;
 
     assert_eq!(
@@ -189,21 +205,20 @@ async fn test_sync_is_idempotent() {
 #[test]
 fn test_build_create_fails_when_wallet_exists() {
     let name = "build-create-exists-test";
-    let file = format!("{name}.json");
-    let _ = std::fs::remove_file(&file);
+    let wallet_dir = temp_wallet_dir();
 
     // First creation must succeed.
     NodeClient::builder()
         .name(name)
+        .wallet_dir(wallet_dir.path())
         .build(CHAIN_ID, HTTPS, true)
         .expect("first create should succeed");
 
     // Second creation on the same name must fail.
     let result = NodeClient::builder()
         .name(name)
+        .wallet_dir(wallet_dir.path())
         .build(CHAIN_ID, HTTPS, true);
-
-    let _ = std::fs::remove_file(&file);
 
     let err = result.expect_err("create_wallet=true must fail when wallet already exists");
     let msg = format!("{err}");
@@ -217,19 +232,18 @@ fn test_build_create_fails_when_wallet_exists() {
 #[test]
 fn test_build_load_succeeds_when_wallet_exists() {
     let name = "build-load-exists-test";
-    let file = format!("{name}.json");
-    let _ = std::fs::remove_file(&file);
+    let wallet_dir = temp_wallet_dir();
 
     NodeClient::builder()
         .name(name)
+        .wallet_dir(wallet_dir.path())
         .build(CHAIN_ID, HTTPS, true)
         .expect("pre-create");
 
     let result = NodeClient::builder()
         .name(name)
+        .wallet_dir(wallet_dir.path())
         .build(CHAIN_ID, HTTPS, false);
-
-    let _ = std::fs::remove_file(&file);
 
     assert!(
         result.is_ok(),
@@ -242,11 +256,11 @@ fn test_build_load_succeeds_when_wallet_exists() {
 #[test]
 fn test_build_load_fails_when_wallet_absent() {
     let name = "build-load-absent-test";
-    let file = format!("{name}.json");
-    let _ = std::fs::remove_file(&file);
+    let wallet_dir = temp_wallet_dir();
 
     let result = NodeClient::builder()
         .name(name)
+        .wallet_dir(wallet_dir.path())
         .build(CHAIN_ID, HTTPS, false);
 
     let err = result.expect_err("create_wallet=false must fail when file is absent");
@@ -261,17 +275,18 @@ fn test_build_load_fails_when_wallet_absent() {
 #[test]
 fn test_build_load_rejects_wrong_chain_id() {
     let name = "build-chain-mismatch-test";
-    let file = format!("{name}.json");
-    let _ = std::fs::remove_file(&file);
+    let wallet_dir = temp_wallet_dir();
 
     NodeClient::builder()
         .name(name)
+        .wallet_dir(wallet_dir.path())
         .build(CHAIN_ID, HTTPS, true)
         .expect("pre-create with CHAIN_ID=5115");
 
-    let result = NodeClient::builder().name(name).build(9999, HTTPS, false); // different chain_id
-
-    let _ = std::fs::remove_file(&file);
+    let result = NodeClient::builder()
+        .name(name)
+        .wallet_dir(wallet_dir.path())
+        .build(9999, HTTPS, false); // different chain_id
 
     let err = result.expect_err("mismatched chain_id must be rejected");
     let msg = format!("{err}");
@@ -293,14 +308,14 @@ fn test_build_load_rejects_wrong_chain_id() {
 #[test]
 fn test_build_propagates_serialization_error_on_bad_json() {
     let name = "malformed-wallet-integration-test";
-    let file = format!("{name}.json");
+    let wallet_dir = temp_wallet_dir();
+    let file = Wallet::wallet_path_in(wallet_dir.path(), name);
     std::fs::write(&file, b"not valid json").unwrap();
 
     let result = NodeClient::builder()
         .name(name)
+        .wallet_dir(wallet_dir.path())
         .build(CHAIN_ID, HTTPS, false); // load, not create
-
-    let _ = std::fs::remove_file(&file);
 
     let err = result.expect_err("build must fail with malformed wallet file");
     let msg = format!("{err}");
