@@ -1,9 +1,9 @@
 //! Integration tests for the CLI module.
 //!
-//! These tests connect to the live Ciphera testnet node (port 80, plain HTTPS).
+//! These tests connect to the live Ciphera testnet node.
 //!   tls=true  → https://
 //!   tls=false → http://
-//! All integration tests use tls=false to get http:// for port 80.
+//! Live-node tests use tls=true for the remote endpoint.
 //!
 //! Run all integration tests:
 //!   cargo test --test integration -- --nocapture
@@ -23,7 +23,7 @@ use tempdir::TempDir;
 const NODE_HOST: &str = "ciphera.satsbridge.com";
 const NODE_PORT: u16 = 80;
 const CHAIN_ID: u64 = 5115; // Citrea testnet
-// tls=true gives http:// (flag is inverted in build())
+// Use TLS when targeting the remote testnet node.
 const HTTPS: bool = true;
 
 fn wallet_name(suffix: &str) -> String {

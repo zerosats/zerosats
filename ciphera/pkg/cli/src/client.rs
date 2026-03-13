@@ -191,10 +191,6 @@ impl NodeClient {
         &self.wallet
     }
 
-    pub fn get_wallet_mut(&mut self) -> &mut Wallet {
-        &mut self.wallet
-    }
-
     pub fn replace_wallet(&mut self, wallet: Wallet) {
         self.wallet = wallet;
     }
@@ -456,7 +452,7 @@ mod client_tests {
 
     /// tls=true produces https://
     #[test]
-    fn test_build_tls_true_gives_http_scheme() {
+    fn test_build_tls_true_gives_https_scheme() {
         let name = "scheme-http-test-wallet";
         let file = format!("{name}.json");
         let _ = std::fs::remove_file(&file);
@@ -479,7 +475,7 @@ mod client_tests {
 
     /// tls=false produces http://
     #[test]
-    fn test_build_tls_false_gives_https_scheme() {
+    fn test_build_tls_false_gives_http_scheme() {
         let name = "scheme-https-test-wallet";
         let file = format!("{name}.json");
         let _ = std::fs::remove_file(&file);

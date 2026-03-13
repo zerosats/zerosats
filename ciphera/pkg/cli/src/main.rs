@@ -174,7 +174,7 @@ async fn handle_create(chain: u64, name: &str) -> Result<(), AppError> {
     println!("   Never share it with anyone.");
 
     println!("\n🚀 Next Steps:");
-    println!("   1. Connect to network:  ciphera-cli --name {name} connect");
+    println!("   1. Connect to network:  ciphera-cli --name {name} sync");
     println!(
         "   2. Mint tokens:         ciphera-cli --name {name} mint --amount <AMOUNT> --secret <YOUR_ETH_KEY> --geth-rpc <RPC_URL>"
     );
@@ -621,25 +621,6 @@ async fn handle_burn(
         }
     }
     Ok(())
-    /*    let input_notes = [note.clone(), InputNote::padding_note()];
-    let utxo = zk_primitives::Utxo::new_burn(input_notes, evm_address);
-
-    let snark = utxo.prove().unwrap();
-
-    let _ = client.get_wallet().save();
-
-    match client.transaction(&snark).await {
-        Ok(tx) => {
-            println!("\n✅ Transaction {} has been sent!", tx.txn_hash);
-            println!("   Height: {}", tx.height);
-            println!("   Root hash: {}", tx.root_hash);
-            Ok(())
-        }
-        Err(e) => {
-            eprintln!("\n❌ Could not send transaction!");
-            Err(AppError::WalletLoadError(e))
-        }
-    }*/
 }
 
 async fn handle_rollup(geth_rpc: &str, chain: u64, rollup: &str) -> Result<()> {
