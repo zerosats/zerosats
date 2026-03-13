@@ -1,6 +1,6 @@
 use std::{future::Future, time::Duration};
 
-use crate::{Error, Result};
+use crate::{Eip1559Fees, Error, FeeStrategy, Result};
 use ethereum_types::{Address, H256, U64};
 use testutil::eth::EthNode;
 use tokio::time::interval;
@@ -87,14 +87,53 @@ impl Client {
         Ok(block_number)
     }
 
-    pub async fn save_gas_price(&self) -> Result<U256, web3::Error> {
-        let gas_price: U256 =
-            retry_on_network_failure(move || self.client.eth().gas_price()).await?;
+    pub async fn estimate_eip1559_fees(
+        &self,
+        strategy: FeeStrategy,
+    ) -> Result<Eip1559Fees, web3::Error> {
+        let fee_history = self
+            .client
+            .eth()
+            .fee_history(
+                U256::from(4),
+                web3::types::BlockNumber::Latest,
+                Some(vec![strategy.percentile()]),
+            )
+            .await?;
 
-        match self.minimum_gas_price {
-            Some(minimum_gas_price) if gas_price < minimum_gas_price => Ok(minimum_gas_price),
-            _ => Ok(gas_price), // works most of the time unless MINIMUM_GAS_PRICE_GWEI is set
-        }
+        // Extract base fee from most recent block
+        let base_fee = fee_history
+            .base_fee_per_gas
+            .last()
+            .ok_or_else(|| web3::Error::Internal)?
+            .clone();
+
+        // Extract priority fee from rewards
+        let priority_fee = fee_history
+            .reward
+            .ok_or_else(|| web3::Error::Internal)?
+            .last()
+            .and_then(|inner_vec| inner_vec.first())
+            .ok_or_else(|| web3::Error::Internal)?
+            .clone();
+
+        // Calculate max fee with buffer for next block's base fee
+        let next_base_fee = base_fee.saturating_mul(U256::from(strategy.base_fee_buffer_percent()))
+            / U256::from(100);
+        let max_fee = next_base_fee.saturating_add(priority_fee);
+
+        // Apply minimum gas price if configured
+        let max_fee = match self.minimum_gas_price {
+            Some(min_price) if max_fee < min_price => min_price,
+            Some(_) => max_fee,
+            None => max_fee,
+        };
+
+        Ok(Eip1559Fees {
+            base_fee,
+            priority_fee,
+            max_fee,
+        })
     }
 
     /// Returns the current chain id with network-failure retries.
@@ -145,14 +184,20 @@ impl Client {
         .await
     }
 
-    pub(crate) async fn options(&self, address: Address) -> Result<Options, web3::Error> {
-        let gas_price = self.save_gas_price().await?;
+    pub(crate) async fn options_eip1559(
+        &self,
+        address: Address,
+        strategy: FeeStrategy,
+    ) -> Result<Options, web3::Error> {
+        let fees = self.estimate_eip1559_fees(strategy).await?;
         let nonce = self.nonce(address).await?;
 
         Ok(Options {
             gas: Some(10_000_000.into()),
-            gas_price: Some(gas_price),
+            max_fee_per_gas: Some(fees.max_fee),
+            max_priority_fee_per_gas: Some(fees.priority_fee),
             nonce: Some(nonce),
+            transaction_type: Some(U64::from(2)), // EIP-1559 type
             ..Default::default()
         })
     }
@@ -165,7 +210,9 @@ impl Client {
         signer: &SecretKey,
         signer_address: Address,
     ) -> Result<H256> {
-        let options = self.options(signer_address).await?;
+        let strategy = FeeStrategy::Lowest;
+        let options = self.options_eip1559(signer_address, strategy).await?;
+
         let gas = retry_on_network_failure(|| {
             contract.estimate_gas(func, params.clone(), signer_address, options.clone())
         })
