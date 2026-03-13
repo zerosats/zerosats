@@ -32,16 +32,20 @@ struct Cli {
     name: String,
 
     /// RPC server host
-    #[arg(global = true, long, default_value = "127.0.0.1")]
+    #[arg(global = true, long, default_value = "ciphera.satsbridge.com")]
     host: String,
 
     /// RPC server port
-    #[arg(global = true, short, long, default_value = "8091")]
+    #[arg(global = true, short, long, default_value = "443")]
     port: u16,
 
     /// Request timeout in seconds
     #[arg(global = true, long, default_value = "10")]
     timeout: u64,
+
+    /// Use plain HTTP instead of HTTPS when talking to the Ciphera node
+    #[arg(global = true, long, action = clap::ArgAction::SetTrue)]
+    no_tls: bool,
 
     #[arg(global = true, short, long, default_value = "5115")] // Citrea testnet default
     chain: u64,
@@ -188,6 +192,7 @@ async fn handle_sync(
     host: &str,
     port: u16,
     timeout_secs: u64,
+    use_tls: bool,
 ) -> Result<()> {
     debug!(
         "Connecting wallet {} to Ciphera node at {}:{}",
@@ -200,7 +205,7 @@ async fn handle_sync(
         .host(host)
         .port(port)
         .timeout_secs(timeout_secs)
-        .build(chain, true, false)?;
+        .build(chain, use_tls, false)?;
 
     // Check health
     match client.check_health().await {
@@ -269,6 +274,7 @@ async fn handle_note_spend(
     host: &str,
     port: u16,
     timeout_secs: u64,
+    use_tls: bool,
     amount: u64,
     ticker: &str,
 ) -> Result<()> {
@@ -278,7 +284,7 @@ async fn handle_note_spend(
         .host(host)
         .port(port)
         .timeout_secs(timeout_secs)
-        .build(chain, true, false)?;
+        .build(chain, use_tls, false)?;
 
     // Prepare transfer. A case, when wallet already has exactly matching note, will be ignored
     let (wallet_with_transfer_note, transfer_note) =
@@ -324,6 +330,7 @@ async fn handle_spend_to(
     host: &str,
     port: u16,
     timeout_secs: u64,
+    use_tls: bool,
     address: &str,
 ) -> Result<()> {
     debug!(
@@ -337,7 +344,7 @@ async fn handle_spend_to(
         .host(host)
         .port(port)
         .timeout_secs(timeout_secs)
-        .build(chain, true, false)?;
+        .build(chain, use_tls, false)?;
 
     // Spend to UX leverages a variant of NoteURL encoding for providing an "address" with address
     // and amount needed for UTXO construction
@@ -380,6 +387,7 @@ async fn handle_receive(
     port: u16,
     timeout_secs: u64,
     chain: u64,
+    use_tls: bool,
     notefile: Option<String>,
     notelink: Option<String>,
 ) -> Result<()> {
@@ -394,7 +402,7 @@ async fn handle_receive(
         .host(host)
         .port(port)
         .timeout_secs(timeout_secs)
-        .build(chain, true, false)?;
+        .build(chain, use_tls, false)?;
 
     // Check health
     match client.check_health().await {
@@ -490,6 +498,7 @@ async fn handle_mint(
     host: &str,
     port: u16,
     timeout_secs: u64,
+    use_tls: bool,
     geth_rpc: &str,
     chain: u64,
     rollup: &str,
@@ -504,7 +513,7 @@ async fn handle_mint(
         .host(host)
         .port(port)
         .timeout_secs(timeout_secs)
-        .build(chain, true, false)?;
+        .build(chain, use_tls, false)?;
 
     let (prepared_wallet, utxo) = client.get_wallet().prepare_mint(amount, ticker)?;
     let snark = utxo.prove().unwrap();
@@ -548,6 +557,7 @@ async fn handle_burn(
     port: u16,
     timeout_secs: u64,
     chain: u64,
+    use_tls: bool,
     address: &str,
     amount: u64,
     ticker: &str,
@@ -558,7 +568,7 @@ async fn handle_burn(
         .host(host)
         .port(port)
         .timeout_secs(timeout_secs)
-        .build(chain, true, false)?;
+        .build(chain, use_tls, false)?;
 
     // Prepare burn
     let (wallet_with_burner_key, burner_note) =
@@ -683,6 +693,7 @@ async fn main() -> Result<()> {
 
     // Initialize logging
     init_logging(cli.verbose);
+    let use_tls = !cli.no_tls;
 
     debug!("Starting Ciphera CLI");
 
@@ -692,7 +703,15 @@ async fn main() -> Result<()> {
             handle_create(cli.chain, &cli.name).await?;
         }
         Commands::Sync {} => {
-            handle_sync(cli.chain, &cli.name, &cli.host, cli.port, cli.timeout).await?;
+            handle_sync(
+                cli.chain,
+                &cli.name,
+                &cli.host,
+                cli.port,
+                cli.timeout,
+                use_tls,
+            )
+            .await?;
         }
         Commands::Address { amount, ticker } => {
             let ticker_normalized = ticker.to_uppercase();
@@ -706,6 +725,7 @@ async fn main() -> Result<()> {
                 &cli.host,
                 cli.port,
                 cli.timeout,
+                use_tls,
                 amount,
                 &ticker_normalized,
             )
@@ -718,6 +738,7 @@ async fn main() -> Result<()> {
                 &cli.host,
                 cli.port,
                 cli.timeout,
+                use_tls,
                 &address,
             )
             .await?;
@@ -729,6 +750,7 @@ async fn main() -> Result<()> {
                 cli.port,
                 cli.timeout,
                 cli.chain,
+                use_tls,
                 note,
                 link,
             )
@@ -750,6 +772,7 @@ async fn main() -> Result<()> {
                 &cli.host,
                 cli.port,
                 cli.timeout,
+                use_tls,
                 &geth_rpc,
                 cli.chain,
                 &cli.rollup,
@@ -772,6 +795,7 @@ async fn main() -> Result<()> {
                 cli.port,
                 cli.timeout,
                 cli.chain,
+                use_tls,
                 &address,
                 amount,
                 &ticker_normalized,

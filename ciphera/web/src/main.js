@@ -50,6 +50,7 @@ class CipheraApp {
             pendingNote: null, // Stores note waiting to be saved
             nodeHost: null,
             nodePort: null,
+            nodeTls: true,
             chainId: null,
             rollupContract: null,
         };
@@ -347,6 +348,7 @@ class CipheraApp {
         if (!connected) {
             this.state.nodeHost = null;
             this.state.nodePort = null;
+            this.state.nodeTls = true;
             this.state.chainId = null;
             this.state.rollupContract = null;
             // Stop explorer polling when disconnected
@@ -372,6 +374,23 @@ class CipheraApp {
         if (this.elements.nodeEndpoint) {
             this.elements.nodeEndpoint.textContent = connected && endpoint ? endpoint : 'DISCONNECTED';
         }
+    }
+
+    parseTlsAnswer(value) {
+        const normalized = String(value ?? '').trim().toLowerCase();
+        return !['n', 'no', 'false', '0', 'off', 'http'].includes(normalized);
+    }
+
+    getNodeProtocol(useTls = this.state.nodeTls) {
+        return useTls === false ? 'http' : 'https';
+    }
+
+    getNodeEndpoint(host = this.state.nodeHost, port = this.state.nodePort, useTls = this.state.nodeTls) {
+        return `${this.getNodeProtocol(useTls)}://${host}:${port}`;
+    }
+
+    getNodeBaseUrl(host = this.state.nodeHost, port = this.state.nodePort, useTls = this.state.nodeTls) {
+        return `${this.getNodeEndpoint(host, port, useTls)}/v0`;
     }
 
     truncateAddress(address) {
@@ -544,7 +563,7 @@ class CipheraApp {
         this.updateStatus(`⏳ Fetching transaction ${hash.slice(0, 16)}...`);
 
         try {
-            const response = await fetch(`https://${this.state.nodeHost}:${this.state.nodePort}/v0/transactions/${hash}`);
+            const response = await fetch(`${this.getNodeBaseUrl()}/transactions/${hash}`);
 
             if (!response.ok) {
                 if (response.status === 404) {
@@ -593,7 +612,7 @@ class CipheraApp {
         this.updateStatus(`⏳ Fetching block ${blockNum}...`);
 
         try {
-            const response = await fetch(`https://${this.state.nodeHost}:${this.state.nodePort}/v0/blocks/${blockNum}`);
+            const response = await fetch(`${this.getNodeBaseUrl()}/blocks/${blockNum}`);
 
             if (!response.ok) {
                 if (response.status === 404) {
@@ -878,7 +897,8 @@ class CipheraApp {
         this.terminal.log('Type "clear" to return home', 'dim');
         this.startPromptSequence('sync', [
             {key: 'host', label: 'Host:', placeholder: 'ciphera.satsbridge.com', default: 'ciphera.satsbridge.com'},
-            {key: 'port', label: 'Port:', placeholder: '443', default: '443'}
+            {key: 'port', label: 'Port:', placeholder: '443', default: '443'},
+            {key: 'tls', label: 'Use TLS (https)? [Y/n]:', placeholder: 'yes', default: 'yes'}
         ]);
     }
 
@@ -895,13 +915,16 @@ class CipheraApp {
 
         const nextNodeHost = answers.host;
         const nextNodePort = parseInt(answers.port);
+        const nextNodeTls = this.parseTlsAnswer(answers.tls);
+        const nextNodeEndpoint = this.getNodeEndpoint(nextNodeHost, nextNodePort, nextNodeTls);
 
-        this.updateStatus(`⏳ CONNECT: Reaching ${answers.host}:${answers.port}...`);
+        this.updateStatus(`⏳ CONNECT: Reaching ${nextNodeEndpoint}...`);
 
         const result = await window.ciphera.connect(
             this.state.walletName,
             nextNodeHost,
-            nextNodePort
+            nextNodePort,
+            !nextNodeTls,
         );
 
         if (!result.success) {
@@ -911,9 +934,9 @@ class CipheraApp {
 
         // Fetch network info to get chain_id and rollup_contract
         try {
-            const networkRes = await fetch(`https://${nextNodeHost}:${nextNodePort}/v0/network`);
+            const networkRes = await fetch(`${this.getNodeBaseUrl(nextNodeHost, nextNodePort, nextNodeTls)}/network`);
             if (!networkRes.ok) {
-                throw new Error(`HTTPs ${networkRes.status}`);
+                throw new Error(`HTTP ${networkRes.status}`);
             }
             const network = await networkRes.json();
             let nextChainId = this.state.chainId;
@@ -948,9 +971,10 @@ class CipheraApp {
 
         this.state.nodeHost = nextNodeHost;
         this.state.nodePort = nextNodePort;
-        this.updateConnectionStatus(true, `${nextNodeHost}:${nextNodePort}`);
+        this.state.nodeTls = nextNodeTls;
+        this.updateConnectionStatus(true, nextNodeEndpoint);
 
-        this.completeStatus(true, `CONNECTED: ${nextNodeHost}:${nextNodePort}`);
+        this.completeStatus(true, `CONNECTED: ${nextNodeEndpoint}`);
     }
 
     startMint() {
@@ -1027,6 +1051,7 @@ class CipheraApp {
             gethRpc: answers.gethRpc,
             host: this.state.nodeHost,
             port: this.state.nodePort,
+            noTls: !this.state.nodeTls,
             chain: this.state.chainId,
             rollup: rollupContract,
         });
@@ -1108,7 +1133,15 @@ class CipheraApp {
 
         this.updateStatus('⏳ SEND: Creating private note...');
 
-        const result = await window.ciphera.spend(this.state.walletName, amountWei, undefined, this.state.chainId, this.state.nodeHost, this.state.nodePort);
+        const result = await window.ciphera.spend(
+            this.state.walletName,
+            amountWei,
+            undefined,
+            this.state.chainId,
+            this.state.nodeHost,
+            this.state.nodePort,
+            !this.state.nodeTls,
+        );
 
         if (!result.success) {
             this.completeStatus(false, `SEND FAILED - ${result.error}`);
@@ -1185,6 +1218,7 @@ class CipheraApp {
             noteFile: answers.noteFile,
             host: this.state.nodeHost,
             port: this.state.nodePort,
+            noTls: !this.state.nodeTls,
             chain: this.state.chainId,
         });
 
@@ -1268,6 +1302,7 @@ class CipheraApp {
             address: answers.address,
             host: this.state.nodeHost,
             port: this.state.nodePort,
+            noTls: !this.state.nodeTls,
             chain: this.state.chainId,
         });
 
@@ -1484,7 +1519,7 @@ class CipheraApp {
 
         try {
             // Fetch height
-            const heightRes = await fetch(`https://${this.state.nodeHost}:${this.state.nodePort}/v0/height`);
+            const heightRes = await fetch(`${this.getNodeBaseUrl()}/height`);
             if (heightRes.ok) {
                 const heightData = await heightRes.json();
                 if (this.elements.statHeight) {
@@ -1493,7 +1528,7 @@ class CipheraApp {
             }
 
             // Fetch stats
-            const statsRes = await fetch(`https://${this.state.nodeHost}:${this.state.nodePort}/v0/stats`);
+            const statsRes = await fetch(`${this.getNodeBaseUrl()}/stats`);
             if (statsRes.ok) {
                 const stats = await statsRes.json();
                 if (this.elements.statTxCount) {
@@ -1599,14 +1634,14 @@ class CipheraApp {
         const paddedHash = cleanHash.padStart(64, '0');
 
         // Try plural endpoint first (v0/transactions/{hash})
-        let url = `https://${this.state.nodeHost}:${this.state.nodePort}/v0/transactions/${paddedHash}`;
+        let url = `${this.getNodeBaseUrl()}/transactions/${paddedHash}`;
         console.log('[Explorer] Trying:', url);
         let response = await fetch(url);
         console.log('[Explorer] Response:', response.status);
 
         // If not found, try singular endpoint (v0/transaction/{hash})
         if (!response.ok && response.status === 404) {
-            url = `https://${this.state.nodeHost}:${this.state.nodePort}/v0/transaction/${paddedHash}`;
+            url = `${this.getNodeBaseUrl()}/transaction/${paddedHash}`;
             console.log('[Explorer] Trying:', url);
             response = await fetch(url);
             console.log('[Explorer] Response:', response.status);
@@ -1626,7 +1661,7 @@ class CipheraApp {
     }
 
     async explorerLookupBlock(blockNum) {
-        const response = await fetch(`https://${this.state.nodeHost}:${this.state.nodePort}/v0/blocks/${blockNum}`);
+        const response = await fetch(`${this.getNodeBaseUrl()}/blocks/${blockNum}`);
 
         if (!response.ok) {
             if (response.status === 404) {
@@ -1645,7 +1680,7 @@ class CipheraApp {
         const cleanHash = hash.startsWith('0x') ? hash.slice(2) : hash;
         const paddedHash = cleanHash.padStart(64, '0');
 
-        const response = await fetch(`https://${this.state.nodeHost}:${this.state.nodePort}/v0/elements/${paddedHash}`);
+        const response = await fetch(`${this.getNodeBaseUrl()}/elements/${paddedHash}`);
 
         if (!response.ok) {
             if (response.status === 404) {
