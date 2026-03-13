@@ -12,7 +12,6 @@ import {ethers} from 'ethers';
 
 // Contract addresses for Citrea testnet
 const CONTRACTS = {
-    ROLLUP: '0xcac0d0901ac8806160acc8ef373117898a51dfe7',
     WCBTC: '0x8d0c9d1c17aE5e40ffF9bE350f57840E9E66Cd93',
     USDC: '0x52f74a8f9bdd29f77a5efd7f6cb44dcf6906a4b6',
 };
@@ -184,8 +183,8 @@ class CipheraApp {
         this.terminal.log('', 'default');
         this.terminal.log('PREREQUISITES FOR MINTING:', 'info');
         this.terminal.log('  • wcBTC tokens on Citrea testnet', 'dim');
-        this.terminal.log('  • Approve the rollup contract to spend your wcBTC:', 'dim');
-        this.terminal.log('    Contract: 0xcac0d0901ac8806160acc8ef373117898a51dfe7', 'dim');
+        this.terminal.log('  • Connect to a Ciphera node first so the app can fetch', 'dim');
+        this.terminal.log('    the active rollup contract for approvals', 'dim');
         this.terminal.separator('═');
     }
 
@@ -966,6 +965,12 @@ class CipheraApp {
 
         // Convert wcBTC input to wei for CLI
         const amountWei = this.wcbtcToWei(answers.amount);
+        const rollupContract = this.state.rollupContract;
+
+        if (!rollupContract) {
+            this.completeStatus(false, 'MINT FAILED - missing rollup contract from node. Reconnect and try again.');
+            return;
+        }
 
         let citreaTxHash = null;
         let cipheraTxHash = null;
@@ -977,14 +982,14 @@ class CipheraApp {
         const tokenContract = new ethers.Contract(CONTRACTS.WCBTC, ERC20_ABI, wallet);
 
         this.updateStatus('⏳ MINT: Checking token approval...');
-        const currentAllowance = await tokenContract.allowance(wallet.address, CONTRACTS.ROLLUP);
+        const currentAllowance = await tokenContract.allowance(wallet.address, rollupContract);
         const mintAmount = BigInt(amountWei);
 
         // Step 2: Approve if needed
         if (currentAllowance < mintAmount) {
             this.updateStatus('⏳ MINT: Approving contract...');
             const approveAmount = mintAmount * 10n;
-            const tx = await tokenContract.approve(CONTRACTS.ROLLUP, approveAmount);
+            const tx = await tokenContract.approve(rollupContract, approveAmount);
             citreaTxHash = tx.hash;
 
             this.updateStatus('⏳ MINT: Waiting for approval confirmation...');
@@ -1002,7 +1007,7 @@ class CipheraApp {
             host: this.state.nodeHost,
             port: this.state.nodePort,
             chain: this.state.chainId,
-            rollup: this.state.rollupContract,
+            rollup: rollupContract,
         });
 
         if (!result.success) {
