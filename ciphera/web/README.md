@@ -106,7 +106,7 @@ The `window.ciphera` API is exposed to the renderer process:
 await window.ciphera.createWallet('alice');
 
 // Connect to node
-await window.ciphera.connect('alice', '63.176.138.198', 8091);
+await window.ciphera.connect('alice', 'ciphera.satsbridge.com', 8091);
 
 // Mint tokens
 await window.ciphera.mint({

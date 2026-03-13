@@ -1,9 +1,9 @@
 use element::Element;
-use rand::rngs::OsRng;
 use rand::RngCore;
+use rand::rngs::OsRng;
 use serde::{Deserialize, Serialize};
 use web3::types::H160;
-use zk_primitives::{generate_note_kind_bridge_evm, Note};
+use zk_primitives::{Note, generate_note_kind_bridge_evm};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct CipheraAddress {
@@ -183,7 +183,7 @@ pub fn decode_address(address: &str) -> CipheraAddress {
 
     let value_len = 32 - leading_zeros;
     let value_without_leading_zeros = &rest[..value_len];
-    rest = &rest[value_len..];
+    //rest = &rest[value_len..];
 
     let mut value_bytes = [0u8; 32];
     value_bytes[leading_zeros..].copy_from_slice(value_without_leading_zeros);

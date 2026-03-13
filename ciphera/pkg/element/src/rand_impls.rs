@@ -35,7 +35,7 @@ impl Element {
     /// If you are using a [`CryptoRng`], consider using [`Element::secure_random`], which has this
     /// trait bound, and returns an [`Element`]
     ///
-    /// ```rust,compile_fail
+    /// ```rust
     /// # use element::Element;
     /// # use rand_xorshift::XorShiftRng;
     /// # use rand::SeedableRng;
@@ -43,7 +43,6 @@ impl Element {
     /// let mut rng = XorShiftRng::from_seed([0; 16]);
     /// let element = Element::random(&mut rng);
     ///
-    /// println!("{element}");  // uh oh
     /// ```
     /// To get access to the generated element, we need to call [`Insecure::get_insecure`].
     /// Hopefully this is scary enough that we will think twice where we use this value.

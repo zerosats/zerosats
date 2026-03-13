@@ -19,8 +19,8 @@ use zk_primitives::{Note, UtxoProof};
 use contracts::ConfirmationType;
 use ethereum_types::U256;
 use secp256k1::PublicKey;
-use web3::signing::{keccak256, SecretKey};
-use web3::types::{Address, H256};
+use web3::signing::{SecretKey, keccak256};
+use web3::types::Address;
 
 use crate::rpc::{HealthResponse, ListTransactionsResponse, ListTxnsQuery};
 /// Singleton HTTP client shared across all NodeClient instances
@@ -89,11 +89,25 @@ impl NodeClientBuilder {
     }
 
     /// Build the NodeClient
-    pub fn build(self) -> Result<NodeClient> {
-        let base_url = format!("http://{}:{}/v0", self.host, self.port);
+    pub fn build(self, chain_id: u64, tls: bool, create_wallet: bool) -> Result<NodeClient> {
+        let proto = if tls { "https" } else { "http" };
+
+        let base_url = format!("{}://{}:{}/v0", proto, self.host, self.port);
+
         debug!("Building NodeClient for: {}", base_url);
 
-        let wallet = Wallet::init(&self.name)?;
+        let wallet = if create_wallet {
+            Wallet::create(chain_id, &self.name)?
+        } else {
+            let loaded_wallet = Wallet::load(&self.name)?;
+            if loaded_wallet.chain_id != chain_id {
+                return Err(color_eyre::eyre::eyre!(
+                    "ChainId in loaded file is different to provided {}",
+                    chain_id
+                ));
+            }
+            loaded_wallet
+        };
 
         Ok(NodeClient {
             base_url,
@@ -124,18 +138,6 @@ pub struct NodeClient {
 
 impl NodeClient {
     /// Create a new NodeClient builder
-    ///
-    /// # Example
-    /// ```no_run
-    /// use cli::NodeClient;
-    ///
-    /// let client = NodeClient::builder()
-    ///     .host("localhost")
-    ///     .port(8091)
-    ///     .timeout_secs(10)
-    ///     .build()?;
-    /// # Ok::<(), color_eyre::eyre::Error>(())
-    /// ```
     pub fn builder() -> NodeClientBuilder {
         NodeClientBuilder::new()
     }
@@ -160,7 +162,7 @@ impl NodeClient {
             .host(host)
             .port(port)
             .timeout_secs(timeout_secs)
-            .build()
+            .build(5115, false, true)
     }
 
     /// Get the base URL of the node
@@ -284,6 +286,7 @@ impl NodeClient {
         let response = self
             .http_client
             .get(&url)
+            .query(&query)
             .timeout(self.timeout)
             .send()
             .await
@@ -310,7 +313,6 @@ impl NodeClient {
         chain_id: u64,
         secret: &str,
         rollup: &str,
-        erc20_contract: &str,
         note: &Note,
         utxo: &UtxoProof,
     ) -> Result<()> {
@@ -351,8 +353,6 @@ impl NodeClient {
         rollup: &str,
         erc20_contract: &str,
         mint_erc20: bool,
-        note: &Note,
-        utxo: &UtxoProof,
     ) -> Result<()> {
         //let eth_node = EthNode::default().run_and_deploy().await;
         let sk = SecretKey::from_str(secret)?;
@@ -391,40 +391,270 @@ impl NodeClient {
 
         Ok(())
     }
+}
 
-    pub async fn state(
-        &self,
-        geth_rpc: &str,
-        chain_id: u64,
-        secret: &str,
-        rollup: &str,
-    ) -> Result<()> {
-        let sk = SecretKey::from_str(secret)?;
-        let client = contracts::Client::new(geth_rpc, None);
-        let rollup = RollupContract::load(client, &chain_id, rollup, sk).await?;
-        let rh = rollup.root_hash().await?;
-        let b = rollup.block_height().await?;
-        let kind_wcbtc = H256::from_slice(
-            &hex::decode("000200000000000013fb8d0c9d1c17ae5e40fff9be350f57840e9e66cd930000")
-                .unwrap(),
+#[cfg(test)]
+mod client_tests {
+    use super::*;
+
+    const CHAIN_ID: u64 = 5115; // Citrea testnet
+
+    // =====================================================================
+    // NodeClientBuilder — offline unit tests
+    // =====================================================================
+
+    #[test]
+    fn test_builder_default_host_and_port() {
+        let b = NodeClientBuilder::new();
+        assert_eq!(b.host, "127.0.0.1");
+        assert_eq!(b.port, 8091);
+    }
+
+    #[test]
+    fn test_builder_fluent_overrides() {
+        let b = NodeClientBuilder::new()
+            .host("example.com")
+            .port(9000)
+            .timeout_secs(30)
+            .name("bob");
+        assert_eq!(b.host, "example.com");
+        assert_eq!(b.port, 9000);
+        assert_eq!(b.timeout, Duration::from_secs(30));
+        assert_eq!(b.name, "bob");
+    }
+
+    /// Timeout setter convenience: timeout_secs(n) equals timeout(Duration::from_secs(n)).
+    #[test]
+    fn test_builder_timeout_secs_matches_duration() {
+        let b1 = NodeClientBuilder::new().timeout_secs(42);
+        let b2 = NodeClientBuilder::new().timeout(Duration::from_secs(42));
+        assert_eq!(b1.timeout, b2.timeout);
+    }
+
+    // =====================================================================
+    // build() — URL scheme (tls flag)
+    //   tls=true  → "https://"
+    //   tls=false → "http://"
+    // =====================================================================
+
+    /// tls=true produces https://
+    #[test]
+    fn test_build_tls_true_gives_http_scheme() {
+        let name = "scheme-http-test-wallet";
+        let file = format!("{name}.json");
+        let _ = std::fs::remove_file(&file);
+
+        let client = NodeClientBuilder::new()
+            .name(name)
+            .host("node.example.com")
+            .port(80)
+            .build(CHAIN_ID, true, true)
+            .expect("build should succeed");
+
+        let _ = std::fs::remove_file(&file);
+
+        assert!(
+            client.base_url().starts_with("https://node.example.com:80"),
+            "tls=true should produce https://; got: {}",
+            client.base_url()
         );
+    }
 
-        let kind_usdc = H256::from_slice(
-            &hex::decode("000200000000000013fb52f74a8f9bdd29f77a5efd7f6cb44dcf6906a4b60000")
-                .unwrap(),
+    /// tls=false produces http://
+    #[test]
+    fn test_build_tls_false_gives_https_scheme() {
+        let name = "scheme-https-test-wallet";
+        let file = format!("{name}.json");
+        let _ = std::fs::remove_file(&file);
+
+        let client = NodeClientBuilder::new()
+            .name(name)
+            .host("node.example.com")
+            .port(443)
+            .build(CHAIN_ID, false, true)
+            .expect("build should succeed");
+
+        let _ = std::fs::remove_file(&file);
+
+        assert!(
+            client.base_url().starts_with("http://node.example.com:443"),
+            "tls=false should produce http://; got: {}",
+            client.base_url()
         );
+    }
 
-        let token_wbtc = rollup.token(kind_wcbtc).await?;
-        let token_usdc = rollup.token(kind_usdc).await?;
+    /// Base URL always ends with /v0.
+    #[test]
+    fn test_build_base_url_has_v0_path() {
+        let name = "v0-path-test-wallet";
+        let file = format!("{name}.json");
+        let _ = std::fs::remove_file(&file);
 
-        println!("\nRollup State Info\n");
-        println!("\tChain                :{chain_id} ");
-        println!("\tToken kind WBTC      :{token_wbtc:#x} ");
-        println!("\tToken kind USDC      :{token_usdc:#x} ");
+        let client = NodeClientBuilder::new()
+            .name(name)
+            .host("host")
+            .port(1234)
+            .build(CHAIN_ID, true, true)
+            .expect("build");
 
-        println!("\tBlock                :{b} ");
-        println!("\tRoot hash            :{rh:#x} ");
+        let _ = std::fs::remove_file(&file);
 
-        Ok(())
+        assert!(
+            client.base_url().ends_with("/v0"),
+            "base_url must end with /v0; got: {}",
+            client.base_url()
+        );
+    }
+
+    // =====================================================================
+    // build() — wallet create vs load
+    // =====================================================================
+
+    /// create_wallet=true creates a new wallet file; fails if one exists.
+    #[test]
+    fn test_build_create_wallet_succeeds_when_file_absent() {
+        let name = "create-absent-test-wallet";
+        let file = format!("{name}.json");
+        let _ = std::fs::remove_file(&file);
+
+        let result = NodeClientBuilder::new()
+            .name(name)
+            .build(CHAIN_ID, true, true);
+
+        let _ = std::fs::remove_file(&file);
+
+        assert!(
+            result.is_ok(),
+            "create_wallet=true should succeed when file absent: {:?}",
+            result.err()
+        );
+    }
+
+    /// create_wallet=true fails with WalletExists when the file already exists.
+    #[test]
+    fn test_build_create_wallet_fails_when_file_exists() {
+        let name = "create-exists-test-wallet";
+        let file = format!("{name}.json");
+
+        // Pre-create the wallet.
+        let _ = NodeClientBuilder::new()
+            .name(name)
+            .build(CHAIN_ID, true, true);
+
+        let result = NodeClientBuilder::new()
+            .name(name)
+            .build(CHAIN_ID, true, true);
+
+        let _ = std::fs::remove_file(&file);
+
+        let err = result.expect_err("create_wallet=true must fail when wallet already exists");
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("exists") || msg.contains("Exists"),
+            "error should mention the file already exists; got: {msg}"
+        );
+    }
+
+    /// create_wallet=false loads an existing wallet successfully.
+    #[test]
+    fn test_build_load_wallet_succeeds_when_file_exists() {
+        let name = "load-exists-test-wallet";
+        let file = format!("{name}.json");
+        let _ = std::fs::remove_file(&file);
+
+        // Create the wallet first.
+        NodeClientBuilder::new()
+            .name(name)
+            .build(CHAIN_ID, true, true)
+            .expect("pre-create wallet");
+
+        let result = NodeClientBuilder::new()
+            .name(name)
+            .build(CHAIN_ID, true, false);
+
+        let _ = std::fs::remove_file(&file);
+
+        assert!(
+            result.is_ok(),
+            "create_wallet=false should load existing wallet: {:?}",
+            result.err()
+        );
+    }
+
+    /// create_wallet=false fails with FileNotFound when file is absent.
+    #[test]
+    fn test_build_load_wallet_fails_when_file_absent() {
+        let name = "load-absent-test-wallet";
+        let file = format!("{name}.json");
+        let _ = std::fs::remove_file(&file);
+
+        let result = NodeClientBuilder::new()
+            .name(name)
+            .build(CHAIN_ID, true, false);
+
+        let err = result.expect_err("create_wallet=false must fail when wallet file absent");
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("not found") || msg.contains("NotFound") || msg.contains("FileNotFound"),
+            "error should mention file not found; got: {msg}"
+        );
+    }
+
+    /// create_wallet=false fails when wallet's chain_id differs from provided.
+    #[test]
+    fn test_build_load_wallet_rejects_wrong_chain_id() {
+        let name = "chain-id-mismatch-test-wallet";
+        let file = format!("{name}.json");
+        let _ = std::fs::remove_file(&file);
+
+        // Create wallet with chain_id=5115.
+        NodeClientBuilder::new()
+            .name(name)
+            .build(CHAIN_ID, true, true)
+            .expect("pre-create wallet");
+
+        // Load with a different chain_id.
+        let result = NodeClientBuilder::new().name(name).build(9999, true, false);
+
+        let _ = std::fs::remove_file(&file);
+
+        let err = result.expect_err("loading wallet with wrong chain_id must fail");
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("ChainId") || msg.contains("chain") || msg.contains("different"),
+            "error should mention chain_id mismatch; got: {msg}"
+        );
+    }
+
+    // =====================================================================
+    // build() — error propagation (regression for handle_note_spend bug)
+    // =====================================================================
+
+    /// Regression: build() with a malformed wallet file returns a descriptive
+    /// serialization error, not a generic one.
+    ///
+    /// Catches the bug in handle_note_spend (main.rs) where
+    ///   .map_err(|_| AppError::CantBuildClient())
+    /// silently drops the WalletError.
+    #[test]
+    fn test_build_propagates_serialization_error_on_bad_json() {
+        let name = "bad-json-test-wallet";
+        let file = format!("{name}.json");
+        std::fs::write(&file, b"{bad json}").unwrap();
+
+        let result = NodeClientBuilder::new()
+            .name(name)
+            .build(CHAIN_ID, true, false); // load, not create
+
+        let _ = std::fs::remove_file(&file);
+
+        let err = result.expect_err("build with malformed wallet file must fail");
+        let msg = format!("{err:#}");
+        assert!(
+            msg.to_lowercase().contains("serial")
+                || msg.to_lowercase().contains("json")
+                || msg.to_lowercase().contains("parse"),
+            "error must mention JSON/serialization, not just 'Builder error': {msg}"
+        );
     }
 }

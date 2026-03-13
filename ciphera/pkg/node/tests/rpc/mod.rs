@@ -713,8 +713,7 @@ async fn rollup_contract(addr: Address, eth_node: &EthNode) -> RollupContract {
 async fn erc20_contract(rollup: &RollupContract, eth_node: &EthNode) -> ERC20Contract {
     // Note kind produced by Note::new_with_psi() — must match what deploy.ts registers via addToken
     let mock_btc_kind = H256::from_slice(
-        &hex::decode("000200000000000000893c499c542cef5e3811e1192ce70d8cc03d5c33590000")
-            .unwrap(),
+        &hex::decode("000200000000000000893c499c542cef5e3811e1192ce70d8cc03d5c33590000").unwrap(),
     );
     let usdc_addr = rollup.token(mock_btc_kind).await.unwrap();
 
