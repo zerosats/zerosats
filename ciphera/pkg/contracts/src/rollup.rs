@@ -1,3 +1,4 @@
+use std::ops::Deref;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -10,6 +11,7 @@ use eth_util::Eth;
 use ethereum_types::{H160, H256, U64, U256};
 use parking_lot::RwLock;
 use sha3::{Digest, Keccak256};
+#[cfg(any(test, feature = "test-helpers"))]
 use testutil::eth::EthNode;
 use tokio::time::{Instant, interval_at};
 use tracing::{info, warn};
@@ -220,12 +222,9 @@ impl Tokenizable for ValidatorSet {
 impl TokenizableItem for ValidatorSet {}
 
 #[derive(Debug, Clone)]
-pub struct RollupContract {
+pub struct ReadonlyRollupContract {
     pub client: Client,
     pub contract: Contract<Http>,
-    pub signer: SecretKey,
-    pub signer_address: Address,
-    pub domain_separator: H256,
     pub validator_sets: Arc<RwLock<Vec<ValidatorSet>>>,
     /// Address of rollup contract
     address: Address,
@@ -234,7 +233,57 @@ pub struct RollupContract {
     block_height: Option<U64>,
 }
 
-impl RollupContract {
+#[derive(Debug, Clone)]
+pub struct SignedRollupContract {
+    pub readonly: ReadonlyRollupContract,
+    pub signer: SecretKey,
+    pub signer_address: Address,
+    pub domain_separator: H256,
+}
+
+impl Deref for SignedRollupContract {
+    type Target = ReadonlyRollupContract;
+
+    fn deref(&self) -> &Self::Target {
+        &self.readonly
+    }
+}
+
+impl ReadonlyRollupContract {
+    pub fn new(client: Client, contract: Contract<Http>, address: Address) -> Self {
+        Self {
+            client,
+            contract,
+            validator_sets: Arc::new(RwLock::new(Vec::new())),
+            address,
+            block_height: None,
+        }
+    }
+
+    pub fn address(&self) -> Address {
+        self.address
+    }
+
+    pub async fn load(client: Client, rollup_contract_addr: &str) -> Result<Self> {
+        let contract_json =
+            include_str!("../../../citrea/artifacts/contracts/rollup/RollupV1.sol/RollupV1.json");
+        let contract = client.load_contract_from_str(rollup_contract_addr, contract_json)?;
+
+        let self_ = Self::new(client, contract, rollup_contract_addr.parse()?);
+        self_.load_all_validators().await?;
+
+        Ok(self_)
+    }
+
+    pub fn at_height(self, height: Option<u64>) -> Self {
+        Self {
+            block_height: height.map(|x| x.into()),
+            ..self
+        }
+    }
+}
+
+impl SignedRollupContract {
     pub fn new(
         client: Client,
         contract: Contract<Http>,
@@ -245,19 +294,11 @@ impl RollupContract {
         let signer_address = Key::address(&SecretKeyRef::new(&signer));
 
         Self {
-            client,
-            contract,
+            readonly: ReadonlyRollupContract::new(client, contract, address),
             signer,
             signer_address,
             domain_separator,
-            validator_sets: Arc::new(RwLock::new(Vec::new())),
-            address,
-            block_height: None,
         }
-    }
-
-    pub fn address(&self) -> Address {
-        self.address
     }
 
     pub async fn load(
@@ -293,6 +334,7 @@ impl RollupContract {
         Ok(self_)
     }
 
+    #[cfg(any(test, feature = "test-helpers"))]
     pub async fn from_eth_node(eth_node: &EthNode, secret_key: SecretKey) -> Result<Self> {
         let deployed = eth_node.deployed();
         let rollup_addr = deployed.rollup_proxy.as_str();
@@ -303,11 +345,13 @@ impl RollupContract {
 
     pub fn at_height(self, height: Option<u64>) -> Self {
         Self {
-            block_height: height.map(|x| x.into()),
+            readonly: self.readonly.at_height(height),
             ..self
         }
     }
+}
 
+impl ReadonlyRollupContract {
     async fn load_all_validators(&self) -> Result<()> {
         let all_validators = self.get_validator_sets(0).await?;
         *self.validator_sets.write() = all_validators;
@@ -391,11 +435,14 @@ impl RollupContract {
 
         handle.await?
     }
+}
 
+impl SignedRollupContract {
     pub async fn call(&self, func: &str, params: impl Tokenize + Clone) -> Result<H256> {
-        self.client
+        self.readonly
+            .client
             .call(
-                &self.contract,
+                &self.readonly.contract,
                 func,
                 params,
                 &self.signer,
@@ -555,7 +602,9 @@ impl RollupContract {
 
         Ok(call_tx)
     }
+}
 
+impl ReadonlyRollupContract {
     #[tracing::instrument(err, ret, skip(self))]
     pub async fn get_mint(&self, key: &Element) -> Result<Option<Mint>> {
         let mint: Mint = self
@@ -653,7 +702,9 @@ impl RollupContract {
 
         Ok(exists)
     }
+}
 
+impl SignedRollupContract {
     #[tracing::instrument(err, ret, skip(self))]
     pub async fn substitute_burn(
         &self,
@@ -678,7 +729,9 @@ impl RollupContract {
 
         Ok(call_tx)
     }
+}
 
+impl ReadonlyRollupContract {
     #[tracing::instrument(err, ret, skip(self))]
     pub async fn was_burn_substituted(
         &self,
@@ -931,7 +984,21 @@ impl RollupContract {
             .filter(|v| height >= v.valid_from.as_u64())
             .next_back()
             .map(|vs| vs.validators.clone())
-            .unwrap_or_else(|| vec![self.signer_address])
+            .unwrap_or_default()
+    }
+}
+
+impl SignedRollupContract {
+    // Signed call sites historically fell back to the local signer when validator
+    // sets had not been loaded yet. Preserve that behavior for existing node/prover
+    // paths while the readonly client accurately reports "no validators known".
+    pub fn validators_for_height(&self, height: u64) -> Vec<Address> {
+        let validators = self.readonly.validators_for_height(height);
+        if validators.is_empty() {
+            vec![self.signer_address]
+        } else {
+            validators
+        }
     }
 
     #[tracing::instrument(err, ret, skip(self))]
@@ -969,7 +1036,9 @@ impl RollupContract {
 
         Ok(call_tx)
     }
+}
 
+impl ReadonlyRollupContract {
     #[tracing::instrument(err, ret, skip(self))]
     pub async fn token(&self, kind: H256) -> Result<H160> {
         let token = self
@@ -1072,5 +1141,58 @@ impl RollupContract {
             .await?;
 
         Ok(key)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::str::FromStr;
+
+    fn test_client() -> Client {
+        Client::new("http://127.0.0.1:8545", None)
+    }
+
+    fn test_contract(client: &Client, address: &str) -> Contract<Http> {
+        let contract_json =
+            include_str!("../../../citrea/artifacts/contracts/rollup/RollupV1.sol/RollupV1.json");
+        client
+            .load_contract_from_str(address, contract_json)
+            .expect("embedded rollup contract JSON should load")
+    }
+
+    #[test]
+    fn readonly_rollup_can_be_constructed_without_a_signer() {
+        let client = test_client();
+        let address = "0xbd57b7d47d66934509f9ca31248598eb6cb3fafd";
+        let contract = test_contract(&client, address);
+
+        let rollup = ReadonlyRollupContract::new(client, contract, address.parse().unwrap());
+
+        assert_eq!(rollup.address(), address.parse().unwrap());
+        assert!(rollup.validators_for_height(42).is_empty());
+    }
+
+    #[test]
+    fn signed_rollup_wraps_readonly_state_and_preserves_signer_fallback() {
+        let client = test_client();
+        let address = "0xbd57b7d47d66934509f9ca31248598eb6cb3fafd";
+        let contract = test_contract(&client, address);
+        let signer =
+            SecretKey::from_str("ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80")
+                .unwrap();
+        let expected_signer = Key::address(&SecretKeyRef::new(&signer));
+
+        let rollup = SignedRollupContract::new(
+            client,
+            contract,
+            signer,
+            H256::zero(),
+            address.parse().unwrap(),
+        );
+
+        assert_eq!(rollup.address(), address.parse().unwrap());
+        assert_eq!(rollup.signer_address, expected_signer);
+        assert_eq!(rollup.validators_for_height(42), vec![expected_signer]);
     }
 }

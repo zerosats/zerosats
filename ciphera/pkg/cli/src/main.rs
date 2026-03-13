@@ -1,13 +1,12 @@
 use clap::{Parser, Subcommand};
 use cli::NodeClient;
 use cli::Wallet;
+use cli::address::citrea_ticker_from_contract;
 use cli::address::decode_address;
 use cli::note_url::{CipheraURL, decode_url};
-use cli::address::citrea_ticker_from_contract;
 
 use color_eyre::Result;
 use tracing::{debug, error};
-use web3::signing::SecretKey;
 use web3::types::{H160, H256};
 
 use barretenberg::Prove;
@@ -610,11 +609,8 @@ async fn handle_burn(
 }
 
 async fn handle_rollup(geth_rpc: &str, chain: u64, rollup: &str) -> Result<()> {
-    let sk =
-        SecretKey::from_str("ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80")?;
-
     let client = contracts::Client::new(geth_rpc, None);
-    let rollup = contracts::RollupContract::load(client, &chain, rollup, sk).await?;
+    let rollup = contracts::ReadonlyRollupContract::load(client, rollup).await?;
 
     let rh = rollup.root_hash().await?;
     let b = rollup.block_height().await?;

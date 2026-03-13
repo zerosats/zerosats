@@ -70,6 +70,7 @@ native-tls = { workspace = true }
 scopeguard = { workspace = true }
 
 [dev-dependencies]
+contracts = { workspace = true, features = ["test-helpers"] }
 dotenvy = { workspace = true }
 reqwest = { workspace = true }
 tempdir = { workspace = true }

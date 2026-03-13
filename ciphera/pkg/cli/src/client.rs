@@ -5,7 +5,7 @@
 
 use crate::wallet::Wallet;
 use color_eyre::Result;
-use contracts::{ERC20Contract, RollupContract};
+use contracts::{ERC20Contract, SignedRollupContract};
 use hash::hash_merge;
 use node_interface::{HeightResponse, TransactionResponse};
 use once_cell::sync::Lazy;
@@ -320,7 +320,7 @@ impl NodeClient {
         let sk = SecretKey::from_str(secret)?;
         let client = contracts::Client::new(geth_rpc, None);
 
-        let rollup = RollupContract::load(client, &chain_id, rollup, sk).await?;
+        let rollup = SignedRollupContract::load(client, &chain_id, rollup, sk).await?;
 
         let mint_hash = hash_merge([note.psi, Note::padding_note().psi]);
 
@@ -359,7 +359,7 @@ impl NodeClient {
         let client = contracts::Client::new(geth_rpc, None);
 
         let erc20_contract = ERC20Contract::load(client.clone(), erc20_contract, sk).await?;
-        let rollup = RollupContract::load(client, &chain_id, rollup, sk).await?;
+        let rollup = SignedRollupContract::load(client, &chain_id, rollup, sk).await?;
 
         let secp = secp256k1::Secp256k1::new();
         let secret_key = secp256k1::SecretKey::from_slice(&sk.secret_bytes()).unwrap();

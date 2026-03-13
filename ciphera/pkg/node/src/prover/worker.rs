@@ -376,7 +376,7 @@ async fn run_rollup_worker(
     rollup_subscription: Option<mpsc::Sender<BlockHeight>>,
     postgres_db: Option<Arc<tokio_postgres::Client>>,
 ) -> Result<()> {
-    rollup_contract.client.use_latest_for_nonce = true;
+    rollup_contract.readonly.client.use_latest_for_nonce = true;
     let rollup_contract = rollup_contract;
 
     let mut skip_waiting = true;
