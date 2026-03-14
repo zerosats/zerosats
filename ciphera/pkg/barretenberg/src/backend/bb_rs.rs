@@ -57,12 +57,19 @@ impl Backend for BindingBackend {
                     bytecode, witness, key, false, None,
                 )
             },
-            _ => unsafe {
+            VerifierTarget::Default => unsafe {
                 bb_rs::barretenberg_api::acir::acir_prove_ultra_honk(
                     bytecode, witness, key, false, None,
                 )
             },
+            VerifierTarget::NoirRecursive => {
+                return Err("BindingBackend does not support NoirRecursive proving; bb_rs v2.0.3 has no recursive-specific API. Use CliBackend instead.".into());
+            }
         };
+
+        if proof.is_empty() {
+            return Err("Barretenberg returned empty proof data".into());
+        }
 
         Ok(proof)
     }
@@ -76,7 +83,12 @@ impl Backend for BindingBackend {
             VerifierTarget::Evm => unsafe {
                 bb_rs::barretenberg_api::acir::acir_verify_ultra_keccak_zk_honk(proof, key)
             },
-            _ => unsafe { bb_rs::barretenberg_api::acir::acir_verify_ultra_honk(proof, key) },
+            VerifierTarget::Default => unsafe {
+                bb_rs::barretenberg_api::acir::acir_verify_ultra_honk(proof, key)
+            },
+            VerifierTarget::NoirRecursive => {
+                return Err("BindingBackend does not support NoirRecursive verification; use CliBackend instead.".into());
+            }
         };
 
         match verified {
