@@ -21,7 +21,6 @@ use zk_primitives::{
 
 const PROGRAM: &str = include_str!("../../../../fixtures/programs/agg_utxo.json");
 const KEY: &[u8] = include_bytes!("../../../../fixtures/keys/agg_utxo_key");
-const KEY_FIELDS: &[u8] = include_bytes!("../../../../fixtures/keys/agg_utxo_key_fields.json");
 
 lazy_static! {
     static ref PROGRAM_ARTIFACT: ProgramArtifact = serde_json::from_str(PROGRAM).unwrap();
@@ -29,7 +28,7 @@ lazy_static! {
     static ref PROGRAM_PATH: PathBuf = write_to_temp_file(PROGRAM.as_bytes(), ".json");
     static ref BYTECODE: Vec<u8> = get_bytecode_from_program(PROGRAM);
     pub static ref AGG_UTXO_VERIFICATION_KEY: VerificationKey =
-        VerificationKey(serde_json::from_slice(KEY_FIELDS).unwrap());
+        VerificationKey(super::vk_binary_to_fields(KEY));
     pub static ref AGG_UTXO_VERIFICATION_KEY_HASH: VerificationKeyHash = VerificationKeyHash(
         hash::poseidon_hash(&AGG_UTXO_VERIFICATION_KEY.0).unwrap()
     );

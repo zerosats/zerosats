@@ -1,5 +1,6 @@
+use acvm::AcirField;
 use barretenberg::verify::VerificationKey;
-use element::{Base, Element};
+use element::Element;
 use hash::poseidon_hash;
 use std::env;
 use std::fs;
@@ -8,32 +9,38 @@ use std::path::Path;
 fn main() {
     let args: Vec<String> = env::args().collect();
     if args.len() != 2 {
-        eprintln!("Usage: {} <vk_fields.json>", args[0]);
+        eprintln!("Usage: {} <vk_binary_file>", args[0]);
         std::process::exit(1);
     }
 
-    let vk_fields_path = &args[1];
+    let vk_path = &args[1];
 
-    if !Path::new(vk_fields_path).exists() {
-        eprintln!("Error: File {vk_fields_path} does not exist");
+    if !Path::new(vk_path).exists() {
+        eprintln!("Error: File {vk_path} does not exist");
         std::process::exit(1);
     }
 
-    let vk_fields_data = match fs::read(vk_fields_path) {
+    let vk_data = match fs::read(vk_path) {
         Ok(data) => data,
         Err(e) => {
-            eprintln!("Error reading file {vk_fields_path}: {e}");
+            eprintln!("Error reading file {vk_path}: {e}");
             std::process::exit(1);
         }
     };
 
-    let vk_fields: Vec<Base> = match serde_json::from_slice(&vk_fields_data) {
-        Ok(fields) => fields,
-        Err(e) => {
-            eprintln!("Error parsing JSON from {vk_fields_path}: {e}");
-            std::process::exit(1);
-        }
-    };
+    // BB 4.0 VK format: concatenated 32-byte big-endian field elements
+    if vk_data.len() % 32 != 0 {
+        eprintln!(
+            "Error: VK file size ({}) is not a multiple of 32 bytes",
+            vk_data.len()
+        );
+        std::process::exit(1);
+    }
+
+    let vk_fields: Vec<_> = vk_data
+        .chunks_exact(32)
+        .map(|chunk| acvm::FieldElement::from_be_bytes_reduce(chunk))
+        .collect();
 
     let verification_key = VerificationKey(vk_fields);
 
