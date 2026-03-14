@@ -47,6 +47,7 @@ impl Prove for Utxo {
         //     element::Element::from_base(UTXO_VERIFICATION_KEY_HASH.0).to_u256()
         // );
 
+        // NoirRecursive: embeds recursion artifacts so agg_utxo can verify this proof in-circuit.
         let proof_bytes = prove::<DefaultBackend>(
             &PROGRAM_COMPILED,
             PROGRAM.as_bytes(),
@@ -90,6 +91,8 @@ impl Prove for Utxo {
 impl Verify for UtxoProof {
     fn verify(&self) -> Result<()> {
         let bytes = self.to_bytes();
+        // Standalone verification uses Default — BB's UltraHonk verifier accepts
+        // NoirRecursive-format proofs without needing the recursive flag.
         verify::<DefaultBackend>(KEY, &bytes, VerifierTarget::Default, UTXO_PUBLIC_INPUTS_COUNT * 32)
     }
 }

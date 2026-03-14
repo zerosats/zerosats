@@ -48,6 +48,7 @@ impl Prove for AggUtxo {
         //     Element::from_base(AGG_UTXO_VERIFICATION_KEY_HASH.0).to_hex()
         // );
 
+        // NoirRecursive: embeds recursion artifacts so agg_agg can verify this proof in-circuit.
         let proof_bytes = prove::<DefaultBackend>(
             &PROGRAM_COMPILED,
             PROGRAM.as_bytes(),
@@ -104,6 +105,7 @@ impl Prove for AggUtxo {
 
 impl Verify for AggUtxoProof {
     fn verify(&self) -> Result<()> {
+        // Standalone verification uses Default — see utxo.rs for rationale.
         verify::<DefaultBackend>(KEY, &self.to_bytes(), VerifierTarget::Default, AGG_UTXO_PUBLIC_INPUTS_COUNT * 32)
     }
 }
