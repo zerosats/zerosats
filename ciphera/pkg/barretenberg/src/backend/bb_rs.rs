@@ -54,11 +54,13 @@ impl Backend for BindingBackend {
         let proof = match target {
             VerifierTarget::Evm => unsafe {
                 bb_rs::barretenberg_api::acir::acir_prove_ultra_keccak_zk_honk(
-                    bytecode, witness, key,
+                    bytecode, witness, key, false, None,
                 )
             },
             _ => unsafe {
-                bb_rs::barretenberg_api::acir::acir_prove_ultra_honk(bytecode, witness, key)
+                bb_rs::barretenberg_api::acir::acir_prove_ultra_honk(
+                    bytecode, witness, key, false, None,
+                )
             },
         };
 
