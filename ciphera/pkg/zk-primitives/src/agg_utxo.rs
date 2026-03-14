@@ -121,7 +121,7 @@ impl AggUtxoProofBytes {
 
 impl Default for AggUtxoProofBytes {
     fn default() -> Self {
-        Self(vec![0u8; 457 * 32])
+        Self(vec![0u8; 508 * 32])
     }
 }
 

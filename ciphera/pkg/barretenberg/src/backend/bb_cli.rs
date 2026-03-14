@@ -139,7 +139,7 @@ impl Backend for CliBackend {
         key_file.write_all(key)?;
         key_file.flush()?;
 
-        let public_inputs_len = proof.len() - 457 * 32;
+        let public_inputs_len = proof.len() - 508 * 32;
         let mut proof_file = NamedTempFile::new()?;
         proof_file.write_all(&proof[public_inputs_len..])?;
         proof_file.flush()?;

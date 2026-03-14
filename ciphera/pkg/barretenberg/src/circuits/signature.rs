@@ -30,7 +30,7 @@ lazy_static! {
 
 // TODO: can we move this as a trait on zk-primitives?
 const SIGNATURE_PUBLIC_INPUTS_COUNT: usize = 2;
-const SIGNATURE_PROOF_SIZE: usize = 457;
+const SIGNATURE_PROOF_SIZE: usize = 508;
 
 impl Prove for Signature {
     type Proof = SignatureProof;

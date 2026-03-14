@@ -70,8 +70,8 @@ impl Prove for AggUtxo {
 
         assert_eq!(
             raw_proof.len(),
-            457 * 32,
-            "Proof must be 457 elements of 32 bytes"
+            508 * 32,
+            "Proof must be 508 elements of 32 bytes"
         );
 
         Ok(AggUtxoProof {
@@ -177,7 +177,7 @@ impl From<AggUtxoInput> for InputMap {
 
 #[derive(Debug, Clone)]
 pub struct AggUtxoProofInput {
-    pub proof: [Base; 457],
+    pub proof: [Base; 508],
     pub input_merkle_paths: [[Base; 160]; 2],
     pub output_merkle_paths: [[Base; 160]; 2],
     pub input_commitments: [Base; 2],
