@@ -1,4 +1,4 @@
-use dep::std;
+use std;
 use poseidon::poseidon2;
 
 global AGG_UTXO_VERIFICATION_KEY_HASH: Field =
@@ -67,7 +67,7 @@ fn main(
                 first_public_inputs
             },
             verification_key_hash,
-            7,
+            0, // PROOF_TYPE_HONK: UltraHonk recursive verification (non-ZK)
         );
 
         if proof.old_root != 0 {

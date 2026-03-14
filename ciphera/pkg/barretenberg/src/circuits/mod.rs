@@ -16,6 +16,20 @@ use flate2::read::GzDecoder;
 // pub use migrate::*;
 pub use utxo::*;
 
+/// Parse a binary VK file (N * 32 bytes) into field elements.
+/// BB 4.0 outputs VKs as concatenated 32-byte big-endian field elements.
+fn vk_binary_to_fields(vk_bytes: &[u8]) -> Vec<element::Base> {
+    assert!(
+        vk_bytes.len() % 32 == 0,
+        "VK binary must be a multiple of 32 bytes, got {}",
+        vk_bytes.len()
+    );
+    vk_bytes
+        .chunks_exact(32)
+        .map(|chunk| acvm::FieldElement::from_be_bytes_reduce(chunk))
+        .collect()
+}
+
 fn get_bytecode_from_program(program_json: &str) -> Vec<u8> {
     let mut program = serde_json::from_str::<serde_json::Value>(program_json).unwrap();
     let bytecode_base64 = program.get_mut("bytecode").unwrap().as_str().unwrap();

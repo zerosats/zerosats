@@ -1,4 +1,4 @@
-use dep::std;
+use std;
 use common::is_one_of;
 use poseidon::poseidon2;
 
@@ -107,7 +107,7 @@ fn main(
                 public_inputs
             },
             verification_key_hash,
-            7,
+            0, // PROOF_TYPE_HONK: UltraHonk recursive verification (non-ZK)
         );
 
         if (!is_padding) {

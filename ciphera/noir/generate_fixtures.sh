@@ -29,64 +29,81 @@ mkdir -p $REPO_ROOT/fixtures/keys
 # as the hash from utxo is used in agg_utxo, and agg_utxo used in agg_agg
 PROGRAMS=("utxo" "agg_utxo" "agg_agg" "signature" "points" ) # "migrate")
 
-# Define which programs should use the recursive flag
+# Define which programs need noir-recursive verifier target
 RECURSIVE_PROGRAMS=("agg_utxo" "utxo")
 
-# Function to check if a program should use recursive flag
-is_recursive() {
+# Function to get the verifier target for a program
+get_verifier_target() {
   local program_name="$1"
+  if [[ "$program_name" == "agg_agg" ]]; then
+    echo "evm"
+    return
+  fi
   for p in "${RECURSIVE_PROGRAMS[@]}"; do
     if [[ "$p" == "$program_name" ]]; then
-      return 0  # True in bash
+      echo "noir-recursive"
+      return
     fi
   done
-  return 1  # False in bash
+  echo ""
 }
 
 # Generate verification keys for each program
 for NAME in "${PROGRAMS[@]}"; do
-  oracle_hash_args=()
-  if [ "$NAME" == "agg_agg" ]; then
-    oracle_hash_args=("--oracle_hash" "keccak")
+  TARGET=$(get_verifier_target "$NAME")
+  target_args=()
+  if [ -n "$TARGET" ]; then
+    target_args=("--verifier_target" "$TARGET")
   fi
 
   echo "================"
   echo "$(echo "$NAME" | tr '[:lower:]' '[:upper:]')"
   echo "================"
 
-  if is_recursive "$NAME"; then
-    echo "Generating verification key for $NAME with recursive flag"
-    $BACKEND write_vk ${oracle_hash_args[@]} --scheme ultra_honk --honk_recursion 1 --init_kzg_accumulator -b $REPO_ROOT/fixtures/programs/${NAME}.json -o $REPO_ROOT/fixtures/keys/ --output_format bytes_and_fields \
-      && mv $REPO_ROOT/fixtures/keys/{vk,${NAME}_key} && mv $REPO_ROOT/fixtures/keys/{vk_fields.json,${NAME}_key_fields.json}
-  else
-    echo "Generating verification key for $NAME"
-    $BACKEND write_vk ${oracle_hash_args[@]} --scheme ultra_honk -b $REPO_ROOT/fixtures/programs/${NAME}.json -o $REPO_ROOT/fixtures/keys/ --output_format bytes_and_fields \
-      && mv $REPO_ROOT/fixtures/keys/{vk,${NAME}_key} && mv $REPO_ROOT/fixtures/keys/{vk_fields.json,${NAME}_key_fields.json}
-  fi
+  echo "Generating verification key for $NAME (target: ${TARGET:-default})"
+  $BACKEND write_vk ${target_args[@]+"${target_args[@]}"} -b $REPO_ROOT/fixtures/programs/${NAME}.json -o $REPO_ROOT/fixtures/keys/ \
+    && mv $REPO_ROOT/fixtures/keys/{vk,${NAME}_key} && mv $REPO_ROOT/fixtures/keys/{vk_hash,${NAME}_vk_hash}
 
-  # Print verification key hash as u256 and hex
+  # Print verification key hash
   echo "Verification key hash for $NAME:"
-  VK_HASH_OUTPUT=$(cd $REPO_ROOT && cargo run --bin vk_hash -- $REPO_ROOT/fixtures/keys/${NAME}_key_fields.json)
-  echo "$VK_HASH_OUTPUT" | sed 's/^/  /'
+  VK_HASH_HEX=$(xxd -p -c 64 $REPO_ROOT/fixtures/keys/${NAME}_vk_hash)
+  echo "  hex: 0x$VK_HASH_HEX"
+
+  # Convert hash to decimal for Noir constants
+  VK_HASH_DECIMAL=$(python3 -c "print(int('$VK_HASH_HEX', 16))")
+  echo "  u256: $VK_HASH_DECIMAL"
   echo ""
 
   # Update agg_utxo/src/main.nr with the UTXO verification key hash
   if [ "$NAME" == "utxo" ]; then
-    UTXO_VK_HASH=$(echo "$VK_HASH_OUTPUT" | grep "u256:" | cut -d' ' -f2)
-    echo "Updating agg_utxo/src/main.nr with UTXO verification key hash: $UTXO_VK_HASH"
-    sed -i.bak "s/global UTXO_VERIFICATION_KEY_HASH: Field = [0-9]*;/global UTXO_VERIFICATION_KEY_HASH: Field = $UTXO_VK_HASH;/" $REPO_ROOT/noir/agg_utxo/src/main.nr
+    echo "Updating agg_utxo/src/main.nr with UTXO verification key hash: $VK_HASH_DECIMAL"
+    sed -i.bak "s/global UTXO_VERIFICATION_KEY_HASH: Field = [0-9]*;/global UTXO_VERIFICATION_KEY_HASH: Field = $VK_HASH_DECIMAL;/" $REPO_ROOT/noir/agg_utxo/src/main.nr
     rm $REPO_ROOT/noir/agg_utxo/src/main.nr.bak
+
+    # Recompile agg_utxo after hash update
+    echo "Recompiling agg_utxo with updated VK hash..."
+    (cd $REPO_ROOT/noir && nargo compile --package agg_utxo)
+    cp $REPO_ROOT/noir/target/agg_utxo.json $REPO_ROOT/fixtures/programs/
   fi
 
   # Update agg_agg/src/main.nr with the agg_utxo verification key hash
   if [ "$NAME" == "agg_utxo" ]; then
-    AGG_UTXO_VK_HASH=$(echo "$VK_HASH_OUTPUT" | grep "u256:" | cut -d' ' -f2)
-    echo "Updating agg_agg/src/main.nr with agg_utxo verification key hash: $AGG_UTXO_VK_HASH"
-    sed -i.bak "s/global AGG_UTXO_VERIFICATION_KEY_HASH: Field = [0-9]*;/global AGG_UTXO_VERIFICATION_KEY_HASH: Field = $AGG_UTXO_VK_HASH;/" $REPO_ROOT/noir/agg_agg/src/main.nr
+    echo "Updating agg_agg/src/main.nr with agg_utxo verification key hash: $VK_HASH_DECIMAL"
+    sed -i.bak "s/global AGG_UTXO_VERIFICATION_KEY_HASH: Field = [0-9]*;/global AGG_UTXO_VERIFICATION_KEY_HASH: Field = $VK_HASH_DECIMAL;/" $REPO_ROOT/noir/agg_agg/src/main.nr
     rm $REPO_ROOT/noir/agg_agg/src/main.nr.bak
+
+    # Recompile agg_agg after hash update
+    echo "Recompiling agg_agg with updated VK hash..."
+    (cd $REPO_ROOT/noir && nargo compile --package agg_agg)
+    cp $REPO_ROOT/noir/target/agg_agg.json $REPO_ROOT/fixtures/programs/
   fi
 
-  $BACKEND write_solidity_verifier --scheme ultra_honk -k $REPO_ROOT/fixtures/keys/${NAME}_key -o $REPO_ROOT/citrea/noir/${NAME}.sol
+  # Generate Solidity verifier
+  sol_target_args=()
+  if [[ "$NAME" == "agg_agg" ]]; then
+    sol_target_args=("--verifier_target" "evm")
+  fi
+  $BACKEND write_solidity_verifier ${sol_target_args[@]+"${sol_target_args[@]}"} -k $REPO_ROOT/fixtures/keys/${NAME}_key -o $REPO_ROOT/citrea/noir/${NAME}.sol
   sed -i.bak 's/external pure/internal pure/g' $REPO_ROOT/citrea/noir/${NAME}.sol
   rm $REPO_ROOT/citrea/noir/${NAME}.sol.bak
   if [[ "$(uname)" == "Darwin" ]]; then
@@ -97,4 +114,4 @@ for NAME in "${PROGRAMS[@]}"; do
   $SOLC --combined-json bin --revert-strings strip --optimize --optimize-runs 1 $REPO_ROOT/citrea/noir/$NAME.sol | jq -r ".contracts[\"$REPO_ROOT/citrea/noir/$NAME.sol:HonkVerifier\"].bin" > $REPO_ROOT/citrea/contracts/noir/${NAME}_HonkVerifier.bin
 done
 
-echo "Successfully copied compiled programs to fixtures/keys/programs"
+echo "Successfully generated fixtures for all programs"
