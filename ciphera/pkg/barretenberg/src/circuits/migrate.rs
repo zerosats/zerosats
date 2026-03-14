@@ -104,7 +104,7 @@ impl Prove for Migrate {
 
 impl Verify for MigrateProof {
     fn verify(&self) -> Result<()> {
-        verify::<DefaultBackend>(KEY, &self.to_bytes(), VerifierTarget::Default)
+        verify::<DefaultBackend>(KEY, &self.to_bytes(), VerifierTarget::Default, 2 * 32)
     }
 }
 

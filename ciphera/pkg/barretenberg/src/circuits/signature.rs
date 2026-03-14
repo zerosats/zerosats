@@ -74,7 +74,7 @@ impl Prove for Signature {
 
 impl Verify for SignatureProof {
     fn verify(&self) -> Result<()> {
-        verify::<DefaultBackend>(KEY, &self.to_bytes(), VerifierTarget::Default)
+        verify::<DefaultBackend>(KEY, &self.to_bytes(), VerifierTarget::Default, SIGNATURE_PUBLIC_INPUTS_COUNT * 32)
     }
 }
 

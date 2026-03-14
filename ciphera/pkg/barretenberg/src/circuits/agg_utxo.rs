@@ -68,10 +68,10 @@ impl Prove for AggUtxo {
             "Public inputs must be {AGG_UTXO_PUBLIC_INPUTS_COUNT} elements"
         );
 
-        assert_eq!(
-            raw_proof.len(),
-            508 * 32,
-            "Proof must be 508 elements of 32 bytes"
+        assert!(
+            raw_proof.len() % 32 == 0,
+            "Proof must be a multiple of 32 bytes, got {}",
+            raw_proof.len()
         );
 
         Ok(AggUtxoProof {
@@ -104,7 +104,7 @@ impl Prove for AggUtxo {
 
 impl Verify for AggUtxoProof {
     fn verify(&self) -> Result<()> {
-        verify::<DefaultBackend>(KEY, &self.to_bytes(), VerifierTarget::Default)
+        verify::<DefaultBackend>(KEY, &self.to_bytes(), VerifierTarget::Default, AGG_UTXO_PUBLIC_INPUTS_COUNT * 32)
     }
 }
 

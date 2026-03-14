@@ -76,7 +76,7 @@ impl Prove for Points {
 
 impl Verify for PointsProof {
     fn verify(&self) -> Result<()> {
-        verify::<DefaultBackend>(KEY, &self.to_bytes(), VerifierTarget::Default)
+        verify::<DefaultBackend>(KEY, &self.to_bytes(), VerifierTarget::Default, POINTS_PUBLIC_INPUTS_COUNT * 32)
     }
 }
 

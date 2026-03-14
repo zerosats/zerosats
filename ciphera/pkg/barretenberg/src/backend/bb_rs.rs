@@ -67,7 +67,7 @@ impl Backend for BindingBackend {
         Ok(proof)
     }
 
-    fn verify(proof: &[u8], key: &[u8], target: VerifierTarget) -> Result<()> {
+    fn verify(proof: &[u8], key: &[u8], target: VerifierTarget, _public_inputs_len: usize) -> Result<()> {
         let _guard = BB_MUTEX.lock().unwrap();
 
         Self::load_srs();

@@ -90,7 +90,7 @@ impl Prove for Utxo {
 impl Verify for UtxoProof {
     fn verify(&self) -> Result<()> {
         let bytes = self.to_bytes();
-        verify::<DefaultBackend>(KEY, &bytes, VerifierTarget::Default)
+        verify::<DefaultBackend>(KEY, &bytes, VerifierTarget::Default, UTXO_PUBLIC_INPUTS_COUNT * 32)
     }
 }
 

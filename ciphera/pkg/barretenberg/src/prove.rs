@@ -12,7 +12,7 @@ pub fn prove<B: Backend>(
 ) -> Result<Vec<u8>> {
     let results = execute_program_and_decode(compiled_program, inputs_map, false)?;
 
-    let witness = bincode::serialize(&results.witness_stack)?;
+    let witness = results.witness_stack.serialize()?;
 
     B::prove(program, bytecode, key, &witness, target)
 }

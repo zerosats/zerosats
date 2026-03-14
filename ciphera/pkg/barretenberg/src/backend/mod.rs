@@ -24,7 +24,8 @@ pub trait Backend {
         witness: &[u8],
         target: VerifierTarget,
     ) -> Result<Vec<u8>>;
-    fn verify(proof: &[u8], key: &[u8], target: VerifierTarget) -> Result<()>;
+    /// Verify a proof. `proof` is `public_inputs || raw_proof`, split at `public_inputs_len` bytes.
+    fn verify(proof: &[u8], key: &[u8], target: VerifierTarget, public_inputs_len: usize) -> Result<()>;
 }
 
 #[cfg(feature = "bb_rs")]

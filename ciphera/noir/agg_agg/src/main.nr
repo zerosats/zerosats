@@ -2,10 +2,10 @@ use std;
 use poseidon::poseidon2;
 
 global AGG_UTXO_VERIFICATION_KEY_HASH: Field =
-    7730520954515141551519747052123678136910236101028675029585573838531487403291;
+    4606711581630016429601637976986938474491913793935403799245973830343626168528;
 
 struct UtxoAggProof {
-    proof: [Field; 457],
+    proof: [Field; 508],
     old_root: Field,
     new_root: Field,
     commit_hash: Field,
@@ -67,7 +67,7 @@ fn main(
                 first_public_inputs
             },
             verification_key_hash,
-            0, // PROOF_TYPE_HONK: UltraHonk recursive verification (non-ZK)
+            6, // PROOF_TYPE_HONK_ZK: UltraHonk ZK recursive verification
         );
 
         if proof.old_root != 0 {

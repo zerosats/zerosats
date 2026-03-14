@@ -67,10 +67,10 @@ impl Prove for AggAgg {
             AGG_AGG_PUBLIC_INPUTS_COUNT,
             "Public inputs must be {AGG_AGG_PUBLIC_INPUTS_COUNT} elements"
         );
-        assert_eq!(
-            raw_proof.len(),
-            508 * 32,
-            "Proof must be 508 elements of 32 bytes"
+        assert!(
+            raw_proof.len() % 32 == 0,
+            "Proof must be a multiple of 32 bytes, got {}",
+            raw_proof.len()
         );
 
         let p = AggAggProof {
@@ -89,7 +89,7 @@ impl Prove for AggAgg {
 
 impl Verify for AggAggProof {
     fn verify(&self) -> Result<()> {
-        verify::<DefaultBackend>(KEY, &self.to_bytes(), VerifierTarget::Evm)
+        verify::<DefaultBackend>(KEY, &self.to_bytes(), VerifierTarget::Evm, AGG_AGG_PUBLIC_INPUTS_COUNT * 32)
     }
 }
 

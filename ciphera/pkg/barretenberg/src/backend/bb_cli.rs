@@ -71,26 +71,18 @@ impl Backend for CliBackend {
     fn prove(
         program: &[u8],
         _bytecode: &[u8],
-        key: &[u8],
+        _key: &[u8],
         witness: &[u8],
         target: VerifierTarget,
     ) -> Result<Vec<u8>> {
-        let mut witness_gz = GzEncoder::new(witness, Compression::none());
-        let mut witness_gz_buf = Vec::with_capacity(witness.len() + 0xFF);
-        witness_gz.read_to_end(&mut witness_gz_buf)?;
-        let witness_gz = witness_gz_buf;
-
         let mut program_file = NamedTempFile::with_suffix(".json")?;
         program_file.write_all(program)?;
         program_file.flush()?;
 
+        // witness is already gzipped by WitnessStack::serialize()
         let mut witness_file = NamedTempFile::new()?;
-        witness_file.write_all(&witness_gz)?;
+        witness_file.write_all(witness)?;
         witness_file.flush()?;
-
-        let mut key_file = NamedTempFile::new()?;
-        key_file.write_all(key)?;
-        key_file.flush()?;
 
         let output_dir = TempDir::new()?;
 
@@ -98,12 +90,11 @@ impl Backend for CliBackend {
         let mut cmd = Command::new(&bb_path);
         cmd.arg("prove")
             .arg("-v")
+            .arg("--write_vk")
             .arg("-b")
             .arg(program_file.path())
             .arg("-w")
             .arg(witness_file.path())
-            .arg("-k")
-            .arg(key_file.path())
             .arg("-o")
             .arg(output_dir.path());
 
@@ -124,28 +115,33 @@ impl Backend for CliBackend {
         }
 
         let proof_path = output_dir.path().join("proof");
-        let mut proof = std::fs::read(&proof_path)?;
+        let raw_proof = std::fs::read(&proof_path)?;
 
         let public_inputs_path = output_dir.path().join("public_inputs");
         let public_inputs = std::fs::read(&public_inputs_path)?;
 
-        proof.splice(0..0, public_inputs);
+        // Concatenate: public_inputs || proof (callers split by known PI count)
+        let mut result = Vec::with_capacity(public_inputs.len() + raw_proof.len());
+        result.extend_from_slice(&public_inputs);
+        result.extend_from_slice(&raw_proof);
 
-        Ok(proof)
+        Ok(result)
     }
 
-    fn verify(proof: &[u8], key: &[u8], target: VerifierTarget) -> Result<()> {
+    fn verify(proof: &[u8], key: &[u8], target: VerifierTarget, public_inputs_len: usize) -> Result<()> {
         let mut key_file = NamedTempFile::new()?;
         key_file.write_all(key)?;
         key_file.flush()?;
 
-        let public_inputs_len = proof.len() - 508 * 32;
+        let public_inputs_data = &proof[..public_inputs_len];
+        let proof_data = &proof[public_inputs_len..];
+
         let mut proof_file = NamedTempFile::new()?;
-        proof_file.write_all(&proof[public_inputs_len..])?;
+        proof_file.write_all(proof_data)?;
         proof_file.flush()?;
 
         let mut public_inputs_file = NamedTempFile::new()?;
-        public_inputs_file.write_all(&proof[..public_inputs_len])?;
+        public_inputs_file.write_all(public_inputs_data)?;
         public_inputs_file.flush()?;
 
         let bb_path = get_bb_path()?;
