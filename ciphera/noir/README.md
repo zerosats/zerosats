@@ -109,7 +109,7 @@ To generate as fields use the `--output_format fields` flag.
 Generate the verification key (recursive):
 
 ```bash
-bb  write_vk --scheme ultra_honk --honk_recursion 1 --init_kzg_accumulator -b target/${PACKAGE_NAME}.json -o target
+bb write_vk --scheme ultra_honk --verifier_target noir-recursive -b target/${PACKAGE_NAME}.json -o target
 ```
 
 Verify the proof:
