@@ -39,11 +39,6 @@ impl Prove for Utxo {
     fn prove(&self) -> Self::Result<Self::Proof> {
         let inputs = InputMap::from(UtxoInput::from(self));
 
-        // println!(
-        //     "UTXO_VERIFICATION_KEY_HASH: {}",
-        //     element::Element::from_base(UTXO_VERIFICATION_KEY_HASH.0).to_u256()
-        // );
-
         // NoirRecursive: embeds recursion artifacts so agg_utxo can verify this proof in-circuit.
         let proof_bytes = prove::<DefaultBackend>(
             &PROGRAM_COMPILED,
