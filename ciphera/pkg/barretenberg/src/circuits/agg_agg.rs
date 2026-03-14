@@ -35,7 +35,9 @@ lazy_static! {
 // agg_agg public inputs layout:
 // old_root (1) + new_root (1) + commit_hash (1) + messages (2 proofs * 15 messages = 30) = 33
 const AGG_AGG_PUBLIC_INPUTS_COUNT: usize = 1 + 1 + 1 + 30;
-const AGG_AGG_PROOF_SIZE: usize = 508;
+// EVM/keccak ZK proofs have a different size than poseidon2 proofs (508).
+// Formula: see calculateProofSize() in agg_agg.sol with LOG_N=21.
+const AGG_AGG_PROOF_SIZE: usize = 342;
 
 impl Prove for AggAgg {
     type Proof = AggAggProof;

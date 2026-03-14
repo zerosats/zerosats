@@ -57,13 +57,15 @@ impl Backend for BindingBackend {
                     bytecode, witness, key, false, None,
                 )
             },
-            VerifierTarget::Default => unsafe {
+            // NoirRecursive uses the same proving function as Default in bb_rs.
+            // In BB 4.0, the poseidon2 ZK proof format is identical regardless of
+            // whether the proof will be verified standalone or recursively in Noir.
+            // The --verifier_target noir-recursive CLI flag affects VK structure,
+            // not proof bytes.
+            VerifierTarget::Default | VerifierTarget::NoirRecursive => unsafe {
                 bb_rs::barretenberg_api::acir::acir_prove_ultra_honk(
                     bytecode, witness, key, false, None,
                 )
-            },
-            VerifierTarget::NoirRecursive => {
-                return Err("BindingBackend does not support NoirRecursive proving; bb_rs v2.0.3 has no recursive-specific API. Use CliBackend instead.".into());
             }
         };
 
@@ -83,11 +85,10 @@ impl Backend for BindingBackend {
             VerifierTarget::Evm => unsafe {
                 bb_rs::barretenberg_api::acir::acir_verify_ultra_keccak_zk_honk(proof, key)
             },
-            VerifierTarget::Default => unsafe {
+            // Same rationale as prove: poseidon2 verification is identical for
+            // Default and NoirRecursive in bb_rs.
+            VerifierTarget::Default | VerifierTarget::NoirRecursive => unsafe {
                 bb_rs::barretenberg_api::acir::acir_verify_ultra_honk(proof, key)
-            },
-            VerifierTarget::NoirRecursive => {
-                return Err("BindingBackend does not support NoirRecursive verification; use CliBackend instead.".into());
             }
         };
 
