@@ -3,10 +3,10 @@ use common::is_one_of;
 use poseidon::poseidon2;
 
 global UTXO_VERIFICATION_KEY_HASH: Field =
-    18779959434705083215725546760451184879298382931437993861134690217528836166710;
+    5089188104823109845830624434365575514646536251099851297406710792232382306461;
 
 struct AggUtxoProofInput {
-    proof: [Field; 508],
+    proof: [Field; 457],
     utxo_kind: Field,
     input_merkle_paths: [[Field; 160]; 2],
     output_merkle_paths: [[Field; 160]; 2],
@@ -202,7 +202,7 @@ fn test_invalid_verification_key_hash() {
 
     let proofs = [
         AggUtxoProofInput {
-            proof: [0; 508],
+            proof: [0; 457],
             utxo_kind: 1,
             input_merkle_paths: [[0; 160]; 2],
             output_merkle_paths: [[0; 160]; 2],
@@ -210,7 +210,7 @@ fn test_invalid_verification_key_hash() {
             output_commitments: [0; 2],
         },
         AggUtxoProofInput {
-            proof: [0; 508],
+            proof: [0; 457],
             utxo_kind: 1,
             input_merkle_paths: [[0; 160]; 2],
             output_merkle_paths: [[0; 160]; 2],
@@ -218,7 +218,7 @@ fn test_invalid_verification_key_hash() {
             output_commitments: [0; 2],
         },
         AggUtxoProofInput {
-            proof: [0; 508],
+            proof: [0; 457],
             utxo_kind: 1,
             input_merkle_paths: [[0; 160]; 2],
             output_merkle_paths: [[0; 160]; 2],

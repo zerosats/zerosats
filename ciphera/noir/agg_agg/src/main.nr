@@ -2,10 +2,10 @@ use std;
 use poseidon::poseidon2;
 
 global AGG_UTXO_VERIFICATION_KEY_HASH: Field =
-    17312275849526493518721480386830253666706187309474064656261199404280431862138;
+    7730520954515141551519747052123678136910236101028675029585573838531487403291;
 
 struct UtxoAggProof {
-    proof: [Field; 508],
+    proof: [Field; 457],
     old_root: Field,
     new_root: Field,
     commit_hash: Field,

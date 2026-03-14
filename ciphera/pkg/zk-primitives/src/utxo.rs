@@ -14,7 +14,7 @@ use ts_rs::TS;
 /// Number of public input fields for utxo proof
 pub const UTXO_PUBLIC_INPUTS_COUNT: usize = 9;
 /// Number of fields in the proof
-pub const UTXO_PROOF_SIZE: usize = 508;
+pub const UTXO_PROOF_SIZE: usize = 457;
 
 /// Utxo is the data required to prove a utxo transaction
 #[derive(Debug, Clone, Serialize, Deserialize)]

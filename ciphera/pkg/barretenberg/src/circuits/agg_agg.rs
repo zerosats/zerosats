@@ -70,8 +70,8 @@ impl Prove for AggAgg {
         );
         assert_eq!(
             raw_proof.len(),
-            508 * 32,
-            "Proof must be 508 elements of 32 bytes"
+            457 * 32,
+            "Proof must be 457 elements of 32 bytes"
         );
 
         let p = AggAggProof {
@@ -175,7 +175,7 @@ impl From<AggAggInput> for InputMap {
 
 #[derive(Debug, Clone)]
 pub struct UtxoAggProof {
-    pub proof: [Base; 508],
+    pub proof: [Base; 457],
     pub old_root: Base,
     pub new_root: Base,
     pub commit_hash: Base,

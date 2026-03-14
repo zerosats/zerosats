@@ -10,6 +10,7 @@ mod utxo;
 
 use std::io::Read;
 
+use acvm::AcirField;
 pub use agg_utxo::*;
 use base64::Engine;
 use flate2::read::GzDecoder;
