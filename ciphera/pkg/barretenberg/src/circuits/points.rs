@@ -11,7 +11,7 @@ use element::Base;
 use lazy_static::lazy_static;
 use noirc_abi::{InputMap, input_parser::InputValue};
 use noirc_artifacts::program::ProgramArtifact;
-use noirc_driver::CompiledProgram;
+use noirc_artifacts::program::CompiledProgram;
 use std::path::PathBuf;
 use zk_primitives::{
     Points, PointsProof, PointsProofBytes, PointsPublicInput, ToBytes, bytes_to_elements,

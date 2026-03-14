@@ -11,7 +11,7 @@ use element::Base;
 use lazy_static::lazy_static;
 use noirc_abi::{InputMap, input_parser::InputValue};
 use noirc_artifacts::program::ProgramArtifact;
-use noirc_driver::CompiledProgram;
+use noirc_artifacts::program::CompiledProgram;
 use std::path::PathBuf;
 use zk_primitives::{
     Migrate, MigrateProof, MigrateProofBytes, MigratePublicInput, ToBytes, bytes_to_elements,
@@ -31,7 +31,7 @@ lazy_static! {
         VerificationKey(fields)
     };
     pub static ref MIGRATE_VERIFICATION_KEY_HASH: VerificationKeyHash = VerificationKeyHash(
-        bn254_blackbox_solver::poseidon_hash(&MIGRATE_VERIFICATION_KEY.0, false).unwrap()
+        hash::poseidon_hash(&MIGRATE_VERIFICATION_KEY.0).unwrap()
     );
 }
 

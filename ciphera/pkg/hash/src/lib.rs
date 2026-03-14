@@ -1,8 +1,10 @@
 use element::Element;
 
 mod path;
+pub mod poseidon;
 
 pub use path::*;
+pub use poseidon::poseidon_hash;
 
 #[cfg(feature = "test-api")]
 static HASH_COUNTER: core::sync::atomic::AtomicUsize = core::sync::atomic::AtomicUsize::new(0);
@@ -73,7 +75,7 @@ pub fn hash_merge<const N: usize>(elements: [Element; N]) -> Element {
     }
 
     let inputs = elements.iter().map(|e| e.to_base()).collect::<Vec<_>>();
-    let hash = bn254_blackbox_solver::poseidon_hash(&inputs, false).unwrap();
+    let hash = poseidon::poseidon_hash(&inputs).unwrap();
 
     Element::from_base(hash)
 }

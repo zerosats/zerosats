@@ -1,6 +1,6 @@
 use barretenberg::verify::VerificationKey;
-use bn254_blackbox_solver::poseidon_hash;
 use element::{Base, Element};
+use hash::poseidon_hash;
 use std::env;
 use std::fs;
 use std::path::Path;
@@ -37,7 +37,7 @@ fn main() {
 
     let verification_key = VerificationKey(vk_fields);
 
-    let hash = match poseidon_hash(&verification_key.0, false) {
+    let hash = match poseidon_hash(&verification_key.0) {
         Ok(hash) => hash,
         Err(e) => {
             eprintln!("Error computing Poseidon hash: {e}");

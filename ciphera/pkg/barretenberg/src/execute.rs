@@ -6,7 +6,7 @@ use nargo::foreign_calls::DefaultForeignCallBuilder;
 use noirc_abi::InputMap;
 use noirc_abi::input_parser::InputValue;
 use noirc_artifacts::debug::DebugArtifact;
-use noirc_driver::CompiledProgram;
+use noirc_artifacts::program::CompiledProgram;
 
 #[derive(Debug)]
 pub struct ExecutionResults {
@@ -45,7 +45,7 @@ pub fn execute_program(
     let solved_witness_stack_err = nargo::ops::execute_program(
         &compiled_program.program,
         initial_witness,
-        &Bn254BlackBoxSolver(pedantic_solving),
+        &Bn254BlackBoxSolver,
         &mut DefaultForeignCallBuilder {
             output: std::io::stdout(),
             enable_mocks: false,

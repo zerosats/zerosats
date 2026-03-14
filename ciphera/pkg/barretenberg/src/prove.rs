@@ -1,6 +1,6 @@
 use crate::{Result, backend::Backend, execute::execute_program_and_decode};
 use noirc_abi::InputMap;
-use noirc_driver::CompiledProgram;
+use noirc_artifacts::program::CompiledProgram;
 
 pub fn prove<B: Backend>(
     compiled_program: &CompiledProgram,
