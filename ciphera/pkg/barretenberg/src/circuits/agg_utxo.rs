@@ -69,9 +69,11 @@ impl Prove for AggUtxo {
             "Public inputs must be {AGG_UTXO_PUBLIC_INPUTS_COUNT} elements"
         );
 
-        assert!(
-            raw_proof.len() % 32 == 0,
-            "Proof must be a multiple of 32 bytes, got {}",
+        const AGG_UTXO_PROOF_SIZE: usize = 508;
+        assert_eq!(
+            raw_proof.len(),
+            AGG_UTXO_PROOF_SIZE * 32,
+            "Proof must be {AGG_UTXO_PROOF_SIZE} elements of 32 bytes, got {} bytes",
             raw_proof.len()
         );
 

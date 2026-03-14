@@ -35,12 +35,8 @@ lazy_static! {
     );
 }
 
-// AggAgg public input fields:
-// - old_root: Base (1 field)
-// - new_root: Base (1 field)
-// - commit_hash: Base (1 field)
-// - messages: Vec<Base> (30 fields => 2 proofs * 15 messages each)
-// Total: 33 fields
+// agg_agg public inputs layout:
+// old_root (1) + new_root (1) + commit_hash (1) + messages (2 proofs * 15 messages = 30) = 33
 const AGG_AGG_PUBLIC_INPUTS_COUNT: usize = 1 + 1 + 1 + 30;
 
 impl Prove for AggAgg {
@@ -67,9 +63,11 @@ impl Prove for AggAgg {
             AGG_AGG_PUBLIC_INPUTS_COUNT,
             "Public inputs must be {AGG_AGG_PUBLIC_INPUTS_COUNT} elements"
         );
-        assert!(
-            raw_proof.len() % 32 == 0,
-            "Proof must be a multiple of 32 bytes, got {}",
+        const AGG_AGG_PROOF_SIZE: usize = 508;
+        assert_eq!(
+            raw_proof.len(),
+            AGG_AGG_PROOF_SIZE * 32,
+            "Proof must be {AGG_AGG_PROOF_SIZE} elements of 32 bytes, got {} bytes",
             raw_proof.len()
         );
 
@@ -79,7 +77,7 @@ impl Prove for AggAgg {
                 old_root: public_inputs[0],
                 new_root: public_inputs[1],
                 commit_hash: public_inputs[2],
-                messages: public_inputs[3..3 + 6 * 5].to_vec(),
+                messages: public_inputs[3..3 + 2 * 15].to_vec(),
             },
             kzg: vec![],
         };

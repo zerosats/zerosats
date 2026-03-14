@@ -18,7 +18,7 @@ fn main(
     old_root: pub Field,
     new_root: pub Field,
     commit_hash: pub Field,
-    // 6 proofs, 6 per proof
+    // 2 agg_utxo proofs, 15 messages per proof
     messages: pub [Field; 30],
 ) {
     // Hardcode verification_key_hash for agg_utxo proof
