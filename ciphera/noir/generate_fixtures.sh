@@ -119,16 +119,16 @@ AGG_AGG_SOL_VK_HASH=$(sed -n 's/.*VK_HASH = \(0x[0-9a-fA-F]*\).*/\1/p' $REPO_ROO
 if [ -n "$AGG_AGG_SOL_VK_HASH" ]; then
     echo "Propagating agg_agg VK hash ($AGG_AGG_SOL_VK_HASH) to deployment scripts..."
 
-    # Update deploy.ts
-    sed -i.bak "s|\"0x[0-9a-fA-F]\{64\}\";|\"$AGG_AGG_SOL_VK_HASH\";|" $REPO_ROOT/citrea/scripts/deploy.ts
+    # Update deploy.ts (target only the AGG_AGG_VERIFICATION_KEY_HASH line)
+    sed -i.bak "/AGG_AGG_VERIFICATION_KEY_HASH/{n;s|\"0x[0-9a-fA-F]\{64\}\"|\"$AGG_AGG_SOL_VK_HASH\"|;}" $REPO_ROOT/citrea/scripts/deploy.ts
     rm -f $REPO_ROOT/citrea/scripts/deploy.ts.bak
 
-    # Update deploy-devnet.ts
-    sed -i.bak "s|\"0x[0-9a-fA-F]\{64\}\";|\"$AGG_AGG_SOL_VK_HASH\";|" $REPO_ROOT/citrea/scripts/deploy-devnet.ts
+    # Update deploy-devnet.ts (target only the AGG_AGG_VERIFICATION_KEY_HASH line)
+    sed -i.bak "/AGG_AGG_VERIFICATION_KEY_HASH/{n;s|\"0x[0-9a-fA-F]\{64\}\"|\"$AGG_AGG_SOL_VK_HASH\"|;}" $REPO_ROOT/citrea/scripts/deploy-devnet.ts
     rm -f $REPO_ROOT/citrea/scripts/deploy-devnet.ts.bak
 
-    # Update rollup.rs
-    sed -i.bak "s|\"0x[0-9a-fA-F]\{64\}\"|\"$AGG_AGG_SOL_VK_HASH\"|" $REPO_ROOT/pkg/contracts/src/rollup.rs
+    # Update rollup.rs (target only the verification key parse line)
+    sed -i.bak "/verification key is parsable/{s|\"0x[0-9a-fA-F]\{64\}\"|\"$AGG_AGG_SOL_VK_HASH\"|;}" $REPO_ROOT/pkg/contracts/src/rollup.rs
     rm -f $REPO_ROOT/pkg/contracts/src/rollup.rs.bak
 
     echo "VK hash propagated successfully."

@@ -32,6 +32,7 @@ lazy_static! {
 }
 
 const AGG_UTXO_PUBLIC_INPUTS_COUNT: usize = 18;
+const AGG_UTXO_PROOF_SIZE: usize = 508;
 
 impl Prove for AggUtxo {
     type Proof = AggUtxoProof;
@@ -39,11 +40,6 @@ impl Prove for AggUtxo {
 
     fn prove(&self) -> Self::Result<Self::Proof> {
         let inputs = InputMap::from(AggUtxoInput::from(self));
-
-        // println!(
-        //     "AGG_UTXO_VERIFICATION_KEY_HASH: {}",
-        //     Element::from_base(AGG_UTXO_VERIFICATION_KEY_HASH.0).to_hex()
-        // );
 
         // NoirRecursive: embeds recursion artifacts so agg_agg can verify this proof in-circuit.
         let proof_bytes = prove::<DefaultBackend>(
@@ -66,7 +62,6 @@ impl Prove for AggUtxo {
             "Public inputs must be {AGG_UTXO_PUBLIC_INPUTS_COUNT} elements"
         );
 
-        const AGG_UTXO_PROOF_SIZE: usize = 508;
         assert_eq!(
             raw_proof.len(),
             AGG_UTXO_PROOF_SIZE * 32,

@@ -101,10 +101,10 @@ bb prove --scheme ultra_honk -b target/${PACKAGE_NAME}.json -w target/${PACKAGE_
 Generate the verification key (non-recursive):
 
 ```bash
-bb  write_vk --scheme ultra_honk -b target/${PACKAGE_NAME}.json -o target
+bb write_vk --scheme ultra_honk -b target/${PACKAGE_NAME}.json -o target
 ```
 
-To generate as fields use the `--output_format fields` flag.
+To generate as JSON use the `--output_format json` flag.
 
 Generate the verification key (recursive):
 

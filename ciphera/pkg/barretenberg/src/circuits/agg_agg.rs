@@ -35,6 +35,7 @@ lazy_static! {
 // agg_agg public inputs layout:
 // old_root (1) + new_root (1) + commit_hash (1) + messages (2 proofs * 15 messages = 30) = 33
 const AGG_AGG_PUBLIC_INPUTS_COUNT: usize = 1 + 1 + 1 + 30;
+const AGG_AGG_PROOF_SIZE: usize = 508;
 
 impl Prove for AggAgg {
     type Proof = AggAggProof;
@@ -60,7 +61,6 @@ impl Prove for AggAgg {
             AGG_AGG_PUBLIC_INPUTS_COUNT,
             "Public inputs must be {AGG_AGG_PUBLIC_INPUTS_COUNT} elements"
         );
-        const AGG_AGG_PROOF_SIZE: usize = 508;
         assert_eq!(
             raw_proof.len(),
             AGG_AGG_PROOF_SIZE * 32,
