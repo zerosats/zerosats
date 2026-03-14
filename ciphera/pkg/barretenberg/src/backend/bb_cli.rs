@@ -8,7 +8,7 @@ use std::{
 use dirs::home_dir;
 use flate2::{Compression, read::GzEncoder};
 use tempfile::{NamedTempFile, TempDir};
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 use super::{Backend, VerifierTarget};
 use crate::Result;
@@ -114,6 +114,11 @@ impl Backend for CliBackend {
             return Err(stderr.into());
         }
 
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        if !stderr.is_empty() {
+            warn!("bb prove stderr: {}", stderr);
+        }
+
         let proof_path = output_dir.path().join("proof");
         let raw_proof = std::fs::read(&proof_path)?;
 
@@ -132,6 +137,13 @@ impl Backend for CliBackend {
         let mut key_file = NamedTempFile::new()?;
         key_file.write_all(key)?;
         key_file.flush()?;
+
+        if public_inputs_len > proof.len() {
+            return Err(format!(
+                "public_inputs_len ({}) exceeds proof length ({})",
+                public_inputs_len, proof.len()
+            ).into());
+        }
 
         let public_inputs_data = &proof[..public_inputs_len];
         let proof_data = &proof[public_inputs_len..];
