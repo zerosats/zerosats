@@ -20,9 +20,9 @@ import { readFile } from "fs/promises";
 import { join } from "path";
 import IERC20Artifact from "../openzeppelin-contracts/token/ERC20/IERC20.json";
 
-// Auto-updated by generate_fixturecs.sh - do not modify manually
+// Auto-updated by generate_fixtures.sh - do not modify manually
 const AGG_AGG_VERIFICATION_KEY_HASH =
-  "0x1594fce0e59bc3785292f9ab4f5a1e45f5795b4a616aff5cdc4d32a223f69f0c";
+  "0x16888919915c54c1d513365165aa81070bdca6f305fe527c954bd58e94710540";
 
 async function main() {
   console.log("Initialization...");

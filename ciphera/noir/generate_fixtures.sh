@@ -114,4 +114,27 @@ for NAME in "${PROGRAMS[@]}"; do
   $SOLC --combined-json bin --revert-strings strip --optimize --optimize-runs 1 $REPO_ROOT/citrea/noir/$NAME.sol | jq -r ".contracts[\"$REPO_ROOT/citrea/noir/$NAME.sol:HonkVerifier\"].bin" > $REPO_ROOT/citrea/contracts/noir/${NAME}_HonkVerifier.bin
 done
 
+# Propagate agg_agg VK hash to deployment scripts
+# Extract VK_HASH from the generated Solidity verifier (macOS + GNU compatible)
+AGG_AGG_SOL_VK_HASH=$(sed -n 's/.*VK_HASH = \(0x[0-9a-fA-F]*\).*/\1/p' $REPO_ROOT/citrea/noir/agg_agg.sol)
+if [ -n "$AGG_AGG_SOL_VK_HASH" ]; then
+    echo "Propagating agg_agg VK hash ($AGG_AGG_SOL_VK_HASH) to deployment scripts..."
+
+    # Update deploy.ts
+    sed -i.bak "s|\"0x[0-9a-fA-F]\{64\}\";|\"$AGG_AGG_SOL_VK_HASH\";|" $REPO_ROOT/citrea/scripts/deploy.ts
+    rm -f $REPO_ROOT/citrea/scripts/deploy.ts.bak
+
+    # Update deploy-devnet.ts
+    sed -i.bak "s|\"0x[0-9a-fA-F]\{64\}\";|\"$AGG_AGG_SOL_VK_HASH\";|" $REPO_ROOT/citrea/scripts/deploy-devnet.ts
+    rm -f $REPO_ROOT/citrea/scripts/deploy-devnet.ts.bak
+
+    # Update rollup.rs
+    sed -i.bak "s|\"0x[0-9a-fA-F]\{64\}\"|\"$AGG_AGG_SOL_VK_HASH\"|" $REPO_ROOT/pkg/contracts/src/rollup.rs
+    rm -f $REPO_ROOT/pkg/contracts/src/rollup.rs.bak
+
+    echo "VK hash propagated successfully."
+else
+    echo "WARNING: Could not extract VK_HASH from agg_agg.sol"
+fi
+
 echo "Successfully generated fixtures for all programs"

@@ -14,9 +14,9 @@ import { deployBin, citreaDevChain } from "./shared";
 import { readFile } from "fs/promises";
 import { join } from "path";
 
-// Auto-updated by generate_fixturecs.sh - do not modify manually
+// Auto-updated by generate_fixtures.sh - do not modify manually
 const AGG_AGG_VERIFICATION_KEY_HASH =
-  "0x1594fce0e59bc3785292f9ab4f5a1e45f5795b4a616aff5cdc4d32a223f69f0c";
+  "0x16888919915c54c1d513365165aa81070bdca6f305fe527c954bd58e94710540";
 
 const usdcAddress = "0x5fbdb2315678afecb367f032d93f642f64180aa3";
 const aggregateVerifierAddr = "0xcf7ed3acca5a467e9e704c703e8d87f634fb0fc9";
