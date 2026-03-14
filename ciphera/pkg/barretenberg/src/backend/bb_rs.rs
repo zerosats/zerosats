@@ -76,6 +76,7 @@ impl Backend for BindingBackend {
         Ok(proof)
     }
 
+    // bb_rs FFI handles public_inputs split internally; CliBackend splits explicitly.
     fn verify(proof: &[u8], key: &[u8], target: VerifierTarget, _public_inputs_len: usize) -> Result<()> {
         let _guard = BB_MUTEX.lock().unwrap();
 

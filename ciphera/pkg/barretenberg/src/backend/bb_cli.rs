@@ -1,12 +1,11 @@
 use std::{
     env,
-    io::{Read, Write},
+    io::Write,
     path::PathBuf,
     process::Command,
 };
 
 use dirs::home_dir;
-use flate2::{Compression, read::GzEncoder};
 use tempfile::{NamedTempFile, TempDir};
 use tracing::{error, info, warn};
 
@@ -68,6 +67,8 @@ fn get_bb_path() -> Result<PathBuf> {
 }
 
 impl Backend for CliBackend {
+    // BB 4.0 CLI derives the VK internally via --write_vk, so `key` is unused.
+    // The bb_rs BindingBackend still uses it. Trait requires both signatures.
     fn prove(
         program: &[u8],
         _bytecode: &[u8],

@@ -127,8 +127,8 @@ if [ -n "$AGG_AGG_SOL_VK_HASH" ]; then
     sed -i.bak "/AGG_AGG_VERIFICATION_KEY_HASH/{n;s|\"0x[0-9a-fA-F]\{64\}\"|\"$AGG_AGG_SOL_VK_HASH\"|;}" $REPO_ROOT/citrea/scripts/deploy-devnet.ts
     rm -f $REPO_ROOT/citrea/scripts/deploy-devnet.ts.bak
 
-    # Update rollup.rs (only one 64-char hex string exists — the VK hash)
-    sed -i.bak "s|\"0x[0-9a-fA-F]\{64\}\"|\"$AGG_AGG_SOL_VK_HASH\"|" $REPO_ROOT/pkg/contracts/src/rollup.rs
+    # Update rollup.rs (scope to the verifyRollup function — hex is 3 lines after the marker)
+    sed -i.bak "/verifyRollup/{n;n;n;s|\"0x[0-9a-fA-F]\{64\}\"|\"$AGG_AGG_SOL_VK_HASH\"|;}" $REPO_ROOT/pkg/contracts/src/rollup.rs
     rm -f $REPO_ROOT/pkg/contracts/src/rollup.rs.bak
 
     echo "VK hash propagated successfully."

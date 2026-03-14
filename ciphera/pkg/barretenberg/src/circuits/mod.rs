@@ -14,7 +14,6 @@ use acvm::AcirField;
 pub use agg_utxo::*;
 use base64::Engine;
 use flate2::read::GzDecoder;
-// pub use migrate::*;
 pub use utxo::*;
 
 /// Parse a binary VK file (N * 32 bytes) into field elements.
