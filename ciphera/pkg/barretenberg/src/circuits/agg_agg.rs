@@ -2,7 +2,6 @@ use super::{AGG_UTXO_VERIFICATION_KEY, AGG_UTXO_VERIFICATION_KEY_HASH};
 use crate::Result;
 use crate::backend::{DefaultBackend, VerifierTarget};
 use crate::circuits::get_bytecode_from_program;
-use crate::util::write_to_temp_file;
 use crate::verify::{VerificationKey, VerificationKeyHash, verify};
 use crate::{
     prove::prove,
@@ -14,7 +13,6 @@ use noirc_abi::{InputMap, input_parser::InputValue};
 use noirc_artifacts::program::ProgramArtifact;
 use noirc_artifacts::program::CompiledProgram;
 use std::collections::BTreeMap;
-use std::path::PathBuf;
 use zk_primitives::{
     AggAgg, AggAggProof, AggAggProofBytes, AggAggPublicInput, AggUtxoProof, ToBytes,
     bytes_to_elements,
@@ -26,7 +24,6 @@ const KEY: &[u8] = include_bytes!("../../../../fixtures/keys/agg_agg_key");
 lazy_static! {
     static ref PROGRAM_ARTIFACT: ProgramArtifact = serde_json::from_str(PROGRAM).unwrap();
     static ref PROGRAM_COMPILED: CompiledProgram = CompiledProgram::from(PROGRAM_ARTIFACT.clone());
-    static ref PROGRAM_PATH: PathBuf = write_to_temp_file(PROGRAM.as_bytes(), ".json");
     static ref BYTECODE: Vec<u8> = get_bytecode_from_program(PROGRAM);
     pub static ref AGG_AGG_VERIFICATION_KEY: VerificationKey =
         VerificationKey(super::vk_binary_to_fields(KEY));
@@ -214,147 +211,3 @@ impl From<UtxoAggProof> for InputValue {
         InputValue::Struct(struct_)
     }
 }
-
-// #[derive(Debug, Clone)]
-// pub struct Input {
-//     pub verification_key: [Base; 114],
-//     pub proofs: [AggUtxoProof; 2],
-//     pub kinds: [Base; 6],
-//     pub old_root: Base,
-//     pub new_root: Base,
-//     pub key_hash: Base,
-// }
-
-// #[derive(Debug, Clone)]
-// pub struct AggUtxoProof {
-//     pub proof: [Base; 109],
-//     pub old_root: Base,
-//     pub new_root: Base,
-// }
-
-// impl From<Input> for InputMap {
-//     fn from(value: Input) -> Self {
-//         let mut map = InputMap::new();
-
-//         map.insert(
-//             "verification_key".to_owned(),
-//             InputValue::Vec(value.verification_key.map(InputValue::Field).to_vec()),
-//         );
-//         map.insert(
-//             "utxo_agg_proofs".to_owned(),
-//             InputValue::Vec(value.proofs.map(InputValue::from).to_vec()),
-//         );
-//         map.insert(
-//             "kinds".to_owned(),
-//             InputValue::Vec(value.kinds.map(InputValue::Field).to_vec()),
-//         );
-//         map.insert("old_root".to_owned(), InputValue::Field(value.old_root));
-//         map.insert("new_root".to_owned(), InputValue::Field(value.new_root));
-//         map.insert("key_hash".to_owned(), InputValue::Field(value.key_hash));
-
-//         map
-//     }
-// }
-
-// impl From<AggUtxoProof> for InputValue {
-//     fn from(value: AggUtxoProof) -> Self {
-//         let mut struct_ = BTreeMap::new();
-
-//         struct_.insert(
-//             "proof".to_owned(),
-//             InputValue::Vec(value.proof.map(InputValue::Field).to_vec()),
-//         );
-//         struct_.insert("old_root".to_owned(), InputValue::Field(value.old_root));
-//         struct_.insert("new_root".to_owned(), InputValue::Field(value.new_root));
-
-//         InputValue::Struct(struct_)
-//     }
-// }
-
-// #[derive(Default, Debug, Clone)]
-// struct BorshBase(pub Base);
-
-// impl BorshSerialize for BorshBase {
-//     fn serialize<W: std::io::Write>(&self, writer: &mut W) -> std::io::Result<()> {
-//         writer.write_all(&self.0.to_be_bytes())
-//     }
-// }
-
-// impl BorshDeserialize for BorshBase {
-//     fn deserialize_reader<R: std::io::Read>(reader: &mut R) -> std::io::Result<Self> {
-//         let mut bytes = [0u8; 32];
-//         reader.read_exact(&mut bytes)?;
-
-//         Ok(BorshBase(Base::from_be_bytes_reduce(&bytes)))
-//     }
-// }
-
-// impl Deref for BorshBase {
-//     type Target = Base;
-
-//     fn deref(&self) -> &Self::Target {
-//         &self.0
-//     }
-// }
-
-// impl DerefMut for BorshBase {
-//     fn deref_mut(&mut self) -> &mut Self::Target {
-//         &mut self.0
-//     }
-// }
-
-// impl From<Base> for BorshBase {
-//     fn from(value: Base) -> Self {
-//         BorshBase(value)
-//     }
-// }
-
-// #[derive(Default, Debug, Clone, BorshSerialize, BorshDeserialize)]
-// pub struct PublicInput {
-//     pub kinds: [BorshBase; 6],
-//     pub old_root: BorshBase,
-//     pub new_root: BorshBase,
-// }
-
-// impl Barretenberg {
-//     pub fn agg_agg_prove(&self, input: Input) -> crate::Result<Vec<u8>> {
-//         let results = crate::execute::execute_program_and_decode(
-//             self.program.clone().into(),
-//             &InputMap::from(input),
-//             false,
-//         )
-//         .unwrap();
-//         let witness_gz = TryInto::<Vec<u8>>::try_into(results.witness_stack).unwrap();
-
-//         let proof = self.prove(&witness_gz, true)?;
-
-//         Ok(proof)
-//     }
-
-//     pub fn agg_agg_verify(&self, proof: &[u8]) -> crate::Result<bool> {
-//         self.verify(KEY, proof)
-//     }
-
-//     pub fn agg_agg_proof_fields(&self, proof: &[u8]) -> crate::Result<PublicInput> {
-//         let fields = self.proof_as_fields(KEY, proof)?;
-
-//         Ok(PublicInput {
-//             kinds: [
-//                 fields[0], fields[1], fields[2], fields[3], fields[4], fields[5],
-//             ]
-//             .map(Into::into),
-//             old_root: fields[6].into(),
-//             new_root: fields[7].into(),
-//         })
-//     }
-// }
-
-// impl From<Input> for PublicInput {
-//     fn from(value: Input) -> Self {
-//         Self {
-//             kinds: value.kinds.map(Into::into),
-//             old_root: value.old_root.into(),
-//             new_root: value.new_root.into(),
-//         }
-//     }
-// }
