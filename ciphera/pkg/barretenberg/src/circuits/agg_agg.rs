@@ -1,6 +1,6 @@
 use super::{AGG_UTXO_VERIFICATION_KEY, AGG_UTXO_VERIFICATION_KEY_HASH};
 use crate::Result;
-use crate::backend::DefaultBackend;
+use crate::backend::{DefaultBackend, VerifierTarget};
 use crate::circuits::get_bytecode_from_program;
 use crate::util::write_to_temp_file;
 use crate::verify::{VerificationKey, VerificationKeyHash, verify};
@@ -57,8 +57,7 @@ impl Prove for AggAgg {
             &BYTECODE,
             KEY,
             &inputs,
-            false,
-            true,
+            VerifierTarget::Evm,
         )?;
         let public_inputs_bytes = proof_bytes[..AGG_AGG_PUBLIC_INPUTS_COUNT * 32].to_vec();
         let public_inputs = bytes_to_elements(&public_inputs_bytes);
@@ -91,7 +90,7 @@ impl Prove for AggAgg {
 
 impl Verify for AggAggProof {
     fn verify(&self) -> Result<()> {
-        verify::<DefaultBackend>(KEY, &self.to_bytes(), true)
+        verify::<DefaultBackend>(KEY, &self.to_bytes(), VerifierTarget::Evm)
     }
 }
 

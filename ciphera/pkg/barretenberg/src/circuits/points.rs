@@ -1,6 +1,6 @@
 use crate::{
     Result,
-    backend::DefaultBackend,
+    backend::{DefaultBackend, VerifierTarget},
     circuits::get_bytecode_from_program,
     prove::prove,
     traits::{Prove, Verify},
@@ -45,8 +45,7 @@ impl Prove for Points {
             &BYTECODE,
             KEY,
             &inputs,
-            false,
-            false,
+            VerifierTarget::Default,
         )?;
 
         // Slice off the public inputs
@@ -77,7 +76,7 @@ impl Prove for Points {
 
 impl Verify for PointsProof {
     fn verify(&self) -> Result<()> {
-        verify::<DefaultBackend>(KEY, &self.to_bytes(), false)
+        verify::<DefaultBackend>(KEY, &self.to_bytes(), VerifierTarget::Default)
     }
 }
 

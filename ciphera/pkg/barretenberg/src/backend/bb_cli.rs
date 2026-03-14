@@ -10,7 +10,7 @@ use flate2::{Compression, read::GzEncoder};
 use tempfile::{NamedTempFile, TempDir};
 use tracing::{error, info};
 
-use super::Backend;
+use super::{Backend, VerifierTarget};
 use crate::Result;
 
 pub struct CliBackend;
@@ -73,8 +73,7 @@ impl Backend for CliBackend {
         _bytecode: &[u8],
         key: &[u8],
         witness: &[u8],
-        recursive: bool,
-        oracle_hash_keccak: bool,
+        target: VerifierTarget,
     ) -> Result<Vec<u8>> {
         let mut witness_gz = GzEncoder::new(witness, Compression::none());
         let mut witness_gz_buf = Vec::with_capacity(witness.len() + 0xFF);
@@ -99,8 +98,6 @@ impl Backend for CliBackend {
         let mut cmd = Command::new(&bb_path);
         cmd.arg("prove")
             .arg("-v")
-            .arg("--scheme")
-            .arg("ultra_honk")
             .arg("-b")
             .arg(program_file.path())
             .arg("-w")
@@ -110,14 +107,14 @@ impl Backend for CliBackend {
             .arg("-o")
             .arg(output_dir.path());
 
-        if recursive {
-            cmd.arg("--honk_recursion")
-                .arg("1")
-                .arg("--init_kzg_accumulator");
-        }
-
-        if oracle_hash_keccak {
-            cmd.arg("--oracle_hash").arg("keccak");
+        match target {
+            VerifierTarget::NoirRecursive => {
+                cmd.arg("--verifier_target").arg("noir-recursive");
+            }
+            VerifierTarget::Evm => {
+                cmd.arg("--verifier_target").arg("evm");
+            }
+            VerifierTarget::Default => {}
         }
 
         let output = cmd.output()?;
@@ -137,7 +134,7 @@ impl Backend for CliBackend {
         Ok(proof)
     }
 
-    fn verify(proof: &[u8], key: &[u8], oracle_hash_keccak: bool) -> Result<()> {
+    fn verify(proof: &[u8], key: &[u8], target: VerifierTarget) -> Result<()> {
         let mut key_file = NamedTempFile::new()?;
         key_file.write_all(key)?;
         key_file.flush()?;
@@ -156,8 +153,6 @@ impl Backend for CliBackend {
         let mut cmd = Command::new(&bb_path);
         cmd.arg("verify")
             .arg("-v")
-            .arg("--scheme")
-            .arg("ultra_honk")
             .arg("-k")
             .arg(key_file.path())
             .arg("-p")
@@ -165,15 +160,20 @@ impl Backend for CliBackend {
             .arg("-i")
             .arg(public_inputs_file.path());
 
-        if oracle_hash_keccak {
-            cmd.arg("--oracle_hash").arg("keccak");
+        match target {
+            VerifierTarget::NoirRecursive => {
+                cmd.arg("--verifier_target").arg("noir-recursive");
+            }
+            VerifierTarget::Evm => {
+                cmd.arg("--verifier_target").arg("evm");
+            }
+            VerifierTarget::Default => {}
         }
 
         let output = cmd.output()?;
         info!("output {:?}", output);
 
         if !output.status.success() {
-            // TODO: return false instead? maybe pass -v and parse out verified: {0/1}
             let stderr = String::from_utf8(output.stderr)?;
             error!("proof error: {}", stderr);
             return Err(stderr.into());

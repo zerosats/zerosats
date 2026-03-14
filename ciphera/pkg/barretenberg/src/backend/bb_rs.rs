@@ -1,4 +1,4 @@
-use super::Backend;
+use super::{Backend, VerifierTarget};
 use crate::Result;
 use lazy_static::lazy_static;
 use std::sync::{Mutex, Once};
@@ -45,37 +45,36 @@ impl Backend for BindingBackend {
         bytecode: &[u8],
         key: &[u8],
         witness: &[u8],
-        _recursive: bool,
-        oracle_hash_keccak: bool,
+        target: VerifierTarget,
     ) -> Result<Vec<u8>> {
         let _guard = BB_MUTEX.lock().unwrap();
 
         Self::load_srs();
 
-        let proof = match oracle_hash_keccak {
-            false => unsafe {
-                bb_rs::barretenberg_api::acir::acir_prove_ultra_honk(bytecode, witness, key)
-            },
-            true => unsafe {
+        let proof = match target {
+            VerifierTarget::Evm => unsafe {
                 bb_rs::barretenberg_api::acir::acir_prove_ultra_keccak_zk_honk(
                     bytecode, witness, key,
                 )
+            },
+            _ => unsafe {
+                bb_rs::barretenberg_api::acir::acir_prove_ultra_honk(bytecode, witness, key)
             },
         };
 
         Ok(proof)
     }
 
-    fn verify(proof: &[u8], key: &[u8], oracle_hash_keccak: bool) -> Result<()> {
+    fn verify(proof: &[u8], key: &[u8], target: VerifierTarget) -> Result<()> {
         let _guard = BB_MUTEX.lock().unwrap();
 
         Self::load_srs();
 
-        let verified = match oracle_hash_keccak {
-            false => unsafe { bb_rs::barretenberg_api::acir::acir_verify_ultra_honk(proof, key) },
-            true => unsafe {
+        let verified = match target {
+            VerifierTarget::Evm => unsafe {
                 bb_rs::barretenberg_api::acir::acir_verify_ultra_keccak_zk_honk(proof, key)
             },
+            _ => unsafe { bb_rs::barretenberg_api::acir::acir_verify_ultra_honk(proof, key) },
         };
 
         match verified {

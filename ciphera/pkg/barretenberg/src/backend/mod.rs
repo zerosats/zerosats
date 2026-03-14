@@ -4,16 +4,27 @@ mod bb_rs;
 
 use crate::Result;
 
+/// Maps to BB 4.0's `--verifier_target` flag.
+/// Replaces the old `recursive: bool` + `oracle_hash_keccak: bool` pair.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VerifierTarget {
+    /// Default UltraHonk (poseidon2, ZK, no recursion artifacts)
+    Default,
+    /// Proof will be recursively verified in another Noir circuit (poseidon2, ZK)
+    NoirRecursive,
+    /// Final proof verified on EVM via Solidity (keccak, ZK)
+    Evm,
+}
+
 pub trait Backend {
     fn prove(
         program: &[u8],
         bytecode: &[u8],
         key: &[u8],
         witness: &[u8],
-        recursive: bool,
-        oracle_hash_keccak: bool,
+        target: VerifierTarget,
     ) -> Result<Vec<u8>>;
-    fn verify(proof: &[u8], key: &[u8], oracle_hash_keccak: bool) -> Result<()>;
+    fn verify(proof: &[u8], key: &[u8], target: VerifierTarget) -> Result<()>;
 }
 
 #[cfg(feature = "bb_rs")]

@@ -22,18 +22,18 @@ curl -L https://raw.githubusercontent.com/noir-lang/noirup/refs/heads/main/insta
 noirup
 ```
 
-Install the specific `nargo` version, `1.0.0-beta.9`:
+Install the specific `nargo` version, `1.0.0-beta.19`:
 
 ```bash
-noirup -v 1.0.0-beta.9
+noirup -v 1.0.0-beta.19
 ```
 
 Confirm it:
 
 ```bash
 $ nargo --version
-nargo version = 1.0.0-beta.9
-noirc version = 1.0.0-beta.9+6abff2f16e1c1314ba30708d1cf032a536de3d19
+nargo version = 1.0.0-beta.19
+noirc version = 1.0.0-beta.19+6abff2f16e1c1314ba30708d1cf032a536de3d19
 (git version hash: 6abff2f16e1c1314ba30708d1cf032a536de3d19, is dirty: false)
 ```
 
@@ -49,19 +49,19 @@ See [Noir docs](https://noir-lang.org/docs) for more information.
 ## Install specific bb version
 
 ```sh
-bbup -v 1.0.0-nightly.20250723
+bbup -v 4.0.0-nightly.20260120
 ```
 
 Confirm it:
 
 ```bash
 $ bb --version
-v1.0.0-nightly.20250723
+v4.0.0-nightly.20260120
 ```
 
 ## Testing proof generation manually using CLI (non-recursive)
 
-Assumes `bb` version: `v1.0.0-nightly.20250723`.
+Assumes `bb` version: `v4.0.0-nightly.20260120`.
 
 To test proof generation manually, you can run the following steps:
 

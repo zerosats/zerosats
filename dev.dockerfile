@@ -1,7 +1,7 @@
 ARG CITREA_BASE_IMAGE=satsbridge/ciphera:citrea
 FROM ${CITREA_BASE_IMAGE}
 
-ARG BB_VERSION=1.0.0-nightly.20250723
+ARG BB_VERSION=4.0.0-nightly.20260120
 
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -26,7 +26,7 @@ RUN apt-get update && apt-get install -y \
     libc++-dev
 
 # Install Rust
-RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain 1.88.0
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain 1.91.1
 ENV PATH="/root/.cargo/bin:$PATH"
 
 RUN curl -fsSL https://deb.nodesource.com/setup_22.x -o nodesource_setup.sh
@@ -61,5 +61,5 @@ CMD ["-i"]
 
 # Build metadata
 LABEL maintainer="Ciphera Development Team"
-LABEL description="Aztec Protocol base image with Rust 1.88.0 and Ciphera development environment"
+LABEL description="Aztec Protocol base image with Rust 1.91.1 and Ciphera development environment"
 LABEL version="1.0"

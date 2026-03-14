@@ -42,13 +42,13 @@ A step-by-step guide to building and using the Ciphera private payments CLI wall
    ```bash
    # Install Noir
    curl -L https://raw.githubusercontent.com/noir-lang/noirup/refs/heads/main/install | bash
-   noirup -v 1.0.0-beta.9
+   noirup -v 1.0.0-beta.19
    ```
    
    ```bash
    # Install Barretenberg
    curl -L https://raw.githubusercontent.com/AztecProtocol/aztec-packages/refs/heads/master/barretenberg/bbup/install | bash
-   bbup -v 1.0.0-nightly.20250723
+   bbup -v 4.0.0-nightly.20260120
    ```
 
 ### 5. **Additional Dependencies** (macOS)

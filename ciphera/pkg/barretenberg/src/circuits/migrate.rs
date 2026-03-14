@@ -1,6 +1,6 @@
 use crate::{
     Result,
-    backend::DefaultBackend,
+    backend::{DefaultBackend, VerifierTarget},
     circuits::get_bytecode_from_program,
     prove::prove,
     traits::{Prove, Verify},
@@ -81,8 +81,7 @@ impl Prove for Migrate {
             &BYTECODE,
             KEY,
             &inputs,
-            false,
-            false,
+            VerifierTarget::Default,
         )?;
 
         // The migrate circuit has 2 public inputs (old_address, new_address)
@@ -107,7 +106,7 @@ impl Prove for Migrate {
 
 impl Verify for MigrateProof {
     fn verify(&self) -> Result<()> {
-        verify::<DefaultBackend>(KEY, &self.to_bytes(), false)
+        verify::<DefaultBackend>(KEY, &self.to_bytes(), VerifierTarget::Default)
     }
 }
 

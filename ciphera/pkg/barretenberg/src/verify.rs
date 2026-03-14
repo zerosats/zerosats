@@ -1,8 +1,8 @@
-use crate::{Result, backend::Backend};
+use crate::{Result, backend::{Backend, VerifierTarget}};
 use element::Base;
 
-pub fn verify<B: Backend>(key: &[u8], proof: &[u8], oracle_hash_keccak: bool) -> Result<()> {
-    B::verify(proof, key, oracle_hash_keccak)
+pub fn verify<B: Backend>(key: &[u8], proof: &[u8], target: VerifierTarget) -> Result<()> {
+    B::verify(proof, key, target)
 }
 
 // pub fn verify(bb_path: &PathBuf, key: &[u8], proof: &[u8]) -> Result<bool> {

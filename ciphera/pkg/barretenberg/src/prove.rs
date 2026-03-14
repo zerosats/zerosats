@@ -1,4 +1,4 @@
-use crate::{Result, backend::Backend, execute::execute_program_and_decode};
+use crate::{Result, backend::{Backend, VerifierTarget}, execute::execute_program_and_decode};
 use noirc_abi::InputMap;
 use noirc_artifacts::program::CompiledProgram;
 
@@ -8,22 +8,13 @@ pub fn prove<B: Backend>(
     bytecode: &[u8],
     key: &[u8],
     inputs_map: &InputMap,
-    recursive: bool,
-    oracle_hash_keccak: bool,
+    target: VerifierTarget,
 ) -> Result<Vec<u8>> {
     let results = execute_program_and_decode(compiled_program, inputs_map, false)?;
 
     let witness = bincode::serialize(&results.witness_stack)?;
 
-    B::prove(
-        program,
-        bytecode,
-        key,
-        &witness,
-        recursive,
-        oracle_hash_keccak,
-    )
-    // Ok(proof)
+    B::prove(program, bytecode, key, &witness, target)
 }
 
 // pub fn prove_witness(

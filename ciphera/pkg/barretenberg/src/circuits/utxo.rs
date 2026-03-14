@@ -1,7 +1,7 @@
 use super::note::{BInputNote, BNote};
 use crate::{
     Result,
-    backend::DefaultBackend,
+    backend::{DefaultBackend, VerifierTarget},
     circuits::get_bytecode_from_program,
     prove::prove,
     traits::{Prove, Verify},
@@ -55,8 +55,7 @@ impl Prove for Utxo {
             &BYTECODE,
             KEY,
             &inputs,
-            true,
-            false,
+            VerifierTarget::NoirRecursive,
         )?;
 
         // Slice the first 6, 32 byte chunks as the public inputs
@@ -93,7 +92,7 @@ impl Prove for Utxo {
 impl Verify for UtxoProof {
     fn verify(&self) -> Result<()> {
         let bytes = self.to_bytes();
-        verify::<DefaultBackend>(KEY, &bytes, false)
+        verify::<DefaultBackend>(KEY, &bytes, VerifierTarget::Default)
     }
 }
 

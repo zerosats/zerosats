@@ -1,6 +1,6 @@
 use super::{UTXO_VERIFICATION_KEY, UTXO_VERIFICATION_KEY_HASH};
 use crate::Result;
-use crate::backend::DefaultBackend;
+use crate::backend::{DefaultBackend, VerifierTarget};
 use crate::circuits::get_bytecode_from_program;
 use crate::prove::prove;
 use crate::traits::{Prove, Verify};
@@ -55,8 +55,7 @@ impl Prove for AggUtxo {
             &BYTECODE,
             KEY,
             &inputs,
-            true,
-            false,
+            VerifierTarget::NoirRecursive,
         )?;
 
         // Slice the first 8, 32 byte chunks as the public inputs
@@ -106,7 +105,7 @@ impl Prove for AggUtxo {
 
 impl Verify for AggUtxoProof {
     fn verify(&self) -> Result<()> {
-        verify::<DefaultBackend>(KEY, &self.to_bytes(), false)
+        verify::<DefaultBackend>(KEY, &self.to_bytes(), VerifierTarget::Default)
     }
 }
 
