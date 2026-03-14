@@ -16,7 +16,7 @@ use zk_primitives::{
 };
 
 const PROGRAM: &str = include_str!("../../../../fixtures/programs/migrate.json");
-const KEY: &[u8] = include_bytes!("../../../../fixtures/keys/migrate_key/vk");
+const KEY: &[u8] = include_bytes!("../../../../fixtures/keys/migrate_key");
 
 lazy_static! {
     static ref PROGRAM_ARTIFACT: ProgramArtifact = serde_json::from_str(PROGRAM).unwrap();
