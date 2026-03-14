@@ -1,4 +1,4 @@
-use acvm::{AcirField, BlackBoxResolutionError, FieldElement};
+use acvm::{AcirField, BlackBoxResolutionError, FieldElement, acir::BlackBoxFunc};
 use bn254_blackbox_solver::poseidon2_permutation;
 
 /// Poseidon2 sponge-based hash, equivalent to the one previously in bn254_blackbox_solver.
@@ -53,7 +53,12 @@ impl Poseidon2Sponge {
         &mut self,
         input: FieldElement,
     ) -> Result<(), BlackBoxResolutionError> {
-        assert!(!self.squeezed);
+        if self.squeezed {
+            return Err(BlackBoxResolutionError::Failed(
+                BlackBoxFunc::Poseidon2Permutation,
+                "cannot absorb after squeeze".to_string(),
+            ));
+        }
         if self.cache.len() == self.rate {
             self.perform_duplex()?;
             self.cache = vec![input];
@@ -66,7 +71,12 @@ impl Poseidon2Sponge {
     fn squeeze(
         &mut self,
     ) -> Result<FieldElement, BlackBoxResolutionError> {
-        assert!(!self.squeezed);
+        if self.squeezed {
+            return Err(BlackBoxResolutionError::Failed(
+                BlackBoxFunc::Poseidon2Permutation,
+                "cannot squeeze twice".to_string(),
+            ));
+        }
         self.perform_duplex()?;
         self.squeezed = true;
         Ok(self.state[0])
