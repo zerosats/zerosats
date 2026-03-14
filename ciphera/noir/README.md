@@ -104,8 +104,6 @@ Generate the verification key (non-recursive):
 bb write_vk --scheme ultra_honk -b target/${PACKAGE_NAME}.json -o target
 ```
 
-To generate as JSON use the `--output_format json` flag.
-
 Generate the verification key (recursive):
 
 ```bash
