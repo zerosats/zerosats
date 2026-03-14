@@ -4,7 +4,6 @@ set -euo pipefail
 
 # Compile the program
 NARGO=${NARGO:-nargo}
-$NARGO compile --workspace
 
 # REPO_ROOT=/workspace/ciphera
 REPO_ROOT=$(git rev-parse --show-toplevel)
@@ -14,7 +13,7 @@ BACKEND=${BACKEND:-bb}
 rm -r $REPO_ROOT/noir/target
 
 # Compile the program
-nargo compile --workspace
+$NARGO compile --workspace
 
 # Create the fixtures directory if it doesn't exist
 mkdir -p $REPO_ROOT/fixtures/programs
@@ -82,7 +81,7 @@ for NAME in "${PROGRAMS[@]}"; do
 
     # Recompile agg_utxo after hash update
     echo "Recompiling agg_utxo with updated VK hash..."
-    (cd $REPO_ROOT/noir && nargo compile --package agg_utxo)
+    (cd $REPO_ROOT/noir && $NARGO compile --package agg_utxo)
     cp $REPO_ROOT/noir/target/agg_utxo.json $REPO_ROOT/fixtures/programs/
   fi
 
@@ -94,7 +93,7 @@ for NAME in "${PROGRAMS[@]}"; do
 
     # Recompile agg_agg after hash update
     echo "Recompiling agg_agg with updated VK hash..."
-    (cd $REPO_ROOT/noir && nargo compile --package agg_agg)
+    (cd $REPO_ROOT/noir && $NARGO compile --package agg_agg)
     cp $REPO_ROOT/noir/target/agg_agg.json $REPO_ROOT/fixtures/programs/
   fi
 
