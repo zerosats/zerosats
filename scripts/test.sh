@@ -17,7 +17,7 @@ CITREA_VERSION="${CITREA_VERSION:-v2.1.0}"
 CITREA_DIR="$REPO_ROOT/.citrea/$CITREA_VERSION"
 CITREA_BASE_IMAGE="satsbridge/ciphera:citrea"
 DOCKER_IMAGE="satsbridge/ciphera:dev"
-BB_VERSION="${BB_VERSION:-1.0.0-nightly.20250723}"
+BB_VERSION="${BB_VERSION:-4.0.0-nightly.20260120}"
 DOCKER_PLATFORM="${DOCKER_PLATFORM:-linux/amd64}"
 
 # --- Parse args ---
