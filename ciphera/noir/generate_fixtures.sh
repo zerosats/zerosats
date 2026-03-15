@@ -5,12 +5,21 @@ set -euo pipefail
 # Compile the program
 NARGO=${NARGO:-nargo}
 
-# REPO_ROOT=/workspace/ciphera
-REPO_ROOT=$(git rev-parse --show-toplevel)
+# Detect repo root: in Docker, ciphera/ contents are at the git root.
+# Locally, they're under a ciphera/ subdirectory.
+GIT_ROOT=$(git rev-parse --show-toplevel)
+if [ -d "$GIT_ROOT/noir" ]; then
+  REPO_ROOT="$GIT_ROOT"
+elif [ -d "$GIT_ROOT/ciphera/noir" ]; then
+  REPO_ROOT="$GIT_ROOT/ciphera"
+else
+  echo "ERROR: Cannot find noir/ directory under $GIT_ROOT or $GIT_ROOT/ciphera/"
+  exit 1
+fi
 BACKEND=${BACKEND:-bb}
 
 # Clean target
-rm -r $REPO_ROOT/noir/target
+rm -rf "$REPO_ROOT/noir/target"
 
 # Compile the program
 $NARGO compile --workspace

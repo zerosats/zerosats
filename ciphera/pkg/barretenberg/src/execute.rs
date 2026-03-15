@@ -38,7 +38,7 @@ pub fn execute_program_and_decode(
 pub fn execute_program(
     compiled_program: &CompiledProgram,
     inputs_map: &InputMap,
-    pedantic_solving: bool,
+    _pedantic_solving: bool,
 ) -> Result<WitnessStack<FieldElement>, Box<dyn std::error::Error>> {
     let initial_witness = compiled_program.abi.encode(inputs_map, None)?;
 

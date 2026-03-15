@@ -323,7 +323,13 @@ async fn verify_transfers() {
 
     tokio::time::sleep(Duration::from_secs(1)).await;
 
-    assert!(agg_agg_proof.proof.0.len() % 32 == 0, "Proof must be a multiple of 32 bytes");
+    // EVM/keccak ZK proof size: 342 fields * 32 bytes = 10944 bytes
+    assert_eq!(
+        agg_agg_proof.proof.0.len(),
+        342 * 32,
+        "agg_agg proof must be 342 elements of 32 bytes, got {} bytes",
+        agg_agg_proof.proof.0.len()
+    );
     env.rollup_contract
         .verify_block(
             &agg_agg_proof.proof.0,
