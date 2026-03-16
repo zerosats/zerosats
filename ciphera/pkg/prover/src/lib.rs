@@ -20,7 +20,7 @@ use smirk::{
 use smirk_metadata::SmirkMetadata;
 use std::sync::Arc;
 use tracing::info;
-use web3::{ethabi, types::TransactionId};
+use web3::ethabi;
 use zk_primitives::{
     AggAgg, AggAggProof, AggUtxo, AggUtxoProof, MerklePath, UtxoProof,
     UtxoProofBundleWithMerkleProofs,
@@ -38,6 +38,12 @@ pub enum Error {
     // Temporary workaround, sometimes rollup transactions get stuck. Restarting the prover fixes it
     #[error("rollup transaction timed out")]
     RollupTransactionTimeout,
+
+    #[error("rollup transaction dropped from mempool: {0}")]
+    RollupTransactionDropped(H256),
+
+    #[error("rollup transaction reverted: {0}")]
+    RollupTransactionReverted(H256),
 
     #[error("from hex error")]
     FromHex(#[from] rustc_hex::FromHexError),
@@ -191,26 +197,18 @@ impl Prover {
         info!(?tx, "EVM root rollup update sent. Waiting for receipt...",);
 
         let wait_start = std::time::Instant::now();
-        while self
-            .contract
-            .client
-            .client()
-            .eth()
-            .transaction_receipt(tx)
-            .await?
-            .is_none()
-        {
-            if self
-                .contract
-                .client
-                .client()
-                .eth()
-                .transaction(TransactionId::Hash(tx))
-                .await?
-                .is_none()
-            {
-                // The transaction was dropped
-                break;
+        loop {
+            if let Some(receipt) = self.contract.client.transaction_receipt(tx).await? {
+                if receipt.status == Some(0.into()) {
+                    return Err(Error::RollupTransactionReverted(tx));
+                }
+
+                info!("EVM root rollup update confirmed");
+                return Ok(tx);
+            }
+
+            if self.contract.client.transaction(tx).await?.is_none() {
+                return Err(Error::RollupTransactionDropped(tx));
             }
 
             // Wait for a maximum of 5 minutes
@@ -220,10 +218,6 @@ impl Prover {
 
             tokio::time::sleep(std::time::Duration::from_secs(1)).await;
         }
-
-        info!("EVM root rollup update confirmed");
-
-        Ok(tx)
     }
 
     #[tracing::instrument(err, skip_all)]
