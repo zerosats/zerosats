@@ -242,63 +242,84 @@ impl Wallet {
         ticker: &str,
         amount: u64,
     ) -> Result<([InputNote; 2], Note), WalletError> {
-        // Select first input note
-        let note1 = self.find_note(amount, ticker)?;
-        let note1_amount = self.get_note_amount(&note1.note)?;
+        let asset_notes = self
+            .avail
+            .get(ticker)
+            .filter(|n| !n.is_empty())
+            .cloned()
+            .ok_or_else(|| {
+                WalletError::LowBalance(format!(
+                    "Wallet {} has 0 balance",
+                    self.name.as_deref().unwrap_or("Noname")
+                ))
+            })?;
 
-        // Determine what we still need
-        let remaining = if note1_amount >= amount {
-            0u64 // Note1 covers everything
-        } else {
-            amount - note1_amount // How much more we need
+        let note_amounts = asset_notes
+            .iter()
+            .map(|note| self.get_note_amount(&note.note))
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let mut best_selection: Option<(Vec<InputNote>, u64)> = None;
+
+        let mut consider_candidate = |notes: Vec<InputNote>, total: u64| {
+            if total < amount {
+                return;
+            }
+
+            let better = match &best_selection {
+                None => true,
+                Some((best_notes, best_total)) => {
+                    let excess = total - amount;
+                    let best_excess = best_total - amount;
+
+                    excess < best_excess
+                        || (excess == best_excess && notes.len() < best_notes.len())
+                }
+            };
+
+            if better {
+                best_selection = Some((notes, total));
+            }
         };
 
-        if remaining == 0 {
-            // ===== Path A: Single note is sufficient =====
-            self.pull_from_avail(ticker, note1.clone())?;
+        for (i, note1) in asset_notes.iter().enumerate() {
+            consider_candidate(vec![note1.clone()], note_amounts[i]);
 
-            let change_amount = note1_amount - amount;
-            if change_amount == 0 {
-                // A1: Exact match, no change
-                Ok((
-                    [note1.clone(), InputNote::padding_note()],
-                    Note::padding_note(),
-                ))
-            } else {
-                // A2: Single note with change
-                let change_note = self.make_change_note(&note1.note, change_amount);
-                self.push_to_avail(ticker, change_note.clone())?;
-                Ok(([note1.clone(), InputNote::padding_note()], change_note.note))
-            }
-        } else {
-            // ===== Path B: Need a second note =====
-            let note2 = self.find_note(remaining, ticker)?;
-            let note2_amount = self.get_note_amount(&note2.note)?;
+            for (j, note2) in asset_notes.iter().enumerate().skip(i + 1) {
+                let Some(total) = note_amounts[i].checked_add(note_amounts[j]) else {
+                    continue;
+                };
 
-            // Pull both notes from wallet
-            self.pull_from_avail(ticker, note1.clone())?;
-            self.pull_from_avail(ticker, note2.clone())?;
-
-            let total_input = note1_amount + note2_amount;
-
-            if total_input == amount {
-                // B1: Two notes exactly match, no change
-                Ok(([note1.clone(), note2.clone()], Note::padding_note()))
-            } else if total_input > amount {
-                // B2: Two notes with change
-                let change_amount = total_input - amount;
-                let change_note = self.make_change_note(&note1.note, change_amount);
-                self.push_to_avail(ticker, change_note.clone())?;
-                Ok(([note1.clone(), note2.clone()], change_note.note))
-            } else {
-                // B3: Two notes not enough - restore state and error
-                self.push_to_avail(ticker, note1.clone())?;
-                self.push_to_avail(ticker, note2.clone())?;
-                Err(WalletError::LowBalance(
-                    "Insufficient balance even with two notes, consolidate".to_string(),
-                ))
+                consider_candidate(vec![note1.clone(), note2.clone()], total);
             }
         }
+
+        let Some((selected_notes, total_input)) = best_selection else {
+            return Err(WalletError::LowBalance(
+                "Insufficient balance even with two notes, consolidate".to_string(),
+            ));
+        };
+
+        for note in &selected_notes {
+            self.pull_from_avail(ticker, note.clone())?;
+        }
+
+        let change = if total_input == amount {
+            Note::padding_note()
+        } else {
+            let change_amount = total_input - amount;
+            let change_note = self.make_change_note(&selected_notes[0].note, change_amount);
+            self.push_to_avail(ticker, change_note.clone())?;
+            change_note.note
+        };
+
+        let inputs = match selected_notes.as_slice() {
+            [note1] => [note1.clone(), InputNote::padding_note()],
+            [note1, note2] => [note1.clone(), note2.clone()],
+            _ => unreachable!("wallet input selection only supports one or two notes"),
+        };
+
+        Ok((inputs, change))
     }
 
     pub fn find_note(&mut self, amount: u64, ticker: &str) -> Result<InputNote, WalletError> {
@@ -1068,6 +1089,27 @@ mod wallet_tests {
 
         let _ = wallet.pull_from_avail("WCBTC", note).unwrap();
         assert_eq!(wallet.avail["WCBTC"].len(), 2);
+    }
+
+    #[test]
+    fn test_select_input_notes_prefers_valid_single_note_over_closer_small_note() {
+        let mut wallet = setup_wallet(vec![42_700_000_000_000_000, 3_000_000_000_000_000], "WCBTC");
+
+        let (inputs, change) = wallet
+            .select_input_notes("WCBTC", 14_000_000_000_000_000)
+            .unwrap();
+
+        assert_eq!(
+            note_value(&inputs[0]),
+            42_700_000_000_000_000,
+            "selection must prefer the covering note instead of reusing the smaller note twice"
+        );
+        assert_eq!(inputs[1].note, InputNote::padding_note().note);
+        assert_eq!(
+            *change.value.to_u64_array().first().unwrap(),
+            28_700_000_000_000_000
+        );
+        assert_eq!(wallet.balance, 31_700_000_000_000_000);
     }
 
     // Wallet: notes [400, 300] (total 700), spend_to 600.
