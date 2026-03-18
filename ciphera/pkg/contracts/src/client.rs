@@ -2,6 +2,7 @@ use std::{future::Future, time::Duration};
 
 use crate::{Error, Result};
 use ethereum_types::{Address, H256, U64};
+#[cfg(any(test, feature = "test-helpers"))]
 use testutil::eth::EthNode;
 use tokio::time::interval;
 use web3::{
@@ -10,7 +11,7 @@ use web3::{
     ethabi,
     signing::SecretKey,
     transports::Http,
-    types::{Transaction, U256},
+    types::{Transaction, TransactionId, TransactionReceipt, U256},
 };
 
 /// Configuration for different types of transaction confirmation requirements.
@@ -64,6 +65,7 @@ impl Client {
         ))
     }
 
+    #[cfg(any(test, feature = "test-helpers"))]
     pub fn from_eth_node(eth_node: &EthNode) -> Self {
         Self::new(&eth_node.rpc_url(), None)
     }
@@ -119,6 +121,22 @@ impl Client {
         .await
     }
 
+    /// Fetch the current transaction receipt with network-failure retries.
+    pub async fn transaction_receipt(
+        &self,
+        txn_hash: H256,
+    ) -> Result<Option<TransactionReceipt>, web3::Error> {
+        retry_on_network_failure(move || self.client.eth().transaction_receipt(txn_hash)).await
+    }
+
+    /// Fetch the current transaction state with network-failure retries.
+    pub async fn transaction(&self, txn_hash: H256) -> Result<Option<Transaction>, web3::Error> {
+        retry_on_network_failure(move || {
+            self.client.eth().transaction(TransactionId::Hash(txn_hash))
+        })
+        .await
+    }
+
     #[tracing::instrument(err, ret, skip(self))]
     pub async fn get_nonce(
         &self,
@@ -133,16 +151,30 @@ impl Client {
 
     #[tracing::instrument(err, ret, skip(self))]
     pub async fn nonce(&self, address: Address) -> Result<U256, web3::Error> {
-        retry_on_network_failure(move || {
-            self.get_nonce(
-                address,
-                match self.use_latest_for_nonce {
-                    true => web3::types::BlockNumber::Latest,
-                    false => web3::types::BlockNumber::Pending,
-                },
-            )
-        })
-        .await
+        match self.use_latest_for_nonce {
+            true => self.latest_nonce(address).await,
+            false => self.pending_nonce(address).await,
+        }
+    }
+
+    #[tracing::instrument(err, ret, skip(self))]
+    pub async fn latest_nonce(&self, address: Address) -> Result<U256, web3::Error> {
+        self.nonce_at_block(address, web3::types::BlockNumber::Latest)
+            .await
+    }
+
+    #[tracing::instrument(err, ret, skip(self))]
+    pub async fn pending_nonce(&self, address: Address) -> Result<U256, web3::Error> {
+        self.nonce_at_block(address, web3::types::BlockNumber::Pending)
+            .await
+    }
+
+    async fn nonce_at_block(
+        &self,
+        address: Address,
+        block: web3::types::BlockNumber,
+    ) -> Result<U256, web3::Error> {
+        retry_on_network_failure(move || self.get_nonce(address, block)).await
     }
 
     pub(crate) async fn options(&self, address: Address) -> Result<Options, web3::Error> {

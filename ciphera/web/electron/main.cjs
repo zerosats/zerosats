@@ -57,6 +57,140 @@ function getWorkingDirectory() {
     return app.getPath('userData');
 }
 
+const WALLET_NAME_PATTERN = /^[a-zA-Z0-9_-]+$/;
+
+function isPlainObject(value) {
+    return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function isSerializedElement(value) {
+    return typeof value === 'string' && value.length > 0;
+}
+
+function isPositiveInteger(value) {
+    return Number.isInteger(value) && value > 0;
+}
+
+function resolveWalletPath(name) {
+    if (typeof name !== 'string' || !WALLET_NAME_PATTERN.test(name)) {
+        return null;
+    }
+
+    const resolvedCwd = path.resolve(getWorkingDirectory());
+    const walletPath = path.resolve(resolvedCwd, `${name}.json`);
+    const relativeWalletPath = path.relative(resolvedCwd, walletPath);
+
+    if (relativeWalletPath.startsWith('..') || path.isAbsolute(relativeWalletPath)) {
+        return null;
+    }
+
+    return walletPath;
+}
+
+function isSerializedNote(value) {
+    return isPlainObject(value)
+        && isSerializedElement(value.kind)
+        && isSerializedElement(value.contract)
+        && isSerializedElement(value.address)
+        && isSerializedElement(value.psi)
+        && isSerializedElement(value.value);
+}
+
+function isSerializedInputNote(value) {
+    return isPlainObject(value)
+        && isSerializedNote(value.note)
+        && isSerializedElement(value.secret_key);
+}
+
+function sanitizeInputNote(note) {
+    return {
+        note: {
+            kind: note.note.kind,
+            contract: note.note.contract,
+            address: note.note.address,
+            psi: note.note.psi,
+            value: note.note.value,
+        },
+        secret_key: note.secret_key,
+    };
+}
+
+function sanitizeInputNoteMap(value) {
+    return Object.fromEntries(
+        Object.entries(value).map(([ticker, notes]) => [
+            ticker,
+            notes.map(sanitizeInputNote),
+        ]),
+    );
+}
+
+function normalizeImportedWallet(wallet) {
+    const normalizedWallet = {
+        pk: wallet.pk,
+        keys: [...wallet.keys],
+        pending: sanitizeInputNoteMap(wallet.pending),
+        avail: sanitizeInputNoteMap(wallet.avail),
+        name: wallet.name,
+        balance: wallet.balance,
+    };
+
+    if (isPositiveInteger(wallet.chain_id)) {
+        normalizedWallet.chain_id = wallet.chain_id;
+    }
+
+    return normalizedWallet;
+}
+
+function validateImportedWallet(wallet) {
+    if (!isPlainObject(wallet)) {
+        return 'Invalid wallet file';
+    }
+
+    if (typeof wallet.name !== 'string' || !wallet.name) {
+        return 'Invalid wallet file (missing or malformed name)';
+    }
+
+    if (!WALLET_NAME_PATTERN.test(wallet.name)) {
+        return 'Invalid wallet name (only alphanumeric, dash, underscore)';
+    }
+
+    if (!isSerializedElement(wallet.pk)) {
+        return 'Invalid wallet file (missing or malformed pk)';
+    }
+
+    if (!Array.isArray(wallet.keys) || !wallet.keys.every(isSerializedElement)) {
+        return 'Invalid wallet file (missing or malformed keys)';
+    }
+
+    if (
+        !isPlainObject(wallet.pending)
+        || !Object.values(wallet.pending).every(
+            notes => Array.isArray(notes) && notes.every(isSerializedInputNote),
+        )
+    ) {
+        return 'Invalid wallet file (missing or malformed pending notes)';
+    }
+
+    if (
+        !isPlainObject(wallet.avail)
+        || !Object.values(wallet.avail).every(
+            notes => Array.isArray(notes) && notes.every(isSerializedInputNote),
+        )
+    ) {
+        return 'Invalid wallet file (missing or malformed available notes)';
+    }
+
+    if (!Number.isInteger(wallet.balance) || wallet.balance < 0) {
+        return 'Invalid wallet file (missing or malformed balance)';
+    }
+
+    if (wallet.chain_id !== undefined && wallet.chain_id !== null && !isPositiveInteger(wallet.chain_id)) {
+        return 'Invalid wallet file (missing or malformed chain id)';
+    }
+
+    return null;
+}
+
 function createWindow() {
     // Create the browser window
     mainWindow = new BrowserWindow({
@@ -244,19 +378,31 @@ ipcMain.handle('cli:check', async () => {
  */
 ipcMain.handle('wallet:read', async (event, name) => {
     try {
-        const cwd = getWorkingDirectory();
-        const walletPath = path.join(cwd, `${name}.json`);
-        
+        const walletPath = resolveWalletPath(name);
+        if (!walletPath) {
+            return {
+                exists: false,
+                error: 'Invalid wallet name',
+            };
+        }
+
         if (!fs.existsSync(walletPath)) {
             return { exists: false };
         }
-        
+
         const content = fs.readFileSync(walletPath, 'utf8');
         const wallet = JSON.parse(content);
-        
+        const validationError = validateImportedWallet(wallet);
+        if (validationError) {
+            return {
+                exists: false,
+                error: validationError,
+            };
+        }
+
         return {
             exists: true,
-            wallet,
+            wallet: normalizeImportedWallet(wallet),
         };
     } catch (e) {
         return {
@@ -271,22 +417,35 @@ ipcMain.handle('wallet:read', async (event, name) => {
  */
 ipcMain.handle('wallet:import', async (event, filePath) => {
     try {
-        if (!filePath || !fs.existsSync(filePath)) {
+        if (typeof filePath !== 'string' || !filePath) {
             return { success: false, error: 'File not found' };
         }
 
-        const content = fs.readFileSync(filePath, 'utf8');
-        const wallet = JSON.parse(content);
-
-        if (!wallet.name || !wallet.pk) {
-            return { success: false, error: 'Invalid wallet file (missing name or pk)' };
+        const sourcePath = path.resolve(filePath);
+        if (!fs.existsSync(sourcePath) || !fs.statSync(sourcePath).isFile()) {
+            return { success: false, error: 'File not found' };
         }
 
-        const cwd = getWorkingDirectory();
-        const destPath = path.join(cwd, `${wallet.name}.json`);
-        fs.writeFileSync(destPath, content, 'utf8');
+        const content = fs.readFileSync(sourcePath, 'utf8');
+        const wallet = JSON.parse(content);
+        const validationError = validateImportedWallet(wallet);
+        if (validationError) {
+            return { success: false, error: validationError };
+        }
 
-        return { success: true, wallet };
+        const destPath = resolveWalletPath(wallet.name);
+        if (!destPath) {
+            return { success: false, error: 'Invalid wallet destination' };
+        }
+
+        if (fs.existsSync(destPath)) {
+            return { success: false, error: `Wallet ${wallet.name} already exists` };
+        }
+
+        const normalizedWallet = normalizeImportedWallet(wallet);
+        fs.writeFileSync(destPath, `${JSON.stringify(normalizedWallet, null, 2)}\n`, 'utf8');
+
+        return { success: true, wallet: normalizedWallet };
     } catch (e) {
         return { success: false, error: e.message };
     }

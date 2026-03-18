@@ -2,6 +2,7 @@ use crate::Client;
 use crate::error::Result;
 use ethereum_types::U64;
 use sha3::{Digest, Keccak256};
+#[cfg(any(test, feature = "test-helpers"))]
 use testutil::eth::EthNode;
 use web3::{
     contract::{Contract, tokens::Tokenize},
@@ -73,6 +74,7 @@ impl ERC20Contract {
         ))
     }
 
+    #[cfg(any(test, feature = "test-helpers"))]
     pub async fn from_eth_node(eth_node: &EthNode, signer: SecretKey) -> Result<Self> {
         let deployed = eth_node.deployed();
         let erc20_addr = deployed.erc20.as_str();

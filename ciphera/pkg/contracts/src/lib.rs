@@ -13,7 +13,8 @@ pub mod wallet;
 pub use client::{Client, ConfirmationType};
 pub use erc20::ERC20Contract;
 pub use error::{Error, Result};
-pub use rollup::RollupContract;
+pub use rollup::{ReadonlyRollupContract, SignedRollupContract};
+pub type RollupContract = SignedRollupContract;
 
 pub use web3::{
     signing::SecretKey,

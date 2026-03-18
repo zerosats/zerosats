@@ -50,6 +50,7 @@ class CipheraApp {
             pendingNote: null, // Stores note waiting to be saved
             nodeHost: null,
             nodePort: null,
+            nodeTls: true,
             chainId: null,
             rollupContract: null,
         };
@@ -283,6 +284,25 @@ class CipheraApp {
 
     // === Wallet Management ===
 
+    applyWalletState(wallet, fallbackName = null, { preserveChainId = false } = {}) {
+        this.state.walletName = wallet.name || fallbackName || null;
+        this.state.walletAddress = wallet.pk || '---';
+        this.state.balance = wallet.balance || 0;
+        if (Number.isInteger(wallet.chain_id) && wallet.chain_id > 0) {
+            this.state.chainId = wallet.chain_id;
+        } else if (!preserveChainId) {
+            this.state.chainId = null;
+        }
+        this.updateWalletDisplay();
+    }
+
+    activateWallet(wallet, fallbackName = null) {
+        this.state.pendingNote = null;
+        this.state.rollupContract = null;
+        this.updateConnectionStatus(false);
+        this.applyWalletState(wallet, fallbackName);
+    }
+
     async loadSavedWallet() {
         try {
             const result = await window.ciphera.listWallets();
@@ -291,10 +311,7 @@ class CipheraApp {
                 const walletData = await window.ciphera.readWallet(name);
 
                 if (walletData.exists && walletData.wallet) {
-                    this.state.walletName = walletData.wallet.name || name;
-                    this.state.walletAddress = walletData.wallet.pk || '---';
-                    this.state.balance = walletData.wallet.balance || 0;
-                    this.updateWalletDisplay();
+                    this.activateWallet(walletData.wallet, name);
                 }
             }
         } catch (e) {
@@ -331,6 +348,9 @@ class CipheraApp {
         if (!connected) {
             this.state.nodeHost = null;
             this.state.nodePort = null;
+            this.state.nodeTls = true;
+            this.state.chainId = null;
+            this.state.rollupContract = null;
             // Stop explorer polling when disconnected
             if (this.explorerPollInterval) {
                 clearInterval(this.explorerPollInterval);
@@ -354,6 +374,23 @@ class CipheraApp {
         if (this.elements.nodeEndpoint) {
             this.elements.nodeEndpoint.textContent = connected && endpoint ? endpoint : 'DISCONNECTED';
         }
+    }
+
+    parseTlsAnswer(value) {
+        const normalized = String(value ?? '').trim().toLowerCase();
+        return !['n', 'no', 'false', '0', 'off', 'http'].includes(normalized);
+    }
+
+    getNodeProtocol(useTls = this.state.nodeTls) {
+        return useTls === false ? 'http' : 'https';
+    }
+
+    getNodeEndpoint(host = this.state.nodeHost, port = this.state.nodePort, useTls = this.state.nodeTls) {
+        return `${this.getNodeProtocol(useTls)}://${host}:${port}`;
+    }
+
+    getNodeBaseUrl(host = this.state.nodeHost, port = this.state.nodePort, useTls = this.state.nodeTls) {
+        return `${this.getNodeEndpoint(host, port, useTls)}/v0`;
     }
 
     truncateAddress(address) {
@@ -526,7 +563,7 @@ class CipheraApp {
         this.updateStatus(`⏳ Fetching transaction ${hash.slice(0, 16)}...`);
 
         try {
-            const response = await fetch(`https://${this.state.nodeHost}:${this.state.nodePort}/v0/transactions/${hash}`);
+            const response = await fetch(`${this.getNodeBaseUrl()}/transactions/${hash}`);
 
             if (!response.ok) {
                 if (response.status === 404) {
@@ -575,7 +612,7 @@ class CipheraApp {
         this.updateStatus(`⏳ Fetching block ${blockNum}...`);
 
         try {
-            const response = await fetch(`https://${this.state.nodeHost}:${this.state.nodePort}/v0/blocks/${blockNum}`);
+            const response = await fetch(`${this.getNodeBaseUrl()}/blocks/${blockNum}`);
 
             if (!response.ok) {
                 if (response.status === 404) {
@@ -844,10 +881,7 @@ class CipheraApp {
             // Reload wallet data
             const walletData = await window.ciphera.readWallet(answers.name);
             if (walletData.exists) {
-                this.state.walletName = answers.name;
-                this.state.walletAddress = walletData.wallet.pk;
-                this.state.balance = walletData.wallet.balance || 0;
-                this.updateWalletDisplay();
+                this.activateWallet(walletData.wallet, answers.name);
             }
 
             this.completeStatus(true, `WALLET CREATED: Welcome, ${answers.name}!`);
@@ -863,7 +897,8 @@ class CipheraApp {
         this.terminal.log('Type "clear" to return home', 'dim');
         this.startPromptSequence('sync', [
             {key: 'host', label: 'Host:', placeholder: 'ciphera.satsbridge.com', default: 'ciphera.satsbridge.com'},
-            {key: 'port', label: 'Port:', placeholder: '443', default: '443'}
+            {key: 'port', label: 'Port:', placeholder: '443', default: '443'},
+            {key: 'tls', label: 'Use TLS (https)? [Y/n]:', placeholder: 'yes', default: 'yes'}
         ]);
     }
 
@@ -878,12 +913,18 @@ class CipheraApp {
             return;
         }
 
-        this.updateStatus(`⏳ CONNECT: Reaching ${answers.host}:${answers.port}...`);
+        const nextNodeHost = answers.host;
+        const nextNodePort = parseInt(answers.port);
+        const nextNodeTls = this.parseTlsAnswer(answers.tls);
+        const nextNodeEndpoint = this.getNodeEndpoint(nextNodeHost, nextNodePort, nextNodeTls);
+
+        this.updateStatus(`⏳ CONNECT: Reaching ${nextNodeEndpoint}...`);
 
         const result = await window.ciphera.connect(
             this.state.walletName,
-            answers.host,
-            parseInt(answers.port)
+            nextNodeHost,
+            nextNodePort,
+            !nextNodeTls,
         );
 
         if (!result.success) {
@@ -891,45 +932,49 @@ class CipheraApp {
             return;
         }
 
-        // Store node connection info in state
-        this.state.nodeHost = answers.host;
-        this.state.nodePort = parseInt(answers.port);
-
         // Fetch network info to get chain_id and rollup_contract
         try {
-            const networkRes = await fetch(`https://${this.state.nodeHost}:${this.state.nodePort}/v0/network`);
+            const networkRes = await fetch(`${this.getNodeBaseUrl(nextNodeHost, nextNodePort, nextNodeTls)}/network`);
             if (!networkRes.ok) {
-                throw new Error(`HTTPs ${networkRes.status}`);
+                throw new Error(`HTTP ${networkRes.status}`);
             }
             const network = await networkRes.json();
+            let nextChainId = this.state.chainId;
+            let nextRollupContract = this.state.rollupContract;
 
             // On first connect, store values. On reconnect, verify they haven't changed.
-            if (this.state.chainId === null) {
-                this.state.chainId = network.chain_id;
+            if (nextChainId === null) {
+                nextChainId = network.chain_id;
                 this.terminal.log(`Chain ID: ${network.chain_id}`, 'dim');
             }
 
-            if (this.state.rollupContract === null) {
-                this.state.rollupContract = network.rollup_contract;
+            if (nextRollupContract === null) {
+                nextRollupContract = network.rollup_contract;
                 this.terminal.log(`Rollup: ${network.rollup_contract}`, 'dim');
             }
 
-            if (network.chain_id !== this.state.chainId) {
-                this.completeStatus(false, `DISCONNECT - chain_id mismatch: expected ${this.state.chainId}, got ${network.chain_id}. Create new a wallet for given node`);
+            if (network.chain_id !== nextChainId) {
+                this.completeStatus(false, `DISCONNECT - chain_id mismatch: expected ${nextChainId}, got ${network.chain_id}. Create new a wallet for given node`);
                 return;
             }
 
-            if (network.rollup_contract.toLowerCase() !== this.state.rollupContract.toLowerCase()) {
-                this.completeStatus(false, `DISCONNECT - rollup contract mismatch: expected ${this.state.rollupContract}, got ${network.rollup_contract}. Create a new wallet for given node`);
+            if (network.rollup_contract.toLowerCase() !== nextRollupContract.toLowerCase()) {
+                this.completeStatus(false, `DISCONNECT - rollup contract mismatch: expected ${nextRollupContract}, got ${network.rollup_contract}. Create a new wallet for given node`);
                 return;
             }
+
+            this.state.chainId = nextChainId;
+            this.state.rollupContract = nextRollupContract;
         } catch (e) {
             this.terminal.log(`Warning: could not fetch network info: ${e.message}`, 'warning');
         }
 
-        this.updateConnectionStatus(true, `${this.state.nodeHost}:${this.state.nodePort}`);
+        this.state.nodeHost = nextNodeHost;
+        this.state.nodePort = nextNodePort;
+        this.state.nodeTls = nextNodeTls;
+        this.updateConnectionStatus(true, nextNodeEndpoint);
 
-        this.completeStatus(true, `CONNECTED: ${this.state.nodeHost}:${this.state.nodePort}`);
+        this.completeStatus(true, `CONNECTED: ${nextNodeEndpoint}`);
     }
 
     startMint() {
@@ -1006,6 +1051,7 @@ class CipheraApp {
             gethRpc: answers.gethRpc,
             host: this.state.nodeHost,
             port: this.state.nodePort,
+            noTls: !this.state.nodeTls,
             chain: this.state.chainId,
             rollup: rollupContract,
         });
@@ -1022,13 +1068,12 @@ class CipheraApp {
         // Step 4: Update wallet balance
         const mintedBalance = this.extractBalance(result.output);
         if (mintedBalance !== null) {
-            this.state.balance += mintedBalance;
+            this.state.balance = mintedBalance;
             this.updateBalanceDisplay();
         } else {
             const walletData = await window.ciphera.readWallet(this.state.walletName);
             if (walletData.exists) {
-                this.state.balance = walletData.wallet.balance || 0;
-                this.updateBalanceDisplay();
+                this.applyWalletState(walletData.wallet, this.state.walletName, {preserveChainId: true});
             }
         }
 
@@ -1088,7 +1133,15 @@ class CipheraApp {
 
         this.updateStatus('⏳ SEND: Creating private note...');
 
-        const result = await window.ciphera.spend(this.state.walletName, amountWei, undefined, this.state.chainId, this.state.nodeHost, this.state.nodePort);
+        const result = await window.ciphera.spend(
+            this.state.walletName,
+            amountWei,
+            undefined,
+            this.state.chainId,
+            this.state.nodeHost,
+            this.state.nodePort,
+            !this.state.nodeTls,
+        );
 
         if (!result.success) {
             this.completeStatus(false, `SEND FAILED - ${result.error}`);
@@ -1106,8 +1159,7 @@ class CipheraApp {
         } else {
             const walletData = await window.ciphera.readWallet(this.state.walletName);
             if (walletData.exists) {
-                this.state.balance = walletData.wallet.balance || 0;
-                this.updateBalanceDisplay();
+                this.applyWalletState(walletData.wallet, this.state.walletName, {preserveChainId: true});
             }
         }
 
@@ -1166,6 +1218,7 @@ class CipheraApp {
             noteFile: answers.noteFile,
             host: this.state.nodeHost,
             port: this.state.nodePort,
+            noTls: !this.state.nodeTls,
             chain: this.state.chainId,
         });
 
@@ -1185,8 +1238,7 @@ class CipheraApp {
         } else {
             const walletData = await window.ciphera.readWallet(this.state.walletName);
             if (walletData.exists) {
-                this.state.balance = walletData.wallet.balance || 0;
-                this.updateBalanceDisplay();
+                this.applyWalletState(walletData.wallet, this.state.walletName, {preserveChainId: true});
             }
         }
 
@@ -1250,6 +1302,7 @@ class CipheraApp {
             address: answers.address,
             host: this.state.nodeHost,
             port: this.state.nodePort,
+            noTls: !this.state.nodeTls,
             chain: this.state.chainId,
         });
 
@@ -1269,8 +1322,7 @@ class CipheraApp {
         } else {
             const walletData = await window.ciphera.readWallet(this.state.walletName);
             if (walletData.exists) {
-                this.state.balance = walletData.wallet.balance || 0;
-                this.updateBalanceDisplay();
+                this.applyWalletState(walletData.wallet, this.state.walletName, {preserveChainId: true});
             }
         }
 
@@ -1401,11 +1453,7 @@ class CipheraApp {
         }
 
         const wallet = result.wallet;
-        this.state.walletName = wallet.name;
-        this.state.walletAddress = wallet.pk;
-        this.state.balance = wallet.balance || 0;
-        this.updateWalletDisplay();
-        this.updateBalanceDisplay();
+        this.activateWallet(wallet, wallet.name);
 
         this.completeStatus(true, `WALLET IMPORTED: ${wallet.name}`);
         this.terminal.log(`Address: ${this.truncateAddress(wallet.pk)}`, 'dim');
@@ -1471,7 +1519,7 @@ class CipheraApp {
 
         try {
             // Fetch height
-            const heightRes = await fetch(`https://${this.state.nodeHost}:${this.state.nodePort}/v0/height`);
+            const heightRes = await fetch(`${this.getNodeBaseUrl()}/height`);
             if (heightRes.ok) {
                 const heightData = await heightRes.json();
                 if (this.elements.statHeight) {
@@ -1480,7 +1528,7 @@ class CipheraApp {
             }
 
             // Fetch stats
-            const statsRes = await fetch(`https://${this.state.nodeHost}:${this.state.nodePort}/v0/stats`);
+            const statsRes = await fetch(`${this.getNodeBaseUrl()}/stats`);
             if (statsRes.ok) {
                 const stats = await statsRes.json();
                 if (this.elements.statTxCount) {
@@ -1586,14 +1634,14 @@ class CipheraApp {
         const paddedHash = cleanHash.padStart(64, '0');
 
         // Try plural endpoint first (v0/transactions/{hash})
-        let url = `https://${this.state.nodeHost}:${this.state.nodePort}/v0/transactions/${paddedHash}`;
+        let url = `${this.getNodeBaseUrl()}/transactions/${paddedHash}`;
         console.log('[Explorer] Trying:', url);
         let response = await fetch(url);
         console.log('[Explorer] Response:', response.status);
 
         // If not found, try singular endpoint (v0/transaction/{hash})
         if (!response.ok && response.status === 404) {
-            url = `https://${this.state.nodeHost}:${this.state.nodePort}/v0/transaction/${paddedHash}`;
+            url = `${this.getNodeBaseUrl()}/transaction/${paddedHash}`;
             console.log('[Explorer] Trying:', url);
             response = await fetch(url);
             console.log('[Explorer] Response:', response.status);
@@ -1613,7 +1661,7 @@ class CipheraApp {
     }
 
     async explorerLookupBlock(blockNum) {
-        const response = await fetch(`https://${this.state.nodeHost}:${this.state.nodePort}/v0/blocks/${blockNum}`);
+        const response = await fetch(`${this.getNodeBaseUrl()}/blocks/${blockNum}`);
 
         if (!response.ok) {
             if (response.status === 404) {
@@ -1632,7 +1680,7 @@ class CipheraApp {
         const cleanHash = hash.startsWith('0x') ? hash.slice(2) : hash;
         const paddedHash = cleanHash.padStart(64, '0');
 
-        const response = await fetch(`https://${this.state.nodeHost}:${this.state.nodePort}/v0/elements/${paddedHash}`);
+        const response = await fetch(`${this.getNodeBaseUrl()}/elements/${paddedHash}`);
 
         if (!response.ok) {
             if (response.status === 404) {

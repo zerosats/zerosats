@@ -19,8 +19,8 @@ use smirk::{
 };
 use smirk_metadata::SmirkMetadata;
 use std::sync::Arc;
-use tracing::info;
-use web3::{ethabi, types::TransactionId};
+use tracing::{info, warn};
+use web3::ethabi;
 use zk_primitives::{
     AggAgg, AggAggProof, AggUtxo, AggUtxoProof, MerklePath, UtxoProof,
     UtxoProofBundleWithMerkleProofs,
@@ -38,6 +38,12 @@ pub enum Error {
     // Temporary workaround, sometimes rollup transactions get stuck. Restarting the prover fixes it
     #[error("rollup transaction timed out")]
     RollupTransactionTimeout,
+
+    #[error("rollup transaction dropped from mempool: {0}")]
+    RollupTransactionDropped(H256),
+
+    #[error("rollup transaction reverted: {0}")]
+    RollupTransactionReverted(H256),
 
     #[error("from hex error")]
     FromHex(#[from] rustc_hex::FromHexError),
@@ -191,26 +197,36 @@ impl Prover {
         info!(?tx, "EVM root rollup update sent. Waiting for receipt...",);
 
         let wait_start = std::time::Instant::now();
-        while self
-            .contract
-            .client
-            .client()
-            .eth()
-            .transaction_receipt(tx)
-            .await?
-            .is_none()
-        {
-            if self
-                .contract
-                .client
-                .client()
-                .eth()
-                .transaction(TransactionId::Hash(tx))
-                .await?
-                .is_none()
-            {
-                // The transaction was dropped
-                break;
+        // Wall-clock deadline for the tx to reappear after going unknown,
+        // matching the 60s semantics in Client::wait_for_transaction_inclusion().
+        let mut unknown_deadline: Option<std::time::Instant> = None;
+        loop {
+            if let Some(receipt) = self.contract.client.transaction_receipt(tx).await? {
+                if receipt.status == Some(0.into()) {
+                    return Err(Error::RollupTransactionReverted(tx));
+                }
+
+                info!("EVM root rollup update confirmed");
+                return Ok(tx);
+            }
+
+            if self.contract.client.transaction(tx).await?.is_none() {
+                // RPC nodes can transiently return None for valid pending/included
+                // transactions (load balancers, caching, eventual consistency).
+                // Set a wall-clock deadline on first miss; do not reset on reappearance
+                // so a flapping backend still gets a bounded wait.
+                if unknown_deadline.is_none() {
+                    unknown_deadline =
+                        Some(std::time::Instant::now() + std::time::Duration::from_secs(15));
+                    warn!(
+                        ?tx,
+                        "Transaction not found in mempool; \
+                         will declare dropped if still absent in 15s"
+                    );
+                }
+                if std::time::Instant::now() > unknown_deadline.expect("just set above") {
+                    return Err(Error::RollupTransactionDropped(tx));
+                }
             }
 
             // Wait for a maximum of 5 minutes
@@ -220,10 +236,6 @@ impl Prover {
 
             tokio::time::sleep(std::time::Duration::from_secs(1)).await;
         }
-
-        info!("EVM root rollup update confirmed");
-
-        Ok(tx)
     }
 
     #[tracing::instrument(err, skip_all)]
