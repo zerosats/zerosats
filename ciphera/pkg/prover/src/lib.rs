@@ -19,7 +19,7 @@ use smirk::{
 };
 use smirk_metadata::SmirkMetadata;
 use std::sync::Arc;
-use tracing::info;
+use tracing::{info, warn};
 use web3::ethabi;
 use zk_primitives::{
     AggAgg, AggAggProof, AggUtxo, AggUtxoProof, MerklePath, UtxoProof,
@@ -197,6 +197,9 @@ impl Prover {
         info!(?tx, "EVM root rollup update sent. Waiting for receipt...",);
 
         let wait_start = std::time::Instant::now();
+        // Wall-clock deadline for the tx to reappear after going unknown,
+        // matching the 60s semantics in Client::wait_for_transaction_inclusion().
+        let mut unknown_deadline: Option<std::time::Instant> = None;
         loop {
             if let Some(receipt) = self.contract.client.transaction_receipt(tx).await? {
                 if receipt.status == Some(0.into()) {
@@ -208,7 +211,22 @@ impl Prover {
             }
 
             if self.contract.client.transaction(tx).await?.is_none() {
-                return Err(Error::RollupTransactionDropped(tx));
+                // RPC nodes can transiently return None for valid pending/included
+                // transactions (load balancers, caching, eventual consistency).
+                // Set a wall-clock deadline on first miss; do not reset on reappearance
+                // so a flapping backend still gets a bounded wait.
+                if unknown_deadline.is_none() {
+                    unknown_deadline =
+                        Some(std::time::Instant::now() + std::time::Duration::from_secs(15));
+                    warn!(
+                        ?tx,
+                        "Transaction not found in mempool; \
+                         will declare dropped if still absent in 15s"
+                    );
+                }
+                if std::time::Instant::now() > unknown_deadline.expect("just set above") {
+                    return Err(Error::RollupTransactionDropped(tx));
+                }
             }
 
             // Wait for a maximum of 5 minutes
