@@ -5,12 +5,12 @@ use ethereum_types::{Address, H256, U64};
 use testutil::eth::EthNode;
 use tokio::time::interval;
 use web3::{
-    contract::{tokens::Tokenize, Contract, Options},
+    Web3,
+    contract::{Contract, Options, tokens::Tokenize},
     ethabi,
     signing::SecretKey,
     transports::Http,
-    types::{BlockId, BlockNumber, Transaction, U256},
-    Web3,
+    types::{BlockNumber, Transaction, U256},
 };
 
 /// Configuration for different types of transaction confirmation requirements.
@@ -101,16 +101,19 @@ impl Client {
             )
             .await?;
 
-        // Extract base fee from the block to be mined
-        let base_fee = fee_history
-            .base_fee_per_gas
-            .last()
-            .ok_or_else(|| {
-                web3::Error::InvalidResponse(
-                    "fee_history.base_fee_per_gas was empty (no base fee in latest block)".to_string(),
-                )
-            })?
-            .clone();
+        // fee_history.base_fee_per_gas has N+1 entries for N requested blocks:
+        // [0..N-1] are historical, [N-1] is the latest block, [N] is the
+        // projected next block. Use the higher of the latest and projected
+        // values so the tx stays admissible even if the base fee rises.
+        let fees = &fee_history.base_fee_per_gas;
+        if fees.len() < 2 {
+            return Err(web3::Error::InvalidResponse(
+                "fee_history.base_fee_per_gas had fewer than 2 entries".to_string(),
+            ));
+        }
+        let current_base_fee = fees[fees.len() - 2];
+        let projected_next_base_fee = fees[fees.len() - 1];
+        let base_fee = current_base_fee.max(projected_next_base_fee);
 
         // Extract priority fee from rewards
         let priority_fee = fee_history
@@ -130,10 +133,12 @@ impl Client {
             })?
             .clone();
 
-        // Calculate max fee with buffer for next block's base fee
-        let next_base_fee = base_fee.saturating_mul(U256::from(strategy.base_fee_buffer_percent()))
+        // Calculate max fee with a strategy-specific buffer on top of the
+        // stricter base fee floor so the transaction remains admissible.
+        let buffered_base_fee = base_fee
+            .saturating_mul(U256::from(strategy.base_fee_buffer_percent()))
             / U256::from(100);
-        let max_fee = next_base_fee.saturating_add(priority_fee);
+        let max_fee = buffered_base_fee.saturating_add(priority_fee);
 
         // Apply minimum gas price if configured
         let max_fee = match self.minimum_gas_price {
@@ -222,13 +227,24 @@ impl Client {
         signer: &SecretKey,
         signer_address: Address,
     ) -> Result<H256> {
-        let strategy = FeeStrategy::Lowest;
+        let strategy = FeeStrategy::default();
         let options = self.options_eip1559(signer_address, strategy).await?;
 
-        let gas = retry_on_network_failure(|| {
-            contract.estimate_gas(func, params.clone(), signer_address, options.clone())
+        // Prefer eth_estimateDiffSize (Citrea-specific) for a tighter gas limit.
+        // Falls back to eth_estimateGas on chains that don't support it.
+        let gas = match retry_on_network_failure(|| {
+            contract.estimate_diff_size(func, params.clone(), signer_address, options.clone())
         })
-        .await?;
+        .await
+        {
+            Ok(diff) if !diff.gas.is_zero() => diff.gas,
+            _ => {
+                retry_on_network_failure(|| {
+                    contract.estimate_gas(func, params.clone(), signer_address, options.clone())
+                })
+                .await?
+            }
+        };
 
         let call_tx = retry_on_network_failure(move || {
             contract.signed_call(
@@ -514,7 +530,7 @@ pub(crate) async fn retry_on_network_failure<
 
 #[cfg(test)]
 mod tests {
-    use std::sync::{atomic::AtomicU16, Arc};
+    use std::sync::{Arc, atomic::AtomicU16};
 
     use web3::error::Error;
     use web3::error::TransportError;

@@ -22,6 +22,12 @@ pub enum FeeStrategy {
     Fast,
 }
 
+impl Default for FeeStrategy {
+    fn default() -> Self {
+        Self::Standard
+    }
+}
+
 impl FeeStrategy {
     /// Get priority fee percentile for this strategy
     pub fn percentile(&self) -> f64 {
