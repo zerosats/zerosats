@@ -4,6 +4,7 @@ mod client;
 mod constants;
 mod erc20;
 mod error;
+mod fees;
 mod rollup;
 #[cfg(test)]
 mod tests;
@@ -13,6 +14,7 @@ pub mod wallet;
 pub use client::{Client, ConfirmationType};
 pub use erc20::ERC20Contract;
 pub use error::{Error, Result};
+pub use fees::{Eip1559Fees, FeeStrategy};
 pub use rollup::{ReadonlyRollupContract, SignedRollupContract};
 pub type RollupContract = SignedRollupContract;
 

@@ -1,6 +1,6 @@
 use std::{future::Future, time::Duration};
 
-use crate::{Error, Result};
+use crate::{Eip1559Fees, Error, FeeStrategy, Result};
 use ethereum_types::{Address, H256, U64};
 #[cfg(any(test, feature = "test-helpers"))]
 use testutil::eth::EthNode;
@@ -11,7 +11,7 @@ use web3::{
     ethabi,
     signing::SecretKey,
     transports::Http,
-    types::{Transaction, TransactionId, TransactionReceipt, U256},
+    types::{BlockNumber, Transaction, TransactionId, TransactionReceipt, U256},
 };
 
 /// Configuration for different types of transaction confirmation requirements.
@@ -89,14 +89,70 @@ impl Client {
         Ok(block_number)
     }
 
-    pub async fn save_gas_price(&self) -> Result<U256, web3::Error> {
-        let gas_price: U256 =
-            retry_on_network_failure(move || self.client.eth().gas_price()).await?;
+    pub async fn estimate_eip1559_fees(
+        &self,
+        strategy: FeeStrategy,
+    ) -> Result<Eip1559Fees, web3::Error> {
+        let fee_history = self
+            .client
+            .eth()
+            .fee_history(
+                U256::from(4),
+                BlockNumber::Latest,
+                Some(vec![strategy.percentile()]),
+            )
+            .await?;
 
-        match self.minimum_gas_price {
-            Some(minimum_gas_price) if gas_price < minimum_gas_price => Ok(minimum_gas_price),
-            _ => Ok(gas_price), // works most of the time unless MINIMUM_GAS_PRICE_GWEI is set
+        // fee_history.base_fee_per_gas has N+1 entries for N requested blocks:
+        // [0..N-1] are historical, [N-1] is the latest block, [N] is the
+        // projected next block. Use the higher of the latest and projected
+        // values so the tx stays admissible even if the base fee rises.
+        let fees = &fee_history.base_fee_per_gas;
+        if fees.len() < 2 {
+            return Err(web3::Error::InvalidResponse(
+                "fee_history.base_fee_per_gas had fewer than 2 entries".to_string(),
+            ));
         }
+        let current_base_fee = fees[fees.len() - 2];
+        let projected_next_base_fee = fees[fees.len() - 1];
+        let base_fee = current_base_fee.max(projected_next_base_fee);
+
+        // Extract priority fee from rewards
+        let priority_fee = fee_history
+            .reward
+            .ok_or_else(|| {
+                web3::Error::InvalidResponse(
+                    "fee_history.reward was missing in eth_feeHistory response".to_string(),
+                )
+            })?
+            .last()
+            .and_then(|inner_vec| inner_vec.first())
+            .ok_or_else(|| {
+                web3::Error::InvalidResponse(
+                    "fee_history.reward was empty or lacked a first entry for the requested percentile"
+                        .to_string(),
+                )
+            })?
+            .clone();
+
+        // Calculate max fee with a strategy-specific buffer on top of the
+        // stricter base fee floor so the transaction remains admissible.
+        let buffered_base_fee = base_fee
+            .saturating_mul(U256::from(strategy.base_fee_buffer_percent()))
+            / U256::from(100);
+        let max_fee = buffered_base_fee.saturating_add(priority_fee);
+
+        // Apply minimum gas price if configured
+        let max_fee = match self.minimum_gas_price {
+            Some(min_price) if max_fee < min_price => min_price,
+            _ => max_fee,
+        };
+
+        Ok(Eip1559Fees {
+            base_fee,
+            priority_fee,
+            max_fee,
+        })
     }
 
     /// Returns the current chain id with network-failure retries.
@@ -141,7 +197,7 @@ impl Client {
     pub async fn get_nonce(
         &self,
         address: Address,
-        block: web3::types::BlockNumber,
+        block: BlockNumber,
     ) -> Result<U256, web3::Error> {
         self.client
             .eth()
@@ -159,32 +215,36 @@ impl Client {
 
     #[tracing::instrument(err, ret, skip(self))]
     pub async fn latest_nonce(&self, address: Address) -> Result<U256, web3::Error> {
-        self.nonce_at_block(address, web3::types::BlockNumber::Latest)
-            .await
+        self.nonce_at_block(address, BlockNumber::Latest).await
     }
 
     #[tracing::instrument(err, ret, skip(self))]
     pub async fn pending_nonce(&self, address: Address) -> Result<U256, web3::Error> {
-        self.nonce_at_block(address, web3::types::BlockNumber::Pending)
-            .await
+        self.nonce_at_block(address, BlockNumber::Pending).await
     }
 
     async fn nonce_at_block(
         &self,
         address: Address,
-        block: web3::types::BlockNumber,
+        block: BlockNumber,
     ) -> Result<U256, web3::Error> {
         retry_on_network_failure(move || self.get_nonce(address, block)).await
     }
 
-    pub(crate) async fn options(&self, address: Address) -> Result<Options, web3::Error> {
-        let gas_price = self.save_gas_price().await?;
+    pub(crate) async fn options_eip1559(
+        &self,
+        address: Address,
+        strategy: FeeStrategy,
+    ) -> Result<Options, web3::Error> {
+        let fees = self.estimate_eip1559_fees(strategy).await?;
         let nonce = self.nonce(address).await?;
 
         Ok(Options {
             gas: Some(10_000_000.into()),
-            gas_price: Some(gas_price),
+            max_fee_per_gas: Some(fees.max_fee),
+            max_priority_fee_per_gas: Some(fees.priority_fee),
             nonce: Some(nonce),
+            transaction_type: Some(U64::from(2)), // EIP-1559 type
             ..Default::default()
         })
     }
@@ -197,18 +257,31 @@ impl Client {
         signer: &SecretKey,
         signer_address: Address,
     ) -> Result<H256> {
-        let options = self.options(signer_address).await?;
-        let gas = retry_on_network_failure(|| {
-            contract.estimate_gas(func, params.clone(), signer_address, options.clone())
+        let strategy = FeeStrategy::default();
+        let options = self.options_eip1559(signer_address, strategy).await?;
+
+        // Prefer eth_estimateDiffSize (Citrea-specific) for a tighter gas limit.
+        // Falls back to eth_estimateGas on chains that don't support it.
+        let gas = match retry_on_network_failure(|| {
+            contract.estimate_diff_size(func, params.clone(), signer_address, options.clone())
         })
-        .await?;
+        .await
+        {
+            Ok(diff) if !diff.gas.is_zero() => diff.gas,
+            _ => {
+                retry_on_network_failure(|| {
+                    contract.estimate_gas(func, params.clone(), signer_address, options.clone())
+                })
+                .await?
+            }
+        };
 
         let call_tx = retry_on_network_failure(move || {
             contract.signed_call(
                 func,
                 params,
                 web3::contract::Options {
-                    gas: Some(gas + gas / 2),
+                    gas: Some(gas.saturating_add(gas / 10)),
                     ..options
                 },
                 signer,
