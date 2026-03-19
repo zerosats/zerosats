@@ -5,11 +5,12 @@
 
 use crate::wallet::Wallet;
 use color_eyre::Result;
-use contracts::{ERC20Contract, RollupContract};
+use contracts::{ERC20Contract, SignedRollupContract};
 use hash::hash_merge;
 use node_interface::{HeightResponse, TransactionResponse};
 use once_cell::sync::Lazy;
 use serde_json::json;
+use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
@@ -41,6 +42,7 @@ pub struct NodeClientBuilder {
     host: String,
     port: u16,
     timeout: Duration,
+    wallet_dir: PathBuf,
 }
 
 impl NodeClientBuilder {
@@ -56,6 +58,7 @@ impl NodeClientBuilder {
             host: "127.0.0.1".to_string(),
             port: 8091,
             timeout: Duration::from_secs(10),
+            wallet_dir: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
         }
     }
 
@@ -88,6 +91,11 @@ impl NodeClientBuilder {
         self
     }
 
+    pub fn wallet_dir(mut self, wallet_dir: impl Into<PathBuf>) -> Self {
+        self.wallet_dir = wallet_dir.into();
+        self
+    }
+
     /// Build the NodeClient
     pub fn build(self, chain_id: u64, tls: bool, create_wallet: bool) -> Result<NodeClient> {
         let proto = if tls { "https" } else { "http" };
@@ -97,14 +105,18 @@ impl NodeClientBuilder {
         debug!("Building NodeClient for: {}", base_url);
 
         let wallet = if create_wallet {
-            Wallet::create(chain_id, &self.name)?
+            Wallet::create_in(&self.wallet_dir, chain_id, &self.name)?
         } else {
-            let loaded_wallet = Wallet::load(&self.name)?;
-            if loaded_wallet.chain_id != chain_id {
-                return Err(color_eyre::eyre::eyre!(
-                    "ChainId in loaded file is different to provided {}",
-                    chain_id
-                ));
+            let loaded_wallet = Wallet::load_from(&self.wallet_dir, &self.name)?;
+            // Legacy wallet files may omit chain_id entirely. In that case we
+            // defer chain binding until the wallet is explicitly synced.
+            if let Some(loaded_chain_id) = loaded_wallet.chain_id {
+                if loaded_chain_id != chain_id {
+                    return Err(color_eyre::eyre::eyre!(
+                        "ChainId in loaded file is different to provided {}",
+                        chain_id
+                    ));
+                }
             }
             loaded_wallet
         };
@@ -179,8 +191,8 @@ impl NodeClient {
         &self.wallet
     }
 
-    pub fn get_wallet_mut(&mut self) -> &mut Wallet {
-        &mut self.wallet
+    pub fn replace_wallet(&mut self, wallet: Wallet) {
+        self.wallet = wallet;
     }
 
     /// Check the health of the node
@@ -320,7 +332,7 @@ impl NodeClient {
         let sk = SecretKey::from_str(secret)?;
         let client = contracts::Client::new(geth_rpc, None);
 
-        let rollup = RollupContract::load(client, &chain_id, rollup, sk).await?;
+        let rollup = SignedRollupContract::load(client, &chain_id, rollup, sk).await?;
 
         let mint_hash = hash_merge([note.psi, Note::padding_note().psi]);
 
@@ -359,7 +371,7 @@ impl NodeClient {
         let client = contracts::Client::new(geth_rpc, None);
 
         let erc20_contract = ERC20Contract::load(client.clone(), erc20_contract, sk).await?;
-        let rollup = RollupContract::load(client, &chain_id, rollup, sk).await?;
+        let rollup = SignedRollupContract::load(client, &chain_id, rollup, sk).await?;
 
         let secp = secp256k1::Secp256k1::new();
         let secret_key = secp256k1::SecretKey::from_slice(&sk.secret_bytes()).unwrap();
@@ -396,6 +408,7 @@ impl NodeClient {
 #[cfg(test)]
 mod client_tests {
     use super::*;
+    use tempdir::TempDir;
 
     const CHAIN_ID: u64 = 5115; // Citrea testnet
 
@@ -439,7 +452,7 @@ mod client_tests {
 
     /// tls=true produces https://
     #[test]
-    fn test_build_tls_true_gives_http_scheme() {
+    fn test_build_tls_true_gives_https_scheme() {
         let name = "scheme-http-test-wallet";
         let file = format!("{name}.json");
         let _ = std::fs::remove_file(&file);
@@ -462,7 +475,7 @@ mod client_tests {
 
     /// tls=false produces http://
     #[test]
-    fn test_build_tls_false_gives_https_scheme() {
+    fn test_build_tls_false_gives_http_scheme() {
         let name = "scheme-https-test-wallet";
         let file = format!("{name}.json");
         let _ = std::fs::remove_file(&file);
@@ -624,6 +637,31 @@ mod client_tests {
             msg.contains("ChainId") || msg.contains("chain") || msg.contains("different"),
             "error should mention chain_id mismatch; got: {msg}"
         );
+    }
+
+    /// create_wallet=false accepts legacy wallet files that predate chain_id.
+    #[test]
+    fn test_build_load_wallet_accepts_legacy_wallet_without_chain_id() {
+        let name = "legacy-chainless-test-wallet";
+        let wallet_dir = TempDir::new("legacy-chainless-wallet").unwrap();
+        let wallet_path = Wallet::wallet_path_in(wallet_dir.path(), name);
+
+        let wallet = Wallet::random(CHAIN_ID, Some(name.to_string()));
+        let mut wallet_json = serde_json::to_value(&wallet).unwrap();
+        wallet_json.as_object_mut().unwrap().remove("chain_id");
+        std::fs::write(
+            &wallet_path,
+            serde_json::to_string_pretty(&wallet_json).unwrap(),
+        )
+        .unwrap();
+
+        let client = NodeClientBuilder::new()
+            .name(name)
+            .wallet_dir(wallet_dir.path())
+            .build(CHAIN_ID, true, false)
+            .expect("legacy wallet without chain_id must still load");
+
+        assert_eq!(client.get_wallet().chain_id, None);
     }
 
     // =====================================================================

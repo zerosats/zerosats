@@ -19,7 +19,7 @@ use prover::{Prover, Transaction};
 use scopeguard::ScopeGuard;
 use smirk::empty_tree_hash;
 use tokio::sync::{Mutex, Notify, mpsc};
-use tracing::{error, info};
+use tracing::{error, info, warn};
 use zk_primitives::{AggAggProof, UtxoKind};
 
 pub async fn run_prover(config: &Config, node: Arc<NodeShared>) -> Result<()> {
@@ -366,20 +366,82 @@ where
     unreachable!()
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ContractRollupState {
+    height: BlockHeight,
+    root_hash: Element,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RollupStateProgress {
+    Applied,
+    AdvancedElsewhere,
+    Unchanged,
+}
+
+async fn fetch_contract_rollup_state(
+    rollup_contract: &RollupContract,
+) -> Result<ContractRollupState> {
+    Ok(ContractRollupState {
+        height: BlockHeight(rollup_contract.block_height().await?),
+        root_hash: Element::from_be_bytes(rollup_contract.root_hash().await?.0),
+    })
+}
+
+fn classify_rollup_progress(
+    before: ContractRollupState,
+    after: ContractRollupState,
+    rollup: &RollupInput,
+) -> RollupStateProgress {
+    if after.height >= BlockHeight(rollup.height()) && after.root_hash == rollup.new_root() {
+        RollupStateProgress::Applied
+    } else if after != before {
+        RollupStateProgress::AdvancedElsewhere
+    } else {
+        RollupStateProgress::Unchanged
+    }
+}
+
+fn is_retryable_rollup_error(err: &prover::Error) -> bool {
+    is_transport_rollup_error(err) || is_nonce_conflict_error(err)
+}
+
+fn is_transport_rollup_error(err: &prover::Error) -> bool {
+    match err {
+        prover::Error::Web3(web3::Error::Transport(_)) => true,
+        prover::Error::Web3Contract(web3::contract::Error::Api(web3::Error::Transport(_))) => true,
+        prover::Error::Contract(contracts::Error::Web3(web3::Error::Transport(_))) => true,
+        prover::Error::Contract(contracts::Error::Web3Contract(web3::contract::Error::Api(
+            web3::Error::Transport(_),
+        ))) => true,
+        _ => false,
+    }
+}
+
+fn is_nonce_conflict_error(err: &prover::Error) -> bool {
+    let message = err.to_string().to_ascii_lowercase();
+    [
+        "nonce too low",
+        "nonce too high",
+        "nonce has already been used",
+        "replacement transaction underpriced",
+    ]
+    .iter()
+    .any(|pattern| message.contains(pattern))
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn run_rollup_worker(
     wait_time: Duration,
-    mut rollup_contract: RollupContract,
+    rollup_contract: RollupContract,
     prover_state_db: Arc<ProverDb>,
     prover: Arc<Prover>,
     proof_notifier: Arc<Notify>,
     rollup_subscription: Option<mpsc::Sender<BlockHeight>>,
     postgres_db: Option<Arc<tokio_postgres::Client>>,
 ) -> Result<()> {
-    rollup_contract.client.use_latest_for_nonce = true;
-    let rollup_contract = rollup_contract;
-
     let mut skip_waiting = true;
+    let mut retried_height = None;
     loop {
         if !skip_waiting {
             tokio::select! {
@@ -397,11 +459,15 @@ async fn run_rollup_worker(
             .list_rollups(contract_height.next()..max)
             .next()
         else {
+            retried_height = None;
             info!(?contract_height, "No proofs to roll up");
             continue;
         };
 
         let (height, rollup) = rollup?;
+        if retried_height.is_some_and(|retried| retried != height) {
+            retried_height = None;
+        }
         let mut postgres_missed_proof_release_lock = Option::<ScopeGuard<(), _>>::None;
 
         let rollup_contract_root_hash =
@@ -466,18 +532,12 @@ async fn run_rollup_worker(
 
         let pending_nonce = rollup_contract
             .client
-            .get_nonce(
-                rollup_contract.signer_address,
-                web3::types::BlockNumber::Pending,
-            )
+            .pending_nonce(rollup_contract.signer_address)
             .await
             .map_err(Error::FailedToGetNonce)?;
         let latest_nonce = rollup_contract
             .client
-            .get_nonce(
-                rollup_contract.signer_address,
-                web3::types::BlockNumber::Latest,
-            )
+            .latest_nonce(rollup_contract.signer_address)
             .await
             .map_err(Error::FailedToGetNonce)?;
         let txn_is_pending = pending_nonce > latest_nonce;
@@ -492,25 +552,90 @@ async fn run_rollup_worker(
 
         info!(counter.rolling_up_height = ?height, "Rolling up proof");
 
-        if let Err(err) = prover.rollup(&rollup).await {
-            if let prover::Error::RollupTransactionTimeout = err {
-                // This should exit the process
-                return Err(err.into());
+        let pre_state = fetch_contract_rollup_state(&rollup_contract).await?;
+        let rollup_result = prover.rollup(&rollup).await;
+        let post_state = fetch_contract_rollup_state(&rollup_contract).await?;
+
+        match classify_rollup_progress(pre_state, post_state, &rollup) {
+            RollupStateProgress::Applied => {
+                retried_height = None;
+
+                match &rollup_result {
+                    Ok(tx) => info!(?tx, ?post_state, "Rollup proof applied to contract"),
+                    Err(err) => info!(?err, ?post_state, "Rollup proof applied despite send error"),
+                }
+
+                info!(counter.rolled_up_height = ?height, "Rolled up proof");
+
+                if let Some(rollup_subscription) = &rollup_subscription {
+                    rollup_subscription.send(height).await?;
+                }
+
+                // There might be more rollups to do, so after a success,
+                // don't wait a constant duration
+                skip_waiting = true;
             }
+            RollupStateProgress::AdvancedElsewhere => {
+                retried_height = None;
 
-            error!(?err, ?rollup, "Failed to roll up proof");
-            continue;
+                match &rollup_result {
+                    Ok(tx) => info!(
+                        ?tx,
+                        ?pre_state,
+                        ?post_state,
+                        "Contract state advanced while handling rollup; moving on"
+                    ),
+                    Err(err) => info!(
+                        ?err,
+                        ?pre_state,
+                        ?post_state,
+                        "Contract state advanced while handling rollup; moving on"
+                    ),
+                }
+
+                skip_waiting = true;
+            }
+            RollupStateProgress::Unchanged => match rollup_result {
+                Err(err @ prover::Error::RollupTransactionTimeout) => {
+                    // This should exit the process
+                    return Err(err.into());
+                }
+                Err(err) if is_retryable_rollup_error(&err) && retried_height != Some(height) => {
+                    retried_height = Some(height);
+                    warn!(
+                        ?err,
+                        ?rollup,
+                        ?pre_state,
+                        ?post_state,
+                        "Rollup attempt left contract state unchanged; retrying once immediately"
+                    );
+                    skip_waiting = true;
+                    continue;
+                }
+                Err(err) => {
+                    retried_height = None;
+                    error!(
+                        ?err,
+                        ?rollup,
+                        ?pre_state,
+                        ?post_state,
+                        "Failed to roll up proof"
+                    );
+                    continue;
+                }
+                Ok(tx) => {
+                    retried_height = None;
+                    error!(
+                        ?tx,
+                        ?rollup,
+                        ?pre_state,
+                        ?post_state,
+                        "Rollup transaction completed without advancing contract state"
+                    );
+                    continue;
+                }
+            },
         }
-
-        info!(counter.rolled_up_height = ?height, "Rolled up proof");
-
-        if let Some(rollup_subscription) = &rollup_subscription {
-            rollup_subscription.send(height).await?;
-        }
-
-        // There might be more rollups to do, so after a success,
-        // don't wait a constant duration
-        skip_waiting = true;
     }
 }
 
@@ -532,6 +657,7 @@ mod tests {
         ACCOUNT_1_SK,
         eth::{EthNode, EthNodeOptions},
     };
+    use web3::error::{Error as Web3Error, TransportError};
     use zk_primitives::AggAggProof;
 
     #[ignore]
@@ -628,5 +754,71 @@ mod tests {
             last_block = block;
             // last_root = new_root;
         }
+    }
+
+    #[test]
+    fn classify_rollup_progress_distinguishes_applied_advanced_and_unchanged() {
+        let mut proof = AggAggProof::default();
+        proof.public_inputs.new_root = Element::new(42);
+        let rollup = RollupInput::new(proof, 2, [0; 32], vec![]);
+
+        assert_eq!(
+            classify_rollup_progress(
+                ContractRollupState {
+                    height: BlockHeight(1),
+                    root_hash: Element::new(1),
+                },
+                ContractRollupState {
+                    height: BlockHeight(2),
+                    root_hash: Element::new(42),
+                },
+                &rollup,
+            ),
+            RollupStateProgress::Applied,
+        );
+
+        assert_eq!(
+            classify_rollup_progress(
+                ContractRollupState {
+                    height: BlockHeight(1),
+                    root_hash: Element::ZERO,
+                },
+                ContractRollupState {
+                    height: BlockHeight(3),
+                    root_hash: Element::new(2),
+                },
+                &rollup,
+            ),
+            RollupStateProgress::AdvancedElsewhere,
+        );
+
+        assert_eq!(
+            classify_rollup_progress(
+                ContractRollupState {
+                    height: BlockHeight(1),
+                    root_hash: Element::ZERO,
+                },
+                ContractRollupState {
+                    height: BlockHeight(1),
+                    root_hash: Element::ZERO,
+                },
+                &rollup,
+            ),
+            RollupStateProgress::Unchanged,
+        );
+    }
+
+    #[test]
+    fn retryable_rollup_errors_cover_transport_and_nonce_conflicts() {
+        let transport_err = prover::Error::Contract(contracts::Error::Web3(Web3Error::Transport(
+            TransportError::Code(503),
+        )));
+        assert!(is_retryable_rollup_error(&transport_err));
+
+        let nonce_err = prover::Error::BarretenbergProve("nonce too low".to_string());
+        assert!(is_retryable_rollup_error(&nonce_err));
+
+        let non_retryable_err = prover::Error::BarretenbergProve("proof invalid".to_string());
+        assert!(!is_retryable_rollup_error(&non_retryable_err));
     }
 }

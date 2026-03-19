@@ -34,3 +34,6 @@ bs58 = { workspace = true }
 [[bin]]
 name = "ciphera-cli"
 path = "src/main.rs"
+
+[dev-dependencies]
+tempdir.workspace = true

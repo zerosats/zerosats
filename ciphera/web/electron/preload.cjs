@@ -7,6 +7,13 @@
 
 const { contextBridge, ipcRenderer } = require('electron');
 
+function appendNodeConnectionArgs(args, { host, port, chain, noTls }) {
+    args.push('--host', host || 'ciphera.satsbridge.com');
+    args.push('--port', String(port || 443));
+    if (noTls) args.push('--no-tls');
+    if (chain) args.push('--chain', String(chain));
+}
+
 // Expose protected methods to the renderer process
 contextBridge.exposeInMainWorld('ciphera', {
     // ==========================================================================
@@ -132,15 +139,13 @@ contextBridge.exposeInMainWorld('ciphera', {
      * Connect to a node
      * @param {string} name - Wallet name
      * @param {string} [host='ciphera.satsbridge.com'] - Node host
-     * @param {number} [port=8091] - Node port
+     * @param {number} [port=443] - Node port
+     * @param {boolean} [noTls=false] - Use plain HTTP instead of HTTPS
      */
-    connect: async (name, host = 'ciphera.satsbridge.com', port = 8091) => {
-        const args = [
-            '--name', name,
-            '--host', host,
-            '--port', String(port),
-            'sync'
-        ];
+    connect: async (name, host = 'ciphera.satsbridge.com', port = 443, noTls = false) => {
+        const args = ['--name', name];
+        appendNodeConnectionArgs(args, { host, port, noTls });
+        args.push('sync');
         return ipcRenderer.invoke('cli:run', args);
     },
     
@@ -153,17 +158,14 @@ contextBridge.exposeInMainWorld('ciphera', {
      * @param {string} [params.gethRpc='https://rpc.testnet.citrea.xyz'] - RPC URL
      * @param {string} [params.ticker='WCBTC'] - Token ticker
      * @param {string} [params.host='ciphera.satsbridge.com'] - Node host
-     * @param {number} [params.port=8091] - Node port
+     * @param {number} [params.port=443] - Node port
+     * @param {boolean} [params.noTls=false] - Use plain HTTP instead of HTTPS
      * @param {number} [params.chain] - Chain ID (from /v0/network)
      * @param {string} [params.rollup] - Rollup contract address (from /v0/network)
      */
     mint: async (params) => {
-        const args = [
-            '--name', params.name,
-            '--host', params.host || 'ciphera.satsbridge.com',
-            '--port', String(params.port || 8091),
-        ];
-        if (params.chain) args.push('--chain', String(params.chain));
+        const args = ['--name', params.name];
+        appendNodeConnectionArgs(args, params);
         if (params.rollup) args.push('--rollup', params.rollup);
         args.push(
             'mint',
@@ -182,15 +184,12 @@ contextBridge.exposeInMainWorld('ciphera', {
      * @param {string} [ticker='WCBTC'] - Token ticker
      * @param {number} [chain] - Chain ID (from /v0/network)
      * @param {string} [host='ciphera.satsbridge.com'] - Node host
-     * @param {number} [port=8091] - Node port
+     * @param {number} [port=443] - Node port
+     * @param {boolean} [noTls=false] - Use plain HTTP instead of HTTPS
      */
-    spend: async (name, amount, ticker, chain, host, port) => {
-        const args = [
-            '--name', name,
-            '--host', host || 'ciphera.satsbridge.com',
-            '--port', String(port || 8091),
-        ];
-        if (chain) args.push('--chain', String(chain));
+    spend: async (name, amount, ticker, chain, host, port, noTls = false) => {
+        const args = ['--name', name];
+        appendNodeConnectionArgs(args, { host, port, chain, noTls });
         args.push('spend', '--amount', String(amount));
         if (ticker) args.push('--ticker', ticker);
         return ipcRenderer.invoke('cli:run', args);
@@ -201,16 +200,20 @@ contextBridge.exposeInMainWorld('ciphera', {
      * @param {string} name - Wallet name
      * @param {string} address - Recipient Ciphera address
      * @param {string} [host='ciphera.satsbridge.com'] - Node host
-     * @param {number} [port=8091] - Node port
+     * @param {number} [port=443] - Node port
      * @param {number} [chain] - Chain ID (from /v0/network)
+     * @param {boolean} [noTls=false] - Use plain HTTP instead of HTTPS
      */
-    spendTo: async (name, address, host = 'ciphera.satsbridge.com', port = 8091, chain) => {
-        const args = [
-            '--name', name,
-            '--host', host,
-            '--port', String(port),
-        ];
-        if (chain) args.push('--chain', String(chain));
+    spendTo: async (
+        name,
+        address,
+        host = 'ciphera.satsbridge.com',
+        port = 443,
+        chain,
+        noTls = false,
+    ) => {
+        const args = ['--name', name];
+        appendNodeConnectionArgs(args, { host, port, chain, noTls });
         args.push('spend-to', '--address', address);
         return ipcRenderer.invoke('cli:run', args);
     },
@@ -235,16 +238,13 @@ contextBridge.exposeInMainWorld('ciphera', {
      * @param {string} [params.noteFile] - Path to note file
      * @param {string} [params.link] - Note link
      * @param {string} [params.host='ciphera.satsbridge.com'] - Node host
-     * @param {number} [params.port=8091] - Node port
+     * @param {number} [params.port=443] - Node port
+     * @param {boolean} [params.noTls=false] - Use plain HTTP instead of HTTPS
      * @param {number} [params.chain] - Chain ID (from /v0/network)
      */
     receive: async (params) => {
-        const args = [
-            '--name', params.name,
-            '--host', params.host || 'ciphera.satsbridge.com',
-            '--port', String(params.port || 8091),
-        ];
-        if (params.chain) args.push('--chain', String(params.chain));
+        const args = ['--name', params.name];
+        appendNodeConnectionArgs(args, params);
         args.push('receive');
 
         if (params.noteFile) {
@@ -264,16 +264,13 @@ contextBridge.exposeInMainWorld('ciphera', {
      * @param {string} params.address - EVM address to receive
      * @param {string} [params.ticker='WCBTC'] - Token ticker
      * @param {string} [params.host='ciphera.satsbridge.com'] - Node host
-     * @param {number} [params.port=8091] - Node port
+     * @param {number} [params.port=443] - Node port
+     * @param {boolean} [params.noTls=false] - Use plain HTTP instead of HTTPS
      * @param {number} [params.chain] - Chain ID (from /v0/network)
      */
     burn: async (params) => {
-        const args = [
-            '--name', params.name,
-            '--host', params.host || 'ciphera.satsbridge.com',
-            '--port', String(params.port || 8091),
-        ];
-        if (params.chain) args.push('--chain', String(params.chain));
+        const args = ['--name', params.name];
+        appendNodeConnectionArgs(args, params);
         args.push('burn', '--address', params.address, '--amount', String(params.amount));
         if (params.ticker) args.push('--ticker', params.ticker);
         return ipcRenderer.invoke('cli:run', args);

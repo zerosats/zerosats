@@ -62,8 +62,8 @@ cargo install --git https://github.com/zerosats/ciphera-cli
 ### Basic Usage
 
 ```bash
-# Connect to the Ciphera network and create your wallet
-ciphera-cli --name alice connect
+# Connect to the Ciphera network and sync your wallet
+ciphera-cli --name alice sync
 
 # Mint tokens (bring tokens into the private network)
 ciphera-cli --name alice mint \
@@ -113,4 +113,3 @@ Contributions welcome! Please open an issue or PR.
 ⚠️ **This is experimental software. Do not use with real funds.**
 
 For security issues, please contact the team directly.
-
