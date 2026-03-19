@@ -58,7 +58,6 @@ pub enum WalletError {
 pub struct Wallet {
     /// *Private* key in the zk‑Primitive sense – **NOT** an ECDSA key!
     pub pk: Element,
-    pub keys: Vec<Element>,
     pub pending: HashMap<String, Vec<InputNote>>,
     pub avail: HashMap<String, Vec<InputNote>>,
     pub name: Option<String>,
@@ -74,7 +73,6 @@ impl Wallet {
     pub fn new(chain_id: u64, name: Option<String>, pk: Element) -> Self {
         Self {
             pk,
-            keys: Vec::new(),
             pending: HashMap::new(),
             avail: HashMap::new(),
             name,
@@ -90,7 +88,6 @@ impl Wallet {
         OsRng.fill_bytes(&mut bytes);
         Self {
             pk: Element::from_be_bytes(bytes),
-            keys: Vec::new(),
             pending: HashMap::new(),
             avail: HashMap::new(),
             name,
@@ -435,7 +432,6 @@ impl Wallet {
     fn receive_note(&mut self, amount: u64, ticker: &str) -> InputNote {
         let pk = self.gen_pk();
         let self_address = hash_merge([pk, Element::ZERO]);
-        self.keys.push(pk);
 
         let (kind, contract) = citrea_token_data(ticker);
 
@@ -456,24 +452,24 @@ impl Wallet {
     }
 
     fn import_note(&mut self, note: &Note) -> Result<(), WalletError> {
-        let mut i = 0;
-        for pk in self.keys.clone() {
-            let self_address = hash_merge([pk, Element::ZERO]);
-            if note.address == self_address {
-                let amount = self.get_note_amount(&note)?;
-
-                let ticker = citrea_ticker_from_contract(note.contract);
+        for ticker in self.pending.keys().cloned().collect::<Vec<_>>() {
+            let asset_notes = self.pending.get(&ticker).unwrap();
+            if let Some(pos) = asset_notes
+                .iter()
+                .position(|n| n.note.address == note.address)
+            {
+                let pending_note = self.pending.get_mut(&ticker).unwrap().remove(pos);
+                let amount = self.get_note_amount(note)?;
 
                 debug!(ticker = ticker, amount = amount, "importing note");
 
-                let b = self.push_to_avail(&ticker, InputNote::new(note.clone(), pk))?;
+                let b =
+                    self.push_to_avail(&ticker, InputNote::new(note.clone(), pending_note.secret_key))?;
 
                 debug!(balance = b, "updated wallet balance");
 
-                self.keys.remove(i);
                 return Ok(());
             }
-            i += 1
         }
         Err(WalletError::KeyNotFound(format!("Cant import {note:?}")))
     }
@@ -482,13 +478,27 @@ impl Wallet {
         self.stage(|wallet| wallet.import_note(note))
     }
 
+    /// Directly add a known `InputNote` (with its embedded secret key) to the
+    /// available notes. Use this when you already hold the `InputNote` value
+    /// (e.g. a self-send burner note) rather than searching `pending` by address.
+    fn add_to_avail(&mut self, input_note: InputNote) -> Result<(), WalletError> {
+        let ticker = citrea_ticker_from_contract(input_note.note.contract);
+        self.push_to_avail(&ticker, input_note).map(|_| ())
+    }
+
+    pub fn prepare_add_to_avail(
+        &self,
+        input_note: InputNote,
+    ) -> Result<(Self, ()), WalletError> {
+        self.stage(|wallet| wallet.add_to_avail(input_note))
+    }
+
     fn get_address(&mut self, amount: u64, ticker: &str) -> CipheraAddress {
         let pk = self.gen_pk();
         let psi = self.gen_pk();
         let address = hash_merge([pk, Element::ZERO]);
         let (kind, contract) = citrea_token_data(ticker);
 
-        self.keys.push(pk);
         let note = Note {
             kind,
             contract,
@@ -637,6 +647,29 @@ mod wallet_tests {
             saved_wallet_json.get("chain_id"),
             Some(&serde_json::json!(5115))
         );
+    }
+
+    #[test]
+    fn test_load_legacy_wallet_with_keys_field() {
+        // Old wallet JSON files may contain a `keys` field. serde must silently
+        // ignore it so existing wallets can be loaded after the refactoring.
+        let wallet_dir = TempDir::new("legacy-wallet-keys").unwrap();
+        let wallet_path = Wallet::wallet_path_in(wallet_dir.path(), "legacy-keys");
+
+        let wallet = Wallet::random(5115, Some("legacy-keys".to_string()));
+        let mut wallet_json = serde_json::to_value(&wallet).unwrap();
+        wallet_json
+            .as_object_mut()
+            .unwrap()
+            .insert("keys".to_string(), serde_json::json!([]));
+        std::fs::write(
+            &wallet_path,
+            serde_json::to_string_pretty(&wallet_json).unwrap(),
+        )
+        .unwrap();
+
+        let loaded_wallet = Wallet::load_from(wallet_dir.path(), "legacy-keys").unwrap();
+        assert_eq!(loaded_wallet.chain_id, Some(5115));
     }
 
     // =====================================================================
@@ -1241,19 +1274,24 @@ mod wallet_tests {
         note
     }
 
-    /// Push a key into `wallet.keys` and return the matching Note so
-    /// `import_note` can find and claim it.
+    /// Add a WCBTC note to `wallet.pending` (mimicking `get_address`) so that
+    /// `import_note` can find and claim it by matching the address.
     fn make_importable_note(wallet: &mut Wallet, amount: u64) -> Note {
         let pk = Element::from(12345u64);
-        wallet.keys.push(pk);
         let (kind, contract) = citrea_token_data("WCBTC");
-        Note {
+        let note = Note {
             kind,
             contract,
             address: hash_merge([pk, Element::ZERO]),
             psi: hash_merge([pk, pk]),
             value: Element::from(amount),
-        }
+        };
+        wallet
+            .pending
+            .entry("WCBTC".to_string())
+            .or_default()
+            .push(InputNote::new(note.clone(), pk));
+        note
     }
 
     // =====================================================================
@@ -1290,10 +1328,13 @@ mod wallet_tests {
     }
 
     #[test]
-    fn test_mint_stores_key() {
+    fn test_mint_note_has_embedded_key() {
+        // After mint the note in avail must carry a non-zero secret key so it
+        // can be spent later without a separate `keys` list.
         let mut wallet = Wallet::random(5115, Some("test".to_string()));
         wallet.mint(1000, "WCBTC").unwrap();
-        assert_eq!(wallet.keys.len(), 1);
+        let avail_note = &wallet.avail["WCBTC"][0];
+        assert_ne!(avail_note.secret_key, Element::ZERO);
     }
 
     #[test]
@@ -1455,21 +1496,21 @@ mod wallet_tests {
     }
 
     #[test]
-    fn test_import_note_removes_used_key() {
+    fn test_import_note_removes_from_pending() {
         let mut wallet = Wallet::random(5115, Some("test".to_string()));
         let note = make_importable_note(&mut wallet, 1000);
-        assert_eq!(wallet.keys.len(), 1);
+        assert_eq!(wallet.pending["WCBTC"].len(), 1);
 
         wallet.import_note(&note).unwrap();
 
-        assert_eq!(wallet.keys.len(), 0);
+        assert_eq!(wallet.pending["WCBTC"].len(), 0);
     }
 
     #[test]
     fn test_import_note_unknown_address_returns_error() {
         let mut wallet = Wallet::random(5115, Some("test".to_string()));
         let (kind, contract) = citrea_token_data("WCBTC");
-        // Address does not correspond to any key in wallet.keys.
+        // Address does not correspond to any pending note in the wallet.
         let note = Note {
             kind,
             contract,
@@ -1484,18 +1525,32 @@ mod wallet_tests {
     }
 
     #[test]
-    fn test_import_note_does_not_remove_other_keys() {
+    fn test_import_note_does_not_remove_other_pending_notes() {
         let mut wallet = Wallet::random(5115, Some("test".to_string()));
-        // Insert an unrelated key before the importable one.
-        let unrelated_key = Element::from(55555u64);
-        wallet.keys.push(unrelated_key);
+        // Add an unrelated pending note for USDC.
+        let pk_usdc = Element::from(55555u64);
+        let (kind_usdc, contract_usdc) = citrea_token_data("USDC");
+        let unrelated_note = InputNote::new(
+            Note {
+                kind: kind_usdc,
+                contract: contract_usdc,
+                address: hash_merge([pk_usdc, Element::ZERO]),
+                psi: hash_merge([pk_usdc, pk_usdc]),
+                value: Element::from(500u64),
+            },
+            pk_usdc,
+        );
+        wallet
+            .pending
+            .insert("USDC".to_string(), vec![unrelated_note]);
+
+        // Add the importable WCBTC note.
         let note = make_importable_note(&mut wallet, 1000);
 
         wallet.import_note(&note).unwrap();
 
-        // Only the matched key (12345) is removed; unrelated_key stays.
-        assert_eq!(wallet.keys.len(), 1);
-        assert_eq!(wallet.keys[0], unrelated_key);
+        // The USDC pending note must not be touched.
+        assert_eq!(wallet.pending["USDC"].len(), 1);
     }
 
     // =====================================================================
@@ -1503,13 +1558,15 @@ mod wallet_tests {
     // =====================================================================
 
     #[test]
-    fn test_get_address_stores_key() {
+    fn test_get_address_pending_note_has_embedded_key() {
+        // The secret key must be embedded inside the pending InputNote rather
+        // than stored in a separate `keys` list.
         let mut wallet = Wallet::random(5115, Some("test".to_string()));
-        assert_eq!(wallet.keys.len(), 0);
 
         wallet.get_address(1000, "WCBTC");
 
-        assert_eq!(wallet.keys.len(), 1);
+        let pending_note = &wallet.pending["WCBTC"][0];
+        assert_ne!(pending_note.secret_key, Element::ZERO);
     }
 
     #[test]
@@ -1653,9 +1710,50 @@ mod wallet_tests {
 
         let (prepared_wallet, _) = wallet.prepare_get_address(1000, "WCBTC");
 
-        assert!(wallet.keys.is_empty());
         assert!(wallet.pending.is_empty());
-        assert_eq!(prepared_wallet.keys.len(), 1);
         assert_eq!(prepared_wallet.pending["WCBTC"].len(), 1);
+        // The pending note in the prepared wallet must carry the secret key.
+        assert_ne!(
+            prepared_wallet.pending["WCBTC"][0].secret_key,
+            Element::ZERO
+        );
+    }
+
+    // =====================================================================
+    // prepare_add_to_avail() tests
+    // =====================================================================
+
+    #[test]
+    fn test_prepare_add_to_avail_adds_note() {
+        let wallet = Wallet::random(5115, Some("test".to_string()));
+        let note = create_wcbtc_input_note_with_contract(500);
+
+        let (prepared_wallet, _) = wallet.prepare_add_to_avail(note).unwrap();
+
+        assert_eq!(prepared_wallet.avail["WCBTC"].len(), 1);
+        assert_eq!(prepared_wallet.balance, 500);
+    }
+
+    #[test]
+    fn test_prepare_add_to_avail_leaves_original_unchanged() {
+        let wallet = Wallet::random(5115, Some("test".to_string()));
+        let note = create_wcbtc_input_note_with_contract(500);
+
+        let (prepared_wallet, _) = wallet.prepare_add_to_avail(note).unwrap();
+
+        assert_eq!(wallet.balance, 0);
+        assert!(!wallet.avail.contains_key("WCBTC"));
+        assert_eq!(prepared_wallet.balance, 500);
+    }
+
+    #[test]
+    fn test_prepare_add_to_avail_preserves_secret_key() {
+        let wallet = Wallet::random(5115, Some("test".to_string()));
+        let note = create_wcbtc_input_note_with_contract(500);
+        let expected_key = note.secret_key;
+
+        let (prepared_wallet, _) = wallet.prepare_add_to_avail(note).unwrap();
+
+        assert_eq!(prepared_wallet.avail["WCBTC"][0].secret_key, expected_key);
     }
 }
