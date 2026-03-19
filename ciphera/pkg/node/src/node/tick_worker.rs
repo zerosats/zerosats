@@ -84,7 +84,7 @@ impl TickWorkerTick for NodeSharedArc {
             }
         }
 
-        let next_time: Instant = start_time + Duration::from_secs(1);
+        let next_time: Instant = start_time + Duration::from_millis(node.config.min_block_duration as u64);
         Some(next_time)
     }
 }
