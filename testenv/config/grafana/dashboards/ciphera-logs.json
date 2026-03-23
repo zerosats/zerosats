@@ -21,7 +21,7 @@
       "type": "timeseries",
       "gridPos": { "h": 6, "w": 24, "x": 0, "y": 1 },
       "targets": [
-        { "datasource": "Loki", "expr": "sum(rate({container=~\"ciphera-validator|ciphera-prover|autoplayer|citrea\"}[1m])) by (container)", "legendFormat": "{{container}}", "refId": "A" }
+        { "datasource": {"type": "loki", "uid": "loki"}, "expr": "sum(rate({container=~\"ciphera-validator|ciphera-prover|autoplayer|citrea\"}[1m])) by (container)", "legendFormat": "{{container}}", "refId": "A" }
       ],
       "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "custom": { "lineWidth": 1, "fillOpacity": 30, "drawStyle": "bars", "stacking": { "mode": "normal" }, "showPoints": "never" }, "unit": "short" }, "overrides": [] }
     },
@@ -37,7 +37,7 @@
       "description": "Any log line containing ERROR from any container. If this is empty, everything is healthy.",
       "type": "logs",
       "gridPos": { "h": 8, "w": 24, "x": 0, "y": 8 },
-      "targets": [{ "datasource": "Loki", "expr": "{container=~\"ciphera-validator|ciphera-prover|autoplayer\"} |~ \"(?i)error|panic|fatal|FAULT\"", "refId": "A" }],
+      "targets": [{ "datasource": {"type": "loki", "uid": "loki"}, "expr": "{container=~\"ciphera-validator|ciphera-prover|autoplayer\"} |~ \"(?i)error|panic|fatal|FAULT\"", "refId": "A" }],
       "options": { "showTime": true, "showLabels": true, "showCommonLabels": false, "wrapLogMessage": true, "prettifyLogMessage": true, "enableLogDetails": true, "sortOrder": "Descending", "dedupStrategy": "none" }
     },
 
@@ -52,7 +52,7 @@
       "description": "Each round = one action (mint, spend+receive, burn, or fault). Shows what the autoplayer is doing.",
       "type": "logs",
       "gridPos": { "h": 10, "w": 24, "x": 0, "y": 17 },
-      "targets": [{ "datasource": "Loki", "expr": "{container=\"autoplayer\"} |~ \"round start|round succeeded|round failed|mint successful|spend successful|receive successful|burn successful|FAULT\"", "refId": "A" }],
+      "targets": [{ "datasource": {"type": "loki", "uid": "loki"}, "expr": "{container=\"autoplayer\"} |~ \"round start|round succeeded|round failed|mint successful|spend successful|receive successful|burn successful|FAULT\"", "refId": "A" }],
       "options": { "showTime": true, "showLabels": false, "showCommonLabels": false, "wrapLogMessage": true, "prettifyLogMessage": true, "enableLogDetails": true, "sortOrder": "Descending", "dedupStrategy": "none" }
     },
 
@@ -67,7 +67,7 @@
       "description": "Shows when the prover generates ZK proofs and submits them to the Citrea rollup contract.",
       "type": "logs",
       "gridPos": { "h": 10, "w": 24, "x": 0, "y": 28 },
-      "targets": [{ "datasource": "Loki", "expr": "{container=\"ciphera-prover\"} |~ \"(?i)proving|proved|rollup|rolling|rolled|commit|error\"", "refId": "A" }],
+      "targets": [{ "datasource": {"type": "loki", "uid": "loki"}, "expr": "{container=\"ciphera-prover\"} |~ \"(?i)proving|proved|rollup|rolling|rolled|commit|error\"", "refId": "A" }],
       "options": { "showTime": true, "showLabels": false, "showCommonLabels": false, "wrapLogMessage": true, "prettifyLogMessage": true, "enableLogDetails": true, "sortOrder": "Descending", "dedupStrategy": "none" }
     },
 
@@ -82,7 +82,7 @@
       "description": "Block commits, transaction submissions, and consensus activity.",
       "type": "logs",
       "gridPos": { "h": 10, "w": 24, "x": 0, "y": 39 },
-      "targets": [{ "datasource": "Loki", "expr": "{container=\"ciphera-validator\"} |~ \"(?i)commit|transaction|block|error|warn\"", "refId": "A" }],
+      "targets": [{ "datasource": {"type": "loki", "uid": "loki"}, "expr": "{container=\"ciphera-validator\"} |~ \"(?i)commit|transaction|block|error|warn\"", "refId": "A" }],
       "options": { "showTime": true, "showLabels": false, "showCommonLabels": false, "wrapLogMessage": true, "prettifyLogMessage": true, "enableLogDetails": true, "sortOrder": "Descending", "dedupStrategy": "none" }
     },
 
@@ -96,7 +96,7 @@
           "title": "All Logs (unfiltered)",
           "type": "logs",
           "gridPos": { "h": 15, "w": 24, "x": 0, "y": 50 },
-          "targets": [{ "datasource": "Loki", "expr": "{container=~\"ciphera-validator|ciphera-prover|autoplayer|citrea\"}", "refId": "A" }],
+          "targets": [{ "datasource": {"type": "loki", "uid": "loki"}, "expr": "{container=~\"ciphera-validator|ciphera-prover|autoplayer|citrea\"}", "refId": "A" }],
           "options": { "showTime": true, "showLabels": true, "showCommonLabels": false, "wrapLogMessage": true, "prettifyLogMessage": true, "enableLogDetails": true, "sortOrder": "Descending", "dedupStrategy": "none" }
         }
       ]

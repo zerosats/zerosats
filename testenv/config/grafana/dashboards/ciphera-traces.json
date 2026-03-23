@@ -37,7 +37,7 @@
       "type": "table",
       "gridPos": { "h": 10, "w": 24, "x": 0, "y": 6 },
       "targets": [{
-        "datasource": "Jaeger",
+        "datasource": {"type": "jaeger", "uid": "jaeger"},
         "queryType": "search",
         "service": "node",
         "limit": 20,

@@ -13,43 +13,43 @@
     { "type": "row", "title": "Network Health at a Glance", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 }, "collapsed": false },
     {
       "title": "Validator Height", "type": "stat", "gridPos": { "h": 4, "w": 4, "x": 0, "y": 1 },
-      "targets": [{ "datasource": "Prometheus", "expr": "ciphera_block_height{job=\"ciphera-validator\"}", "refId": "A" }],
+      "targets": [{ "datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "ciphera_block_height{job=\"ciphera-validator\"}", "refId": "A" }],
       "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "thresholds": { "steps": [{ "color": "green", "value": null }] } }, "overrides": [] },
       "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background_solid" }
     },
     {
       "title": "Prover Height", "type": "stat", "gridPos": { "h": 4, "w": 4, "x": 4, "y": 1 },
-      "targets": [{ "datasource": "Prometheus", "expr": "ciphera_block_height{job=\"ciphera-prover\"}", "refId": "A" }],
+      "targets": [{ "datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "ciphera_block_height{job=\"ciphera-prover\"}", "refId": "A" }],
       "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "thresholds": { "steps": [{ "color": "blue", "value": null }] } }, "overrides": [] },
       "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background_solid" }
     },
     {
       "title": "Prover Lag", "type": "stat", "gridPos": { "h": 4, "w": 4, "x": 8, "y": 1 },
-      "targets": [{ "datasource": "Prometheus", "expr": "ciphera_block_height{job=\"ciphera-validator\"} - ciphera_block_height{job=\"ciphera-prover\"}", "refId": "A" }],
+      "targets": [{ "datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "ciphera_block_height{job=\"ciphera-validator\"} - ciphera_block_height{job=\"ciphera-prover\"}", "refId": "A" }],
       "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "thresholds": { "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 5 }, { "color": "red", "value": 20 }] }, "unit": "short" }, "overrides": [] },
       "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background_solid" }
     },
     {
       "title": "Total Txns", "type": "stat", "gridPos": { "h": 4, "w": 3, "x": 12, "y": 1 },
-      "targets": [{ "datasource": "Prometheus", "expr": "ciphera_transactions_total{job=\"ciphera-validator\"}", "refId": "A" }],
+      "targets": [{ "datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "ciphera_transactions_total{job=\"ciphera-validator\"}", "refId": "A" }],
       "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "thresholds": { "steps": [{ "color": "purple", "value": null }] } }, "overrides": [] },
       "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background_solid" }
     },
     {
       "title": "Mempool", "type": "stat", "gridPos": { "h": 4, "w": 3, "x": 15, "y": 1 },
-      "targets": [{ "datasource": "Prometheus", "expr": "ciphera_mempool_size{job=\"ciphera-validator\"}", "refId": "A" }],
+      "targets": [{ "datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "ciphera_mempool_size{job=\"ciphera-validator\"}", "refId": "A" }],
       "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "thresholds": { "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 3 }, { "color": "red", "value": 6 }] } }, "overrides": [] },
       "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background_solid" }
     },
     {
       "title": "Citrea Block", "type": "stat", "gridPos": { "h": 4, "w": 3, "x": 18, "y": 1 },
-      "targets": [{ "datasource": "Prometheus", "expr": "citrea_block_number", "refId": "A" }],
+      "targets": [{ "datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "citrea_block_number", "refId": "A" }],
       "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "thresholds": { "steps": [{ "color": "semi-dark-orange", "value": null }] } }, "overrides": [] },
       "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background_solid" }
     },
     {
       "title": "Rollup Verified", "type": "stat", "gridPos": { "h": 4, "w": 3, "x": 21, "y": 1 },
-      "targets": [{ "datasource": "Prometheus", "expr": "citrea_rollup_verified_height", "refId": "A" }],
+      "targets": [{ "datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "citrea_rollup_verified_height", "refId": "A" }],
       "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "thresholds": { "steps": [{ "color": "dark-green", "value": null }] } }, "overrides": [] },
       "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background_solid" }
     },
@@ -60,10 +60,10 @@
       "description": "The full pipeline. Citrea produces L1 blocks. The validator builds Ciphera blocks on top. The prover generates ZK proofs. Rollup verified = what's been proven and accepted on-chain.",
       "type": "timeseries", "gridPos": { "h": 9, "w": 12, "x": 0, "y": 6 },
       "targets": [
-        { "datasource": "Prometheus", "expr": "citrea_block_number", "legendFormat": "Citrea L1", "refId": "A" },
-        { "datasource": "Prometheus", "expr": "ciphera_block_height{job=\"ciphera-validator\"}", "legendFormat": "Ciphera Validator", "refId": "B" },
-        { "datasource": "Prometheus", "expr": "ciphera_block_height{job=\"ciphera-prover\"}", "legendFormat": "Ciphera Prover", "refId": "C" },
-        { "datasource": "Prometheus", "expr": "citrea_rollup_verified_height", "legendFormat": "Rollup Verified", "refId": "D" }
+        { "datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "citrea_block_number", "legendFormat": "Citrea L1", "refId": "A" },
+        { "datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "ciphera_block_height{job=\"ciphera-validator\"}", "legendFormat": "Ciphera Validator", "refId": "B" },
+        { "datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "ciphera_block_height{job=\"ciphera-prover\"}", "legendFormat": "Ciphera Prover", "refId": "C" },
+        { "datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "citrea_rollup_verified_height", "legendFormat": "Rollup Verified", "refId": "D" }
       ],
       "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "custom": { "lineWidth": 2, "fillOpacity": 5, "showPoints": "never", "spanNulls": true } }, "overrides": [
         { "matcher": { "id": "byName", "options": "Citrea L1" }, "properties": [{ "id": "color", "value": { "fixedColor": "orange", "mode": "fixed" } }] },
@@ -77,8 +77,8 @@
       "description": "How far behind prover is from validator, and how far rollup verification lags behind the prover.",
       "type": "timeseries", "gridPos": { "h": 9, "w": 12, "x": 12, "y": 6 },
       "targets": [
-        { "datasource": "Prometheus", "expr": "ciphera_block_height{job=\"ciphera-validator\"} - ciphera_block_height{job=\"ciphera-prover\"}", "legendFormat": "Prover lag (blocks)", "refId": "A" },
-        { "datasource": "Prometheus", "expr": "ciphera_block_height{job=\"ciphera-prover\"} - citrea_rollup_verified_height", "legendFormat": "Rollup lag (proved but not verified)", "refId": "B" }
+        { "datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "ciphera_block_height{job=\"ciphera-validator\"} - ciphera_block_height{job=\"ciphera-prover\"}", "legendFormat": "Prover lag (blocks)", "refId": "A" },
+        { "datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "ciphera_block_height{job=\"ciphera-prover\"} - citrea_rollup_verified_height", "legendFormat": "Rollup lag (proved but not verified)", "refId": "B" }
       ],
       "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "custom": { "lineWidth": 2, "fillOpacity": 20, "showPoints": "never", "thresholdsStyle": { "mode": "area" } }, "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 10 }, { "color": "red", "value": 50 }] }, "min": 0 }, "overrides": [] }
     },
@@ -88,21 +88,21 @@
       "title": "Citrea Block Gas Used",
       "description": "Gas consumed per block on Citrea. Spikes = rollup verification or mint/burn contract calls.",
       "type": "timeseries", "gridPos": { "h": 8, "w": 8, "x": 0, "y": 16 },
-      "targets": [{ "datasource": "Prometheus", "expr": "citrea_block_gas_used", "legendFormat": "Gas used", "refId": "A" }],
+      "targets": [{ "datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "citrea_block_gas_used", "legendFormat": "Gas used", "refId": "A" }],
       "fieldConfig": { "defaults": { "color": { "fixedColor": "orange", "mode": "fixed" }, "custom": { "lineWidth": 1, "fillOpacity": 30, "drawStyle": "bars", "showPoints": "never" }, "unit": "short", "min": 0 }, "overrides": [] }
     },
     {
       "title": "Citrea Block Tx Count",
       "description": "Transactions per block on Citrea. Includes: mint deposits, rollup verifications, token approvals.",
       "type": "timeseries", "gridPos": { "h": 8, "w": 8, "x": 8, "y": 16 },
-      "targets": [{ "datasource": "Prometheus", "expr": "citrea_block_tx_count", "legendFormat": "Txns/block", "refId": "A" }],
+      "targets": [{ "datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "citrea_block_tx_count", "legendFormat": "Txns/block", "refId": "A" }],
       "fieldConfig": { "defaults": { "color": { "fixedColor": "semi-dark-purple", "mode": "fixed" }, "custom": { "lineWidth": 1, "fillOpacity": 40, "drawStyle": "bars", "showPoints": "never" }, "unit": "short", "min": 0 }, "overrides": [] }
     },
     {
       "title": "Tokens Locked in Rollup",
       "description": "ERC20 tokens deposited into the rollup contract. Increases on mints, decreases on burns.",
       "type": "timeseries", "gridPos": { "h": 8, "w": 8, "x": 16, "y": 16 },
-      "targets": [{ "datasource": "Prometheus", "expr": "citrea_rollup_tokens_locked", "legendFormat": "Tokens locked", "refId": "A" }],
+      "targets": [{ "datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "citrea_rollup_tokens_locked", "legendFormat": "Tokens locked", "refId": "A" }],
       "fieldConfig": { "defaults": { "color": { "fixedColor": "dark-green", "mode": "fixed" }, "custom": { "lineWidth": 2, "fillOpacity": 15, "gradientMode": "scheme", "showPoints": "never" }, "unit": "short", "min": 0 }, "overrides": [] }
     },
 
@@ -110,21 +110,21 @@
     {
       "title": "Transaction Rate",
       "type": "timeseries", "gridPos": { "h": 7, "w": 8, "x": 0, "y": 25 },
-      "targets": [{ "datasource": "Prometheus", "expr": "rate(ciphera_transactions_total{job=\"ciphera-validator\"}[1m]) * 60", "legendFormat": "tx/min", "refId": "A" }],
+      "targets": [{ "datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "rate(ciphera_transactions_total{job=\"ciphera-validator\"}[1m]) * 60", "legendFormat": "tx/min", "refId": "A" }],
       "fieldConfig": { "defaults": { "color": { "fixedColor": "purple", "mode": "fixed" }, "custom": { "lineWidth": 2, "fillOpacity": 20, "drawStyle": "bars", "showPoints": "never" }, "unit": "short", "min": 0 }, "overrides": [] }
     },
     {
       "title": "Mempool Depth",
       "type": "timeseries", "gridPos": { "h": 7, "w": 8, "x": 8, "y": 25 },
-      "targets": [{ "datasource": "Prometheus", "expr": "ciphera_mempool_size{job=\"ciphera-validator\"}", "legendFormat": "Pending", "refId": "A" }],
+      "targets": [{ "datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "ciphera_mempool_size{job=\"ciphera-validator\"}", "legendFormat": "Pending", "refId": "A" }],
       "fieldConfig": { "defaults": { "color": { "fixedColor": "orange", "mode": "fixed" }, "custom": { "lineWidth": 2, "fillOpacity": 40, "showPoints": "never" }, "min": 0 }, "overrides": [] }
     },
     {
       "title": "Merkle Tree Growth",
       "type": "timeseries", "gridPos": { "h": 7, "w": 8, "x": 16, "y": 25 },
       "targets": [
-        { "datasource": "Prometheus", "expr": "ciphera_merkle_tree_elements{job=\"ciphera-validator\"}", "legendFormat": "Validator", "refId": "A" },
-        { "datasource": "Prometheus", "expr": "ciphera_merkle_tree_elements{job=\"ciphera-prover\"}", "legendFormat": "Prover", "refId": "B" }
+        { "datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "ciphera_merkle_tree_elements{job=\"ciphera-validator\"}", "legendFormat": "Validator", "refId": "A" },
+        { "datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "ciphera_merkle_tree_elements{job=\"ciphera-prover\"}", "legendFormat": "Prover", "refId": "B" }
       ],
       "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "custom": { "lineWidth": 2, "fillOpacity": 10, "showPoints": "never" }, "min": 0 }, "overrides": [] }
     },
@@ -133,16 +133,16 @@
     {
       "title": "CPU Usage", "type": "timeseries", "gridPos": { "h": 7, "w": 12, "x": 0, "y": 33 },
       "targets": [
-        { "datasource": "Prometheus", "expr": "rate(process_cpu_seconds_total{job=\"ciphera-validator\"}[1m])", "legendFormat": "Validator", "refId": "A" },
-        { "datasource": "Prometheus", "expr": "rate(process_cpu_seconds_total{job=\"ciphera-prover\"}[1m])", "legendFormat": "Prover", "refId": "B" }
+        { "datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "rate(process_cpu_seconds_total{job=\"ciphera-validator\"}[1m])", "legendFormat": "Validator", "refId": "A" },
+        { "datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "rate(process_cpu_seconds_total{job=\"ciphera-prover\"}[1m])", "legendFormat": "Prover", "refId": "B" }
       ],
       "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "custom": { "lineWidth": 2, "fillOpacity": 20, "showPoints": "never" }, "unit": "percentunit", "min": 0 }, "overrides": [] }
     },
     {
       "title": "Memory (RSS)", "type": "timeseries", "gridPos": { "h": 7, "w": 12, "x": 12, "y": 33 },
       "targets": [
-        { "datasource": "Prometheus", "expr": "process_resident_memory_bytes{job=\"ciphera-validator\"}", "legendFormat": "Validator", "refId": "A" },
-        { "datasource": "Prometheus", "expr": "process_resident_memory_bytes{job=\"ciphera-prover\"}", "legendFormat": "Prover", "refId": "B" }
+        { "datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "process_resident_memory_bytes{job=\"ciphera-validator\"}", "legendFormat": "Validator", "refId": "A" },
+        { "datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "process_resident_memory_bytes{job=\"ciphera-prover\"}", "legendFormat": "Prover", "refId": "B" }
       ],
       "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "custom": { "lineWidth": 2, "fillOpacity": 10, "showPoints": "never" }, "unit": "bytes", "min": 0 }, "overrides": [] }
     },
@@ -150,12 +150,12 @@
     { "type": "row", "title": "Live Logs", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 40 }, "collapsed": false },
     {
       "title": "Autoplayer", "type": "logs", "gridPos": { "h": 8, "w": 12, "x": 0, "y": 41 },
-      "targets": [{ "datasource": "Loki", "expr": "{container=\"autoplayer\"} |~ \"round|mint|spend|receive|burn|FAULT\"", "refId": "A" }],
+      "targets": [{ "datasource": {"type": "loki", "uid": "loki"}, "expr": "{container=\"autoplayer\"} |~ \"round|mint|spend|receive|burn|FAULT\"", "refId": "A" }],
       "options": { "showTime": true, "showLabels": false, "wrapLogMessage": true, "prettifyLogMessage": true, "enableLogDetails": true, "sortOrder": "Descending" }
     },
     {
       "title": "Prover", "type": "logs", "gridPos": { "h": 8, "w": 12, "x": 12, "y": 41 },
-      "targets": [{ "datasource": "Loki", "expr": "{container=\"ciphera-prover\"} |~ \"(?i)proving|proved|rollup|rolling|commit|error\"", "refId": "A" }],
+      "targets": [{ "datasource": {"type": "loki", "uid": "loki"}, "expr": "{container=\"ciphera-prover\"} |~ \"(?i)proving|proved|rollup|rolling|commit|error\"", "refId": "A" }],
       "options": { "showTime": true, "showLabels": false, "wrapLogMessage": true, "prettifyLogMessage": true, "enableLogDetails": true, "sortOrder": "Descending" }
     }
   ],
