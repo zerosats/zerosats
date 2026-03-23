@@ -37,11 +37,11 @@ pub struct Args {
     pub seed: u64,
 
     /// Minimum delay between actions (ms)
-    #[arg(long, default_value = "5000")]
+    #[arg(long, default_value = "2000")]
     pub min_delay_ms: u64,
 
     /// Maximum delay between actions (ms)
-    #[arg(long, default_value = "30000")]
+    #[arg(long, default_value = "8000")]
     pub max_delay_ms: u64,
 
     /// Weight for mint actions (out of 100)
