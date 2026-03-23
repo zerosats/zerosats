@@ -946,11 +946,11 @@
       "collapsed": false
     },
     {
-      "title": "Autoplayer",
+      "title": "Autoplayer (normal)",
       "type": "logs",
       "gridPos": {
         "h": 8,
-        "w": 12,
+        "w": 8,
         "x": 0,
         "y": 41
       },
@@ -960,7 +960,7 @@
             "type": "loki",
             "uid": "loki"
           },
-          "expr": "{container=\"autoplayer\"} |~ \"round|mint|spend|receive|burn|FAULT\"",
+          "expr": "{container=\"autoplayer\"} |~ \"round|mint|spend|receive|burn\" !~ \"FAULT|fault|garbage|double\"",
           "refId": "A"
         }
       ],
@@ -975,6 +975,39 @@
       "datasource": {
         "type": "loki",
         "uid": "loki"
+      }
+    },
+    {
+      "title": "Fault Injections",
+      "description": "INTENTIONAL \u2014 autoplayer tests node rejection of bad proofs/double-spends",
+      "type": "logs",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 4,
+        "x": 8,
+        "y": 41
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "{container=\"autoplayer\"} |~ \"(?i)fault|garbage|double.spend\"",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "showTime": true,
+        "showLabels": false,
+        "wrapLogMessage": true,
+        "prettifyLogMessage": true,
+        "enableLogDetails": true,
+        "sortOrder": "Descending"
       }
     },
     {

@@ -78,7 +78,7 @@
     },
     {
       "type": "row",
-      "title": "Errors & Warnings (things that need attention)",
+      "title": "Real Errors (things that need attention)",
       "gridPos": {
         "h": 1,
         "w": 24,
@@ -88,9 +88,13 @@
       "collapsed": false
     },
     {
-      "title": "All Errors Across All Services",
-      "description": "Any log line containing ERROR from any container. If this is empty, everything is healthy.",
+      "title": "Real Errors (excludes fault injection)",
+      "description": "Genuine errors from all services. Fault injections are excluded \u2014 see the panel below.",
       "type": "logs",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
       "gridPos": {
         "h": 8,
         "w": 24,
@@ -103,7 +107,7 @@
             "type": "loki",
             "uid": "loki"
           },
-          "expr": "{container=~\"ciphera-validator|ciphera-prover|autoplayer\"} |~ \"(?i)error|panic|fatal|FAULT\"",
+          "expr": "{container=~\"ciphera-validator|ciphera-prover|autoplayer\"} |~ \"(?i)error|panic|fatal\" !~ \"FAULT\"",
           "refId": "A"
         }
       ],
@@ -116,15 +120,11 @@
         "enableLogDetails": true,
         "sortOrder": "Descending",
         "dedupStrategy": "none"
-      },
-      "datasource": {
-        "type": "loki",
-        "uid": "loki"
       }
     },
     {
       "type": "row",
-      "title": "Autoplayer Activity (what transactions are being generated)",
+      "title": "Fault Injections (intentional \u2014 autoplayer testing node rejection)",
       "gridPos": {
         "h": 1,
         "w": 24,
@@ -134,11 +134,15 @@
       "collapsed": false
     },
     {
-      "title": "Autoplayer: Round Activity",
-      "description": "Each round = one action (mint, spend+receive, burn, or fault). Shows what the autoplayer is doing.",
+      "title": "Fault Injections (INTENTIONAL)",
+      "description": "These are EXPECTED. The autoplayer intentionally submits garbage proofs and double-spends to verify the node rejects them. 'correctly rejected' = good. 'ACCEPTED' = bug.",
       "type": "logs",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
       "gridPos": {
-        "h": 10,
+        "h": 8,
         "w": 24,
         "x": 0,
         "y": 17
@@ -149,7 +153,7 @@
             "type": "loki",
             "uid": "loki"
           },
-          "expr": "{container=\"autoplayer\"} |~ \"round start|round succeeded|round failed|mint successful|spend successful|receive successful|burn successful|FAULT\"",
+          "expr": "{container=\"autoplayer\"} |~ \"FAULT\"",
           "refId": "A"
         }
       ],
@@ -162,10 +166,87 @@
         "enableLogDetails": true,
         "sortOrder": "Descending",
         "dedupStrategy": "none"
+      }
+    },
+    {
+      "type": "row",
+      "title": "Autoplayer Activity (what transactions are being generated)",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 25
       },
+      "collapsed": false
+    },
+    {
+      "title": "Autoplayer: Normal Rounds (mint, spend, receive, burn)",
+      "description": "Regular transaction lifecycle activity.",
+      "type": "logs",
       "datasource": {
         "type": "loki",
         "uid": "loki"
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 12,
+        "x": 0,
+        "y": 26
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "{container=\"autoplayer\"} |~ \"round start|round succeeded|round failed|mint successful|spend successful|receive successful|burn\" !~ \"Fault|FAULT\"",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "showTime": true,
+        "showLabels": false,
+        "showCommonLabels": false,
+        "wrapLogMessage": true,
+        "prettifyLogMessage": true,
+        "enableLogDetails": true,
+        "sortOrder": "Descending",
+        "dedupStrategy": "none"
+      }
+    },
+    {
+      "title": "Autoplayer: Fault Injection Rounds",
+      "description": "Intentional bad behavior \u2014 garbage proofs and double-spend attempts. These SHOULD be rejected by the node.",
+      "type": "logs",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 12,
+        "x": 12,
+        "y": 26
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "{container=\"autoplayer\"} |~ \"(?i)fault|garbage|double.spend\"",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "showTime": true,
+        "showLabels": false,
+        "showCommonLabels": false,
+        "wrapLogMessage": true,
+        "prettifyLogMessage": true,
+        "enableLogDetails": true,
+        "sortOrder": "Descending",
+        "dedupStrategy": "none"
       }
     },
     {
@@ -175,7 +256,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 27
+        "y": 36
       },
       "collapsed": false
     },
@@ -187,7 +268,7 @@
         "h": 10,
         "w": 24,
         "x": 0,
-        "y": 28
+        "y": 37
       },
       "targets": [
         {
@@ -221,7 +302,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 38
+        "y": 47
       },
       "collapsed": false
     },
@@ -233,7 +314,7 @@
         "h": 10,
         "w": 24,
         "x": 0,
-        "y": 39
+        "y": 48
       },
       "targets": [
         {
@@ -267,7 +348,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 49
+        "y": 58
       },
       "collapsed": true,
       "panels": [
