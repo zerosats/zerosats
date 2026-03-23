@@ -42,6 +42,8 @@ pub async fn submit_txn(
         .await
         .context("tokio spawn join handle error")??;
 
+    super::metrics::inc_transactions();
+
     Ok(web::Json(TransactionResponse {
         height: block.content.header.height,
         root_hash: block.content.state.root_hash,

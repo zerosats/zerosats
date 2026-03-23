@@ -1,0 +1,14 @@
+global:
+  scrape_interval: 5s
+  evaluation_interval: 5s
+
+scrape_configs:
+  - job_name: "ciphera-validator"
+    static_configs:
+      - targets: ["ciphera-validator:8091"]
+    metrics_path: "/v0/metrics"
+
+  - job_name: "ciphera-prover"
+    static_configs:
+      - targets: ["ciphera-prover:8092"]
+    metrics_path: "/v0/metrics"

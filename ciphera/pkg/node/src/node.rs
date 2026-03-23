@@ -284,6 +284,14 @@ impl NodeShared {
         self.block_cache.lock().is_out_of_sync()
     }
 
+    pub(crate) fn mempool_len(&self) -> usize {
+        self.mempool.len()
+    }
+
+    pub(crate) fn tree_len(&self) -> usize {
+        self.notes_tree.read().tree().len()
+    }
+
     pub(crate) fn root_hash(&self) -> Element {
         self.notes_tree.read().tree().root_hash()
     }

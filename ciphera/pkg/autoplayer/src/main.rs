@@ -1,0 +1,26 @@
+mod actions;
+mod config;
+mod player;
+
+use clap::Parser;
+use config::Args;
+use player::Player;
+use tracing_subscriber::EnvFilter;
+
+#[tokio::main]
+async fn main() -> eyre::Result<()> {
+    color_eyre::install()?;
+    let args = Args::parse();
+
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| EnvFilter::new("info,autoplayer=debug")),
+        )
+        .json()
+        .init();
+
+    tracing::info!(?args, "autoplayer starting");
+    let mut player = Player::new(args)?;
+    player.run().await
+}

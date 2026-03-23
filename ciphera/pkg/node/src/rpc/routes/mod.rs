@@ -5,6 +5,7 @@ pub mod error;
 pub mod health;
 pub mod height;
 pub mod merkle;
+pub mod metrics;
 pub mod network;
 pub mod smirk;
 pub mod state;

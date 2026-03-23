@@ -1,4 +1,4 @@
-use super::{State, blocks, element, health, height, merkle, network, smirk, stats, txn};
+use super::{State, blocks, element, health, height, merkle, metrics, network, smirk, stats, txn};
 use actix_web::web;
 
 pub fn configure_routes(state: State) -> Box<dyn FnOnce(&mut web::ServiceConfig)> {
@@ -20,6 +20,7 @@ pub fn configure_routes(state: State) -> Box<dyn FnOnce(&mut web::ServiceConfig)
             )
             .service(web::resource("/stats").get(stats::get_stats))
             .service(web::resource("/smirk/elements/all").get(smirk::get_all_smirk_elements))
-            .service(web::resource("/network").get(network::get_network_info));
+            .service(web::resource("/network").get(network::get_network_info))
+            .service(web::resource("/metrics").get(metrics::get_metrics));
     })
 }

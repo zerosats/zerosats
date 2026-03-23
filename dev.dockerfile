@@ -46,12 +46,17 @@ RUN curl -fsSL https://raw.githubusercontent.com/AztecProtocol/aztec-packages/ma
 # Create a workspace directory
 WORKDIR /app
 COPY ciphera .
+COPY testenv /app/testenv
 
 WORKDIR /app/citrea
 RUN npm ci
 RUN npx hardhat compile
 
 ENV PATH="/root/.cargo/bin:/root/.bb:/usr/src/noir/noir-repo/target/release:/usr/src/barretenberg/cpp/build/bin:$PATH"
+
+# Build Ciphera binaries (node + autoplayer)
+WORKDIR /app
+RUN cargo build --release -p node -p autoplayer
 
 # Set bash as entrypoint with login shell to ensure profile is sourced
 ENTRYPOINT ["/bin/bash", "--login"]

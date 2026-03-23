@@ -1,0 +1,126 @@
+services:
+  # === Citrea regtest (2s blocks, unlimited funds, no real Bitcoin) ===
+  citrea:
+    build:
+      context: ..
+      dockerfile: citrea.dockerfile
+    ports:
+      - "12345:12345"
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:12345", "-X", "POST",
+             "-H", "Content-Type: application/json",
+             "-d", '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}']
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
+  # === Init: Deploy contracts with REAL Honk verifier ===
+  deployer:
+    build:
+      context: ..
+      dockerfile: dev.dockerfile
+    depends_on:
+      citrea:
+        condition: service_healthy
+    entrypoint: ["bash", "/app/testenv/scripts/deploy-and-wait.sh"]
+    environment:
+      - CITREA_RPC=http://citrea:12345
+    volumes:
+      - deploy-output:/deploy-output
+      - ./scripts/deploy-and-wait.sh:/app/testenv/scripts/deploy-and-wait.sh:ro
+
+  # === Ciphera VALIDATOR ===
+  ciphera-validator:
+    build:
+      context: ..
+      dockerfile: dev.dockerfile
+    depends_on:
+      deployer:
+        condition: service_completed_successfully
+    entrypoint: ["bash", "/app/testenv/scripts/entrypoint-validator.sh"]
+    ports:
+      - "8091:8091"
+      - "5000:5000"
+    environment:
+      - OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=http://jaeger:4317
+    volumes:
+      - deploy-output:/deploy-output:ro
+      - ./config/validator.toml:/app/testenv/config/validator.toml:ro
+      - ./scripts/entrypoint-validator.sh:/app/testenv/scripts/entrypoint-validator.sh:ro
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8091/v0/health"]
+      interval: 3s
+      timeout: 5s
+      retries: 60
+      start_period: 10s
+
+  # === Ciphera PROVER (real ZK proofs via Barretenberg) ===
+  ciphera-prover:
+    build:
+      context: ..
+      dockerfile: dev.dockerfile
+    depends_on:
+      ciphera-validator:
+        condition: service_healthy
+    entrypoint: ["bash", "/app/testenv/scripts/entrypoint-prover.sh"]
+    environment:
+      - OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=http://jaeger:4317
+    volumes:
+      - deploy-output:/deploy-output:ro
+      - ./config/prover.toml:/app/testenv/config/prover.toml:ro
+      - ./scripts/entrypoint-prover.sh:/app/testenv/scripts/entrypoint-prover.sh:ro
+
+  # === Auto-player (real client-side proofs, deterministic seed) ===
+  autoplayer:
+    build:
+      context: ..
+      dockerfile: dev.dockerfile
+    depends_on:
+      ciphera-validator:
+        condition: service_healthy
+    entrypoint: >
+      bash -c "source /deploy-output/env.sh &&
+      /app/target/release/autoplayer
+        --host ciphera-validator --port 8091
+        --evm-rpc-url http://citrea:12345
+        --chain-id 5655
+        --rollup-contract $$ROLLUP_PROXY
+        --seed 42"
+    environment:
+      - RUST_LOG=info,autoplayer=debug
+    volumes:
+      - deploy-output:/deploy-output:ro
+
+  # === Jaeger (distributed traces) ===
+  jaeger:
+    image: jaegertracing/all-in-one:1.57
+    ports:
+      - "16686:16686"
+      - "4317:4317"
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+
+  # === Prometheus (metrics) ===
+  prometheus:
+    image: prom/prometheus:v2.51.0
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./config/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+
+  # === Grafana (dashboards) ===
+  grafana:
+    image: grafana/grafana:10.4.0
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer
+    volumes:
+      - ./config/grafana/datasources.yml:/etc/grafana/provisioning/datasources/datasources.yml:ro
+      - ./config/grafana/dashboards/dashboards.yml:/etc/grafana/provisioning/dashboards/dashboards.yml:ro
+      - ./config/grafana/dashboards/ciphera.json:/var/lib/grafana/dashboards/ciphera.json:ro
+
+volumes:
+  deploy-output:

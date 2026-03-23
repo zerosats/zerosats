@@ -1,0 +1,29 @@
+[package]
+name = "autoplayer"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "autoplayer"
+path = "src/main.rs"
+
+[dependencies]
+cli = { path = "../cli" }
+contracts = { path = "../contracts" }
+node-interface = { path = "../node-interface" }
+zk-primitives = { path = "../zk-primitives" }
+barretenberg = { path = "../barretenberg" }
+primitives = { path = "../primitives" }
+element = { path = "../element" }
+web3 = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+rand = { workspace = true }
+rand_chacha = { workspace = true }
+clap = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+eyre = { workspace = true }
+color-eyre = { workspace = true }
+chrono = { workspace = true }

@@ -68,6 +68,7 @@ tokio-postgres = { workspace = true }
 postgres-native-tls = { workspace = true }
 native-tls = { workspace = true }
 scopeguard = { workspace = true }
+prometheus = { workspace = true }
 
 [dev-dependencies]
 contracts = { workspace = true, features = ["test-helpers"] }

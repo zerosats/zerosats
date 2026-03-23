@@ -126,6 +126,7 @@ once_cell = "1.19.0"
 parking_lot = { version = "0.12.1", features = ["deadlock_detection"] }
 phonenumber = "0.3"
 pretty-hex = "0.3.0"
+prometheus = { version = "0.13", features = ["process"] }
 proptest = "1.6.0"
 quickcheck = "1.0.3"
 rand = "0.8.5"

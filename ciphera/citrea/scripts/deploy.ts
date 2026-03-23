@@ -37,8 +37,12 @@ async function main() {
   console.log("    Validators - ", validators);
   console.log("    Verifier - ", aggregateVerifierAddr);
 
+  const useNoopVerifier =
+    !isTestnet &&
+    (process.env.DEV_USE_NOOP_VERIFIER === "1" ||
+      process.env.DEV_USE_NOOP_VERIFIER === "true");
   const maybeNoopVerifier = (verifier: string) =>
-    isTestnet ? verifier : "NoopVerifierHonk.bin";
+    useNoopVerifier ? "NoopVerifierHonk.bin" : verifier;
 
   let account;
   let rpcUrl;

@@ -59,6 +59,11 @@ where
     L: Eq + PartialEq + Hash + Clone + std::fmt::Debug,
     C: Eq + PartialEq + Hash + Clone,
 {
+    /// Number of pending transactions in the mempool
+    pub fn len(&self) -> usize {
+        self.state.lock().pool.len()
+    }
+
     /// Add a transaction to the mempool, only adds key/txn if the key
     /// doesn't already exist in the mempool. This is used when other nodes
     /// send us a txn they have received from a client

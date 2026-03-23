@@ -1,0 +1,20 @@
+env-name = "testenv"
+block-txns-count = 6
+min-block-duration = 2000
+mode = "validator"
+secret-key = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
+rpc-laddr = "0.0.0.0:8091"
+db-path = "/tmp/ciphera-validator/db"
+smirk-path = "/tmp/ciphera-validator/smirk"
+evm-rpc-url = "http://citrea:12345"
+chain-id = 5655
+rollup-contract-addr = "PLACEHOLDER"
+health-check-commit-interval-sec = 300
+rollup-wait-time-ms = 10000
+safe-eth-height-offset = 1
+
+[p2p]
+laddr = "/ip4/0.0.0.0/tcp/5000"
+dial = ""
+idle-timeout-secs = 0
+whitelisted-ips = []
