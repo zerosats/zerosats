@@ -1,0 +1,43 @@
+server:
+  http_listen_port: 9080
+  grpc_listen_port: 0
+
+positions:
+  filename: /tmp/positions.yaml
+
+clients:
+  - url: http://loki:3100/loki/api/v1/push
+
+scrape_configs:
+  - job_name: docker
+    docker_sd_configs:
+      - host: unix:///var/run/docker.sock
+        refresh_interval: 5s
+    relabel_configs:
+      # Keep only testenv containers
+      - source_labels: ['__meta_docker_container_name']
+        regex: '/testenv-(.*)-1'
+        target_label: 'container'
+        replacement: '$1'
+      - source_labels: ['__meta_docker_container_name']
+        regex: '/testenv-.*'
+        action: keep
+      # Add service labels
+      - source_labels: ['__meta_docker_container_name']
+        regex: '/testenv-(ciphera-validator|ciphera-prover|autoplayer|citrea|deployer)-1'
+        target_label: 'service'
+        replacement: '$1'
+    pipeline_stages:
+      # Try to parse JSON logs (autoplayer outputs JSON)
+      - json:
+          expressions:
+            level: level
+            msg: fields.message
+            timestamp: timestamp
+      - labels:
+          level:
+      # Fallback: for non-JSON logs, extract log level from text
+      - regex:
+          expression: '(?i)\b(?P<level>INFO|WARN|ERROR|DEBUG|TRACE)\b'
+      - labels:
+          level:

@@ -103,6 +103,26 @@ services:
     environment:
       - COLLECTOR_OTLP_ENABLED=true
 
+  # === Loki (log aggregation — so Grafana can show logs) ===
+  loki:
+    image: grafana/loki:2.9.4
+    ports:
+      - "3100:3100"
+    command: -config.file=/etc/loki/local-config.yaml
+    volumes:
+      - ./config/loki.yml:/etc/loki/local-config.yaml:ro
+
+  # === Promtail (ships Docker container logs to Loki) ===
+  promtail:
+    image: grafana/promtail:2.9.4
+    volumes:
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./config/promtail.yml:/etc/promtail/config.yml:ro
+    command: -config.file=/etc/promtail/config.yml
+    depends_on:
+      - loki
+
   # === Prometheus (metrics) ===
   prometheus:
     image: prom/prometheus:v2.51.0
@@ -111,7 +131,7 @@ services:
     volumes:
       - ./config/prometheus.yml:/etc/prometheus/prometheus.yml:ro
 
-  # === Grafana (dashboards) ===
+  # === Grafana (THE single UI for everything) ===
   grafana:
     image: grafana/grafana:10.4.0
     ports:
@@ -120,10 +140,17 @@ services:
       - GF_SECURITY_ADMIN_PASSWORD=admin
       - GF_AUTH_ANONYMOUS_ENABLED=true
       - GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer
+      - GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH=/var/lib/grafana/dashboards/ciphera-overview.json
+    depends_on:
+      - prometheus
+      - loki
+      - jaeger
     volumes:
       - ./config/grafana/datasources.yml:/etc/grafana/provisioning/datasources/datasources.yml:ro
       - ./config/grafana/dashboards/dashboards.yml:/etc/grafana/provisioning/dashboards/dashboards.yml:ro
-      - ./config/grafana/dashboards/ciphera.json:/var/lib/grafana/dashboards/ciphera.json:ro
+      - ./config/grafana/dashboards/ciphera-overview.json:/var/lib/grafana/dashboards/ciphera-overview.json:ro
+      - ./config/grafana/dashboards/ciphera-logs.json:/var/lib/grafana/dashboards/ciphera-logs.json:ro
+      - ./config/grafana/dashboards/ciphera-traces.json:/var/lib/grafana/dashboards/ciphera-traces.json:ro
 
 volumes:
   deploy-output:

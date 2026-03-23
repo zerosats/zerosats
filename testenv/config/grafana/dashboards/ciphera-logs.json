@@ -1,0 +1,116 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "graphTooltip": 0,
+  "id": null,
+  "links": [
+    { "title": "Back to Overview", "url": "/d/ciphera-overview", "type": "link", "icon": "home" },
+    { "title": "Traces Explorer", "url": "/d/ciphera-traces", "type": "link", "icon": "bolt" }
+  ],
+  "liveNow": true,
+  "panels": [
+    {
+      "type": "row",
+      "title": "Log Volume (how noisy is each service?)",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "collapsed": false
+    },
+    {
+      "title": "Log Volume by Service",
+      "description": "Lines per second from each container. Spikes usually mean something interesting is happening.",
+      "type": "timeseries",
+      "gridPos": { "h": 6, "w": 24, "x": 0, "y": 1 },
+      "targets": [
+        { "datasource": "Loki", "expr": "sum(rate({container=~\"ciphera-validator|ciphera-prover|autoplayer|citrea\"}[1m])) by (container)", "legendFormat": "{{container}}", "refId": "A" }
+      ],
+      "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "custom": { "lineWidth": 1, "fillOpacity": 30, "drawStyle": "bars", "stacking": { "mode": "normal" }, "showPoints": "never" }, "unit": "short" }, "overrides": [] }
+    },
+
+    {
+      "type": "row",
+      "title": "Errors & Warnings (things that need attention)",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 7 },
+      "collapsed": false
+    },
+    {
+      "title": "All Errors Across All Services",
+      "description": "Any log line containing ERROR from any container. If this is empty, everything is healthy.",
+      "type": "logs",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 8 },
+      "targets": [{ "datasource": "Loki", "expr": "{container=~\"ciphera-validator|ciphera-prover|autoplayer\"} |~ \"(?i)error|panic|fatal|FAULT\"", "refId": "A" }],
+      "options": { "showTime": true, "showLabels": true, "showCommonLabels": false, "wrapLogMessage": true, "prettifyLogMessage": true, "enableLogDetails": true, "sortOrder": "Descending", "dedupStrategy": "none" }
+    },
+
+    {
+      "type": "row",
+      "title": "Autoplayer Activity (what transactions are being generated)",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 16 },
+      "collapsed": false
+    },
+    {
+      "title": "Autoplayer: Round Activity",
+      "description": "Each round = one action (mint, spend+receive, burn, or fault). Shows what the autoplayer is doing.",
+      "type": "logs",
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 17 },
+      "targets": [{ "datasource": "Loki", "expr": "{container=\"autoplayer\"} |~ \"round start|round succeeded|round failed|mint successful|spend successful|receive successful|burn successful|FAULT\"", "refId": "A" }],
+      "options": { "showTime": true, "showLabels": false, "showCommonLabels": false, "wrapLogMessage": true, "prettifyLogMessage": true, "enableLogDetails": true, "sortOrder": "Descending", "dedupStrategy": "none" }
+    },
+
+    {
+      "type": "row",
+      "title": "Prover Activity (proof generation & rollup submissions)",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 27 },
+      "collapsed": false
+    },
+    {
+      "title": "Prover: Proof Generation & Rollup",
+      "description": "Shows when the prover generates ZK proofs and submits them to the Citrea rollup contract.",
+      "type": "logs",
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 28 },
+      "targets": [{ "datasource": "Loki", "expr": "{container=\"ciphera-prover\"} |~ \"(?i)proving|proved|rollup|rolling|rolled|commit|error\"", "refId": "A" }],
+      "options": { "showTime": true, "showLabels": false, "showCommonLabels": false, "wrapLogMessage": true, "prettifyLogMessage": true, "enableLogDetails": true, "sortOrder": "Descending", "dedupStrategy": "none" }
+    },
+
+    {
+      "type": "row",
+      "title": "Validator Activity (block production)",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 38 },
+      "collapsed": false
+    },
+    {
+      "title": "Validator: Block Production",
+      "description": "Block commits, transaction submissions, and consensus activity.",
+      "type": "logs",
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 39 },
+      "targets": [{ "datasource": "Loki", "expr": "{container=\"ciphera-validator\"} |~ \"(?i)commit|transaction|block|error|warn\"", "refId": "A" }],
+      "options": { "showTime": true, "showLabels": false, "showCommonLabels": false, "wrapLogMessage": true, "prettifyLogMessage": true, "enableLogDetails": true, "sortOrder": "Descending", "dedupStrategy": "none" }
+    },
+
+    {
+      "type": "row",
+      "title": "Full Raw Logs (all containers, unfiltered)",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 49 },
+      "collapsed": true,
+      "panels": [
+        {
+          "title": "All Logs (unfiltered)",
+          "type": "logs",
+          "gridPos": { "h": 15, "w": 24, "x": 0, "y": 50 },
+          "targets": [{ "datasource": "Loki", "expr": "{container=~\"ciphera-validator|ciphera-prover|autoplayer|citrea\"}", "refId": "A" }],
+          "options": { "showTime": true, "showLabels": true, "showCommonLabels": false, "wrapLogMessage": true, "prettifyLogMessage": true, "enableLogDetails": true, "sortOrder": "Descending", "dedupStrategy": "none" }
+        }
+      ]
+    }
+  ],
+  "refresh": "5s",
+  "schemaVersion": 39,
+  "style": "dark",
+  "tags": ["ciphera", "testenv", "logs"],
+  "templating": { "list": [] },
+  "time": { "from": "now-15m", "to": "now" },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "Ciphera Logs Explorer",
+  "uid": "ciphera-logs",
+  "version": 1
+}
