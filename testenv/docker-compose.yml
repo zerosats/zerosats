@@ -94,6 +94,19 @@ services:
     volumes:
       - deploy-output:/deploy-output:ro
 
+  # === Citrea metrics exporter (polls Citrea RPC, serves Prometheus metrics) ===
+  citrea-exporter:
+    image: python:3.12-slim
+    depends_on:
+      deployer:
+        condition: service_completed_successfully
+    entrypoint: ["bash", "-c", "apt-get update -qq && apt-get install -y -qq curl jq >/dev/null 2>&1 && bash /scripts/citrea-exporter.sh"]
+    environment:
+      - CITREA_RPC=http://citrea:12345
+    volumes:
+      - deploy-output:/deploy-output:ro
+      - ./scripts/citrea-exporter.sh:/scripts/citrea-exporter.sh:ro
+
   # === Jaeger (distributed traces) ===
   jaeger:
     image: jaegertracing/all-in-one:1.57
@@ -151,6 +164,7 @@ services:
       - ./config/grafana/dashboards/ciphera-overview.json:/var/lib/grafana/dashboards/ciphera-overview.json:ro
       - ./config/grafana/dashboards/ciphera-logs.json:/var/lib/grafana/dashboards/ciphera-logs.json:ro
       - ./config/grafana/dashboards/ciphera-traces.json:/var/lib/grafana/dashboards/ciphera-traces.json:ro
+      - ./config/grafana/dashboards/citrea-chain.json:/var/lib/grafana/dashboards/citrea-chain.json:ro
 
 volumes:
   deploy-output:

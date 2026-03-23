@@ -1,0 +1,109 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "graphTooltip": 2,
+  "id": null,
+  "links": [
+    { "title": "Back to Overview", "url": "/d/ciphera-overview", "type": "link", "icon": "home" }
+  ],
+  "liveNow": true,
+  "panels": [
+    { "type": "row", "title": "Citrea Chain State", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 }, "collapsed": false },
+    {
+      "title": "Citrea Block Number", "type": "stat", "gridPos": { "h": 5, "w": 6, "x": 0, "y": 1 },
+      "targets": [{ "datasource": "Prometheus", "expr": "citrea_block_number", "refId": "A" }],
+      "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "thresholds": { "steps": [{ "color": "orange", "value": null }] } }, "overrides": [] },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background_solid", "graphMode": "area" }
+    },
+    {
+      "title": "Gas Price (wei)", "type": "stat", "gridPos": { "h": 5, "w": 6, "x": 6, "y": 1 },
+      "targets": [{ "datasource": "Prometheus", "expr": "citrea_gas_price_wei", "refId": "A" }],
+      "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "thresholds": { "steps": [{ "color": "semi-dark-blue", "value": null }] }, "unit": "short" }, "overrides": [] },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background_solid" }
+    },
+    {
+      "title": "Block Gas Limit", "type": "stat", "gridPos": { "h": 5, "w": 6, "x": 12, "y": 1 },
+      "targets": [{ "datasource": "Prometheus", "expr": "citrea_block_gas_limit", "refId": "A" }],
+      "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "thresholds": { "steps": [{ "color": "semi-dark-green", "value": null }] }, "unit": "short" }, "overrides": [] },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background_solid" }
+    },
+    {
+      "title": "Deployer ETH Balance", "type": "stat", "gridPos": { "h": 5, "w": 6, "x": 18, "y": 1 },
+      "description": "Hardhat account 0 — pre-funded with near-infinite ETH. Pays gas for all mint/rollup operations.",
+      "targets": [{ "datasource": "Prometheus", "expr": "citrea_deployer_balance_wei / 1e18", "refId": "A" }],
+      "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "thresholds": { "steps": [{ "color": "dark-green", "value": null }, { "color": "red", "value": 0 }] }, "unit": "short", "decimals": 2 }, "overrides": [] },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background_solid" }
+    },
+
+    { "type": "row", "title": "Rollup Contract State", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 6 }, "collapsed": false },
+    {
+      "title": "Rollup Verified Height vs Ciphera Height",
+      "description": "The rollup contract on Citrea tracks which Ciphera blocks have been verified with ZK proofs. The gap shows how far behind verification is.",
+      "type": "timeseries", "gridPos": { "h": 9, "w": 12, "x": 0, "y": 7 },
+      "targets": [
+        { "datasource": "Prometheus", "expr": "ciphera_block_height{job=\"ciphera-validator\"}", "legendFormat": "Ciphera produced", "refId": "A" },
+        { "datasource": "Prometheus", "expr": "citrea_rollup_verified_height", "legendFormat": "Rollup verified", "refId": "B" }
+      ],
+      "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "custom": { "lineWidth": 2, "fillOpacity": 10, "showPoints": "never" } }, "overrides": [
+        { "matcher": { "id": "byName", "options": "Ciphera produced" }, "properties": [{ "id": "color", "value": { "fixedColor": "green", "mode": "fixed" } }] },
+        { "matcher": { "id": "byName", "options": "Rollup verified" }, "properties": [{ "id": "color", "value": { "fixedColor": "yellow", "mode": "fixed" } }, { "id": "custom.lineStyle", "value": { "fill": "dash", "dash": [10, 10] } }] }
+      ] }
+    },
+    {
+      "title": "Tokens Locked in Rollup (Bridge Balance)",
+      "description": "Total ERC20 tokens deposited into the rollup contract. This is the bridge TVL. Goes up on mints (user deposits from Citrea), goes down on burns (user withdraws to Citrea).",
+      "type": "timeseries", "gridPos": { "h": 9, "w": 12, "x": 12, "y": 7 },
+      "targets": [{ "datasource": "Prometheus", "expr": "citrea_rollup_tokens_locked", "legendFormat": "Bridge TVL (tokens)", "refId": "A" }],
+      "fieldConfig": { "defaults": { "color": { "fixedColor": "dark-green", "mode": "fixed" }, "custom": { "lineWidth": 2, "fillOpacity": 20, "gradientMode": "scheme", "showPoints": "never" }, "min": 0 }, "overrides": [] }
+    },
+
+    { "type": "row", "title": "Gas Consumption on Citrea", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 16 }, "collapsed": false },
+    {
+      "title": "Gas Used per Block",
+      "description": "Each spike represents a block with contract interactions (mints, rollup verifications). Empty blocks use 0 gas.",
+      "type": "timeseries", "gridPos": { "h": 8, "w": 12, "x": 0, "y": 17 },
+      "targets": [{ "datasource": "Prometheus", "expr": "citrea_block_gas_used", "legendFormat": "Gas used", "refId": "A" }],
+      "fieldConfig": { "defaults": { "color": { "fixedColor": "orange", "mode": "fixed" }, "custom": { "lineWidth": 1, "fillOpacity": 40, "drawStyle": "bars", "showPoints": "never" }, "unit": "short", "min": 0 }, "overrides": [] }
+    },
+    {
+      "title": "Gas Utilization %",
+      "description": "How full each block is (gas used / gas limit). High utilization = potential bottleneck.",
+      "type": "timeseries", "gridPos": { "h": 8, "w": 12, "x": 12, "y": 17 },
+      "targets": [{ "datasource": "Prometheus", "expr": "citrea_block_gas_used / citrea_block_gas_limit * 100", "legendFormat": "Utilization %", "refId": "A" }],
+      "fieldConfig": { "defaults": { "color": { "fixedColor": "semi-dark-red", "mode": "fixed" }, "custom": { "lineWidth": 2, "fillOpacity": 15, "showPoints": "never", "thresholdsStyle": { "mode": "area" } }, "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 50 }, { "color": "red", "value": 80 }] }, "unit": "percent", "min": 0, "max": 100 }, "overrides": [] }
+    },
+
+    { "type": "row", "title": "Citrea Block Activity", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 25 }, "collapsed": false },
+    {
+      "title": "Citrea Block Number Over Time",
+      "type": "timeseries", "gridPos": { "h": 7, "w": 12, "x": 0, "y": 26 },
+      "targets": [{ "datasource": "Prometheus", "expr": "citrea_block_number", "legendFormat": "Block #", "refId": "A" }],
+      "fieldConfig": { "defaults": { "color": { "fixedColor": "orange", "mode": "fixed" }, "custom": { "lineWidth": 2, "fillOpacity": 5, "showPoints": "never" } }, "overrides": [] }
+    },
+    {
+      "title": "Citrea Transactions per Block",
+      "type": "timeseries", "gridPos": { "h": 7, "w": 12, "x": 12, "y": 26 },
+      "targets": [{ "datasource": "Prometheus", "expr": "citrea_block_tx_count", "legendFormat": "Txns/block", "refId": "A" }],
+      "fieldConfig": { "defaults": { "color": { "fixedColor": "purple", "mode": "fixed" }, "custom": { "lineWidth": 1, "fillOpacity": 30, "drawStyle": "bars", "showPoints": "never" }, "min": 0 }, "overrides": [] }
+    },
+
+    { "type": "row", "title": "Citrea Container Logs", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 33 }, "collapsed": false },
+    {
+      "title": "Citrea Node Logs",
+      "type": "logs", "gridPos": { "h": 8, "w": 24, "x": 0, "y": 34 },
+      "targets": [{ "datasource": "Loki", "expr": "{container=\"citrea\"}", "refId": "A" }],
+      "options": { "showTime": true, "showLabels": false, "wrapLogMessage": true, "prettifyLogMessage": true, "enableLogDetails": true, "sortOrder": "Descending" }
+    }
+  ],
+  "refresh": "5s",
+  "schemaVersion": 39,
+  "style": "dark",
+  "tags": ["ciphera", "testenv", "citrea"],
+  "templating": { "list": [] },
+  "time": { "from": "now-15m", "to": "now" },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "Citrea L1 Deep Dive",
+  "uid": "citrea-chain",
+  "version": 1
+}

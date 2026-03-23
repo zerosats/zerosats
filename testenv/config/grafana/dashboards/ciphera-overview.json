@@ -4,184 +4,159 @@
   "graphTooltip": 2,
   "id": null,
   "links": [
-    { "title": "Logs Explorer", "url": "/d/ciphera-logs", "type": "link", "icon": "doc", "tooltip": "View container logs" },
-    { "title": "Traces Explorer", "url": "/d/ciphera-traces", "type": "link", "icon": "bolt", "tooltip": "View distributed traces" }
+    { "title": "Logs Explorer", "url": "/d/ciphera-logs", "type": "link", "icon": "doc", "tooltip": "Container logs" },
+    { "title": "Traces Explorer", "url": "/d/ciphera-traces", "type": "link", "icon": "bolt", "tooltip": "Distributed traces" },
+    { "title": "Citrea Deep Dive", "url": "/d/citrea-chain", "type": "link", "icon": "database", "tooltip": "Citrea L1 details" }
   ],
   "liveNow": true,
   "panels": [
+    { "type": "row", "title": "Network Health at a Glance", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 }, "collapsed": false },
     {
-      "type": "row",
-      "title": "Network Health",
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
-      "collapsed": false
-    },
-    {
-      "title": "Validator Block Height",
-      "type": "stat",
-      "gridPos": { "h": 4, "w": 4, "x": 0, "y": 1 },
+      "title": "Validator Height", "type": "stat", "gridPos": { "h": 4, "w": 4, "x": 0, "y": 1 },
       "targets": [{ "datasource": "Prometheus", "expr": "ciphera_block_height{job=\"ciphera-validator\"}", "refId": "A" }],
-      "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] }, "mappings": [], "unit": "none" }, "overrides": [] },
-      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "orientation": "auto", "textMode": "value_and_name", "colorMode": "background_solid" }
+      "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "thresholds": { "steps": [{ "color": "green", "value": null }] } }, "overrides": [] },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background_solid" }
     },
     {
-      "title": "Prover Block Height",
-      "type": "stat",
-      "gridPos": { "h": 4, "w": 4, "x": 4, "y": 1 },
+      "title": "Prover Height", "type": "stat", "gridPos": { "h": 4, "w": 4, "x": 4, "y": 1 },
       "targets": [{ "datasource": "Prometheus", "expr": "ciphera_block_height{job=\"ciphera-prover\"}", "refId": "A" }],
-      "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "thresholds": { "mode": "absolute", "steps": [{ "color": "blue", "value": null }] }, "unit": "none" }, "overrides": [] },
+      "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "thresholds": { "steps": [{ "color": "blue", "value": null }] } }, "overrides": [] },
       "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background_solid" }
     },
     {
-      "title": "Prover Lag (blocks behind)",
-      "type": "stat",
-      "gridPos": { "h": 4, "w": 4, "x": 8, "y": 1 },
+      "title": "Prover Lag", "type": "stat", "gridPos": { "h": 4, "w": 4, "x": 8, "y": 1 },
       "targets": [{ "datasource": "Prometheus", "expr": "ciphera_block_height{job=\"ciphera-validator\"} - ciphera_block_height{job=\"ciphera-prover\"}", "refId": "A" }],
-      "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 5 }, { "color": "red", "value": 20 }] }, "unit": "none" }, "overrides": [] },
+      "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "thresholds": { "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 5 }, { "color": "red", "value": 20 }] }, "unit": "short" }, "overrides": [] },
       "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background_solid" }
     },
     {
-      "title": "Total Transactions",
-      "type": "stat",
-      "gridPos": { "h": 4, "w": 4, "x": 12, "y": 1 },
+      "title": "Total Txns", "type": "stat", "gridPos": { "h": 4, "w": 3, "x": 12, "y": 1 },
       "targets": [{ "datasource": "Prometheus", "expr": "ciphera_transactions_total{job=\"ciphera-validator\"}", "refId": "A" }],
-      "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "thresholds": { "mode": "absolute", "steps": [{ "color": "purple", "value": null }] }, "unit": "none" }, "overrides": [] },
+      "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "thresholds": { "steps": [{ "color": "purple", "value": null }] } }, "overrides": [] },
       "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background_solid" }
     },
     {
-      "title": "Mempool Pending",
-      "type": "stat",
-      "gridPos": { "h": 4, "w": 4, "x": 16, "y": 1 },
+      "title": "Mempool", "type": "stat", "gridPos": { "h": 4, "w": 3, "x": 15, "y": 1 },
       "targets": [{ "datasource": "Prometheus", "expr": "ciphera_mempool_size{job=\"ciphera-validator\"}", "refId": "A" }],
-      "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 3 }, { "color": "red", "value": 6 }] }, "unit": "none" }, "overrides": [] },
+      "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "thresholds": { "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 3 }, { "color": "red", "value": 6 }] } }, "overrides": [] },
       "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background_solid" }
     },
     {
-      "title": "Merkle Tree Size",
-      "type": "stat",
-      "gridPos": { "h": 4, "w": 4, "x": 20, "y": 1 },
-      "targets": [{ "datasource": "Prometheus", "expr": "ciphera_merkle_tree_elements{job=\"ciphera-validator\"}", "refId": "A" }],
-      "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "thresholds": { "mode": "absolute", "steps": [{ "color": "semi-dark-blue", "value": null }] }, "unit": "none" }, "overrides": [] },
+      "title": "Citrea Block", "type": "stat", "gridPos": { "h": 4, "w": 3, "x": 18, "y": 1 },
+      "targets": [{ "datasource": "Prometheus", "expr": "citrea_block_number", "refId": "A" }],
+      "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "thresholds": { "steps": [{ "color": "semi-dark-orange", "value": null }] } }, "overrides": [] },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background_solid" }
+    },
+    {
+      "title": "Rollup Verified", "type": "stat", "gridPos": { "h": 4, "w": 3, "x": 21, "y": 1 },
+      "targets": [{ "datasource": "Prometheus", "expr": "citrea_rollup_verified_height", "refId": "A" }],
+      "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "thresholds": { "steps": [{ "color": "dark-green", "value": null }] } }, "overrides": [] },
       "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background_solid" }
     },
 
+    { "type": "row", "title": "The Full Pipeline: Citrea -> Validator -> Prover -> Rollup", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 5 }, "collapsed": false },
     {
-      "type": "row",
-      "title": "Block Production & Consensus",
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 5 },
-      "collapsed": false
-    },
-    {
-      "title": "Block Height: Validator vs Prover",
-      "description": "Shows how far behind the prover is from the validator. A growing gap means the prover can't keep up with proof generation.",
-      "type": "timeseries",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 6 },
+      "title": "Block Heights: Citrea vs Validator vs Prover vs Rollup Verified",
+      "description": "The full pipeline. Citrea produces L1 blocks. The validator builds Ciphera blocks on top. The prover generates ZK proofs. Rollup verified = what's been proven and accepted on-chain.",
+      "type": "timeseries", "gridPos": { "h": 9, "w": 12, "x": 0, "y": 6 },
       "targets": [
-        { "datasource": "Prometheus", "expr": "ciphera_block_height{job=\"ciphera-validator\"}", "legendFormat": "Validator", "refId": "A" },
-        { "datasource": "Prometheus", "expr": "ciphera_block_height{job=\"ciphera-prover\"}", "legendFormat": "Prover", "refId": "B" }
+        { "datasource": "Prometheus", "expr": "citrea_block_number", "legendFormat": "Citrea L1", "refId": "A" },
+        { "datasource": "Prometheus", "expr": "ciphera_block_height{job=\"ciphera-validator\"}", "legendFormat": "Ciphera Validator", "refId": "B" },
+        { "datasource": "Prometheus", "expr": "ciphera_block_height{job=\"ciphera-prover\"}", "legendFormat": "Ciphera Prover", "refId": "C" },
+        { "datasource": "Prometheus", "expr": "citrea_rollup_verified_height", "legendFormat": "Rollup Verified", "refId": "D" }
       ],
-      "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "custom": { "lineWidth": 2, "fillOpacity": 10, "showPoints": "never", "spanNulls": true, "axisBorderShow": true, "scaleDistribution": { "type": "linear" } } }, "overrides": [{ "matcher": { "id": "byName", "options": "Validator" }, "properties": [{ "id": "color", "value": { "fixedColor": "green", "mode": "fixed" } }] }, { "matcher": { "id": "byName", "options": "Prover" }, "properties": [{ "id": "color", "value": { "fixedColor": "blue", "mode": "fixed" } }] }] }
+      "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "custom": { "lineWidth": 2, "fillOpacity": 5, "showPoints": "never", "spanNulls": true } }, "overrides": [
+        { "matcher": { "id": "byName", "options": "Citrea L1" }, "properties": [{ "id": "color", "value": { "fixedColor": "orange", "mode": "fixed" } }] },
+        { "matcher": { "id": "byName", "options": "Ciphera Validator" }, "properties": [{ "id": "color", "value": { "fixedColor": "green", "mode": "fixed" } }] },
+        { "matcher": { "id": "byName", "options": "Ciphera Prover" }, "properties": [{ "id": "color", "value": { "fixedColor": "blue", "mode": "fixed" } }] },
+        { "matcher": { "id": "byName", "options": "Rollup Verified" }, "properties": [{ "id": "color", "value": { "fixedColor": "yellow", "mode": "fixed" } }, { "id": "custom.lineStyle", "value": { "fill": "dash", "dash": [10, 10] } }] }
+      ] }
     },
     {
-      "title": "Prover Lag Over Time",
-      "description": "How many blocks behind the prover is. Spikes mean blocks with transactions that need proving.",
-      "type": "timeseries",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 6 },
-      "targets": [{ "datasource": "Prometheus", "expr": "ciphera_block_height{job=\"ciphera-validator\"} - ciphera_block_height{job=\"ciphera-prover\"}", "legendFormat": "Lag (blocks)", "refId": "A" }],
-      "fieldConfig": { "defaults": { "color": { "fixedColor": "orange", "mode": "fixed" }, "custom": { "lineWidth": 2, "fillOpacity": 30, "gradientMode": "scheme", "showPoints": "never", "thresholdsStyle": { "mode": "area" } }, "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 5 }, { "color": "red", "value": 20 }] }, "min": 0 }, "overrides": [] }
+      "title": "Prover Lag & Rollup Lag",
+      "description": "How far behind prover is from validator, and how far rollup verification lags behind the prover.",
+      "type": "timeseries", "gridPos": { "h": 9, "w": 12, "x": 12, "y": 6 },
+      "targets": [
+        { "datasource": "Prometheus", "expr": "ciphera_block_height{job=\"ciphera-validator\"} - ciphera_block_height{job=\"ciphera-prover\"}", "legendFormat": "Prover lag (blocks)", "refId": "A" },
+        { "datasource": "Prometheus", "expr": "ciphera_block_height{job=\"ciphera-prover\"} - citrea_rollup_verified_height", "legendFormat": "Rollup lag (proved but not verified)", "refId": "B" }
+      ],
+      "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "custom": { "lineWidth": 2, "fillOpacity": 20, "showPoints": "never", "thresholdsStyle": { "mode": "area" } }, "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 10 }, { "color": "red", "value": 50 }] }, "min": 0 }, "overrides": [] }
     },
 
+    { "type": "row", "title": "Citrea L1: Gas, Transactions, Funds", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 15 }, "collapsed": false },
     {
-      "type": "row",
-      "title": "Transaction Pipeline",
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 14 },
-      "collapsed": false
+      "title": "Citrea Block Gas Used",
+      "description": "Gas consumed per block on Citrea. Spikes = rollup verification or mint/burn contract calls.",
+      "type": "timeseries", "gridPos": { "h": 8, "w": 8, "x": 0, "y": 16 },
+      "targets": [{ "datasource": "Prometheus", "expr": "citrea_block_gas_used", "legendFormat": "Gas used", "refId": "A" }],
+      "fieldConfig": { "defaults": { "color": { "fixedColor": "orange", "mode": "fixed" }, "custom": { "lineWidth": 1, "fillOpacity": 30, "drawStyle": "bars", "showPoints": "never" }, "unit": "short", "min": 0 }, "overrides": [] }
     },
+    {
+      "title": "Citrea Block Tx Count",
+      "description": "Transactions per block on Citrea. Includes: mint deposits, rollup verifications, token approvals.",
+      "type": "timeseries", "gridPos": { "h": 8, "w": 8, "x": 8, "y": 16 },
+      "targets": [{ "datasource": "Prometheus", "expr": "citrea_block_tx_count", "legendFormat": "Txns/block", "refId": "A" }],
+      "fieldConfig": { "defaults": { "color": { "fixedColor": "semi-dark-purple", "mode": "fixed" }, "custom": { "lineWidth": 1, "fillOpacity": 40, "drawStyle": "bars", "showPoints": "never" }, "unit": "short", "min": 0 }, "overrides": [] }
+    },
+    {
+      "title": "Tokens Locked in Rollup",
+      "description": "ERC20 tokens deposited into the rollup contract. Increases on mints, decreases on burns.",
+      "type": "timeseries", "gridPos": { "h": 8, "w": 8, "x": 16, "y": 16 },
+      "targets": [{ "datasource": "Prometheus", "expr": "citrea_rollup_tokens_locked", "legendFormat": "Tokens locked", "refId": "A" }],
+      "fieldConfig": { "defaults": { "color": { "fixedColor": "dark-green", "mode": "fixed" }, "custom": { "lineWidth": 2, "fillOpacity": 15, "gradientMode": "scheme", "showPoints": "never" }, "unit": "short", "min": 0 }, "overrides": [] }
+    },
+
+    { "type": "row", "title": "Ciphera Transaction Pipeline", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 24 }, "collapsed": false },
     {
       "title": "Transaction Rate",
-      "description": "Transactions submitted per minute",
-      "type": "timeseries",
-      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 15 },
+      "type": "timeseries", "gridPos": { "h": 7, "w": 8, "x": 0, "y": 25 },
       "targets": [{ "datasource": "Prometheus", "expr": "rate(ciphera_transactions_total{job=\"ciphera-validator\"}[1m]) * 60", "legendFormat": "tx/min", "refId": "A" }],
       "fieldConfig": { "defaults": { "color": { "fixedColor": "purple", "mode": "fixed" }, "custom": { "lineWidth": 2, "fillOpacity": 20, "drawStyle": "bars", "showPoints": "never" }, "unit": "short", "min": 0 }, "overrides": [] }
     },
     {
       "title": "Mempool Depth",
-      "description": "How many transactions are waiting to be included in a block",
-      "type": "timeseries",
-      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 15 },
-      "targets": [{ "datasource": "Prometheus", "expr": "ciphera_mempool_size{job=\"ciphera-validator\"}", "legendFormat": "Pending txns", "refId": "A" }],
-      "fieldConfig": { "defaults": { "color": { "fixedColor": "orange", "mode": "fixed" }, "custom": { "lineWidth": 2, "fillOpacity": 40, "gradientMode": "scheme", "showPoints": "never" }, "min": 0, "max": 10 }, "overrides": [] }
+      "type": "timeseries", "gridPos": { "h": 7, "w": 8, "x": 8, "y": 25 },
+      "targets": [{ "datasource": "Prometheus", "expr": "ciphera_mempool_size{job=\"ciphera-validator\"}", "legendFormat": "Pending", "refId": "A" }],
+      "fieldConfig": { "defaults": { "color": { "fixedColor": "orange", "mode": "fixed" }, "custom": { "lineWidth": 2, "fillOpacity": 40, "showPoints": "never" }, "min": 0 }, "overrides": [] }
     },
     {
       "title": "Merkle Tree Growth",
-      "description": "Total UTXO commitments in the merkle tree. Grows with mints/receives, doesn't shrink (nullifiers are separate).",
-      "type": "timeseries",
-      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 15 },
+      "type": "timeseries", "gridPos": { "h": 7, "w": 8, "x": 16, "y": 25 },
       "targets": [
-        { "datasource": "Prometheus", "expr": "ciphera_merkle_tree_elements{job=\"ciphera-validator\"}", "legendFormat": "Validator tree", "refId": "A" },
-        { "datasource": "Prometheus", "expr": "ciphera_merkle_tree_elements{job=\"ciphera-prover\"}", "legendFormat": "Prover tree", "refId": "B" }
+        { "datasource": "Prometheus", "expr": "ciphera_merkle_tree_elements{job=\"ciphera-validator\"}", "legendFormat": "Validator", "refId": "A" },
+        { "datasource": "Prometheus", "expr": "ciphera_merkle_tree_elements{job=\"ciphera-prover\"}", "legendFormat": "Prover", "refId": "B" }
       ],
       "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "custom": { "lineWidth": 2, "fillOpacity": 10, "showPoints": "never" }, "min": 0 }, "overrides": [] }
     },
 
+    { "type": "row", "title": "Process Resources", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 32 }, "collapsed": false },
     {
-      "type": "row",
-      "title": "Process Resources (CPU & Memory)",
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 23 },
-      "collapsed": false
-    },
-    {
-      "title": "CPU Usage (seconds)",
-      "description": "Total CPU seconds consumed by each node process",
-      "type": "timeseries",
-      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 24 },
+      "title": "CPU Usage", "type": "timeseries", "gridPos": { "h": 7, "w": 12, "x": 0, "y": 33 },
       "targets": [
-        { "datasource": "Prometheus", "expr": "rate(process_cpu_seconds_total{job=\"ciphera-validator\"}[1m])", "legendFormat": "Validator CPU", "refId": "A" },
-        { "datasource": "Prometheus", "expr": "rate(process_cpu_seconds_total{job=\"ciphera-prover\"}[1m])", "legendFormat": "Prover CPU", "refId": "B" }
+        { "datasource": "Prometheus", "expr": "rate(process_cpu_seconds_total{job=\"ciphera-validator\"}[1m])", "legendFormat": "Validator", "refId": "A" },
+        { "datasource": "Prometheus", "expr": "rate(process_cpu_seconds_total{job=\"ciphera-prover\"}[1m])", "legendFormat": "Prover", "refId": "B" }
       ],
       "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "custom": { "lineWidth": 2, "fillOpacity": 20, "showPoints": "never" }, "unit": "percentunit", "min": 0 }, "overrides": [] }
     },
     {
-      "title": "Memory Usage (RSS)",
-      "description": "Resident memory of each node process",
-      "type": "timeseries",
-      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 24 },
+      "title": "Memory (RSS)", "type": "timeseries", "gridPos": { "h": 7, "w": 12, "x": 12, "y": 33 },
       "targets": [
-        { "datasource": "Prometheus", "expr": "process_resident_memory_bytes{job=\"ciphera-validator\"}", "legendFormat": "Validator RSS", "refId": "A" },
-        { "datasource": "Prometheus", "expr": "process_resident_memory_bytes{job=\"ciphera-prover\"}", "legendFormat": "Prover RSS", "refId": "B" }
+        { "datasource": "Prometheus", "expr": "process_resident_memory_bytes{job=\"ciphera-validator\"}", "legendFormat": "Validator", "refId": "A" },
+        { "datasource": "Prometheus", "expr": "process_resident_memory_bytes{job=\"ciphera-prover\"}", "legendFormat": "Prover", "refId": "B" }
       ],
       "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "custom": { "lineWidth": 2, "fillOpacity": 10, "showPoints": "never" }, "unit": "bytes", "min": 0 }, "overrides": [] }
     },
 
+    { "type": "row", "title": "Live Logs", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 40 }, "collapsed": false },
     {
-      "type": "row",
-      "title": "Live Logs (last 50 lines)",
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 31 },
-      "collapsed": false
+      "title": "Autoplayer", "type": "logs", "gridPos": { "h": 8, "w": 12, "x": 0, "y": 41 },
+      "targets": [{ "datasource": "Loki", "expr": "{container=\"autoplayer\"} |~ \"round|mint|spend|receive|burn|FAULT\"", "refId": "A" }],
+      "options": { "showTime": true, "showLabels": false, "wrapLogMessage": true, "prettifyLogMessage": true, "enableLogDetails": true, "sortOrder": "Descending" }
     },
     {
-      "title": "Autoplayer Logs",
-      "description": "Live transaction activity from the auto-player",
-      "type": "logs",
-      "gridPos": { "h": 10, "w": 12, "x": 0, "y": 32 },
-      "targets": [{ "datasource": "Loki", "expr": "{container=\"autoplayer\"}", "refId": "A" }],
-      "options": { "showTime": true, "showLabels": false, "showCommonLabels": false, "wrapLogMessage": true, "prettifyLogMessage": true, "enableLogDetails": true, "sortOrder": "Descending", "dedupStrategy": "none" }
-    },
-    {
-      "title": "Prover Logs",
-      "description": "Proof generation and rollup submission activity",
-      "type": "logs",
-      "gridPos": { "h": 10, "w": 12, "x": 12, "y": 32 },
-      "targets": [{ "datasource": "Loki", "expr": "{container=\"ciphera-prover\"}", "refId": "A" }],
-      "options": { "showTime": true, "showLabels": false, "showCommonLabels": false, "wrapLogMessage": true, "prettifyLogMessage": true, "enableLogDetails": true, "sortOrder": "Descending", "dedupStrategy": "none" }
-    },
-    {
-      "title": "Validator Logs",
-      "description": "Block production and RPC activity",
-      "type": "logs",
-      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 42 },
-      "targets": [{ "datasource": "Loki", "expr": "{container=\"ciphera-validator\"} |~ \"(?i)error|warn|commit|transaction\"", "refId": "A" }],
-      "options": { "showTime": true, "showLabels": false, "showCommonLabels": false, "wrapLogMessage": true, "prettifyLogMessage": true, "enableLogDetails": true, "sortOrder": "Descending", "dedupStrategy": "none" }
+      "title": "Prover", "type": "logs", "gridPos": { "h": 8, "w": 12, "x": 12, "y": 41 },
+      "targets": [{ "datasource": "Loki", "expr": "{container=\"ciphera-prover\"} |~ \"(?i)proving|proved|rollup|rolling|commit|error\"", "refId": "A" }],
+      "options": { "showTime": true, "showLabels": false, "wrapLogMessage": true, "prettifyLogMessage": true, "enableLogDetails": true, "sortOrder": "Descending" }
     }
   ],
   "refresh": "5s",
@@ -194,5 +169,5 @@
   "timezone": "browser",
   "title": "Ciphera Overview",
   "uid": "ciphera-overview",
-  "version": 1
+  "version": 2
 }

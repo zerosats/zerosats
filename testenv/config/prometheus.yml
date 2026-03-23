@@ -12,3 +12,9 @@ scrape_configs:
     static_configs:
       - targets: ["ciphera-prover:8092"]
     metrics_path: "/v0/metrics"
+
+  - job_name: "citrea"
+    static_configs:
+      - targets: ["citrea-exporter:9101"]
+    metrics_path: "/"
+    scrape_interval: 5s
