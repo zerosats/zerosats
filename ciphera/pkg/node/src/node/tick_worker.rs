@@ -84,7 +84,8 @@ impl TickWorkerTick for NodeSharedArc {
             }
         }
 
-        let next_time: Instant = start_time + Duration::from_secs(1);
+        let next_time: Instant =
+            start_time + Duration::from_millis(crate::constants::MIN_BLOCK_PRODUCTION_DELAY);
         Some(next_time)
     }
 }
