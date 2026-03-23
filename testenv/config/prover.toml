@@ -15,6 +15,6 @@ safe-eth-height-offset = 1
 
 [p2p]
 laddr = "/ip4/0.0.0.0/tcp/5001"
-dial = "/ip4/ciphera-validator/tcp/5000"
+dial = ""
 idle-timeout-secs = 0
 whitelisted-ips = []

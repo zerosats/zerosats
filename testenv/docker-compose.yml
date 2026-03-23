@@ -6,6 +6,8 @@ services:
       dockerfile: citrea.dockerfile
     ports:
       - "12345:12345"
+    volumes:
+      - ./config/citrea_rollup_config.toml:/configs/mock/sequencer_rollup_config.toml:ro
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:12345", "-X", "POST",
              "-H", "Content-Type: application/json",
@@ -19,6 +21,8 @@ services:
     build:
       context: ..
       dockerfile: dev.dockerfile
+      args:
+        CITREA_BASE_IMAGE: testenv-citrea
     depends_on:
       citrea:
         condition: service_healthy
@@ -34,6 +38,8 @@ services:
     build:
       context: ..
       dockerfile: dev.dockerfile
+      args:
+        CITREA_BASE_IMAGE: testenv-citrea
     depends_on:
       deployer:
         condition: service_completed_successfully
@@ -59,6 +65,8 @@ services:
     build:
       context: ..
       dockerfile: dev.dockerfile
+      args:
+        CITREA_BASE_IMAGE: testenv-citrea
     depends_on:
       ciphera-validator:
         condition: service_healthy
@@ -75,17 +83,12 @@ services:
     build:
       context: ..
       dockerfile: dev.dockerfile
+      args:
+        CITREA_BASE_IMAGE: testenv-citrea
     depends_on:
       ciphera-validator:
         condition: service_healthy
-    entrypoint: >
-      bash -c "source /deploy-output/env.sh &&
-      /app/target/release/autoplayer
-        --host ciphera-validator --port 8091
-        --evm-rpc-url http://citrea:12345
-        --chain-id 5655
-        --rollup-contract $$ROLLUP_PROXY
-        --seed 42"
+    entrypoint: ["bash", "-c", "source /deploy-output/env.sh && exec /app/target/release/autoplayer --host ciphera-validator --port 8091 --evm-rpc-url http://citrea:12345 --chain-id 5655 --rollup-contract $$ROLLUP_PROXY --seed 42"]
     environment:
       - RUST_LOG=info,autoplayer=debug
     volumes:
