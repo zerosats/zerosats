@@ -1,64 +1,113 @@
 {
-  "annotations": { "list": [] },
+  "annotations": {
+    "list": []
+  },
   "editable": true,
   "graphTooltip": 0,
   "id": null,
   "links": [
-    { "title": "Back to Overview", "url": "/d/ciphera-overview", "type": "link", "icon": "home" },
-    { "title": "Logs Explorer", "url": "/d/ciphera-logs", "type": "link", "icon": "doc" }
+    {
+      "title": "Back to Overview",
+      "url": "/d/ciphera-overview",
+      "type": "link",
+      "icon": "home"
+    },
+    {
+      "title": "Logs Explorer",
+      "url": "/d/ciphera-logs",
+      "type": "link",
+      "icon": "doc"
+    }
   ],
   "liveNow": false,
   "panels": [
     {
       "type": "row",
       "title": "What are traces?",
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
       "collapsed": false
     },
     {
       "title": "How to Use Traces",
       "type": "text",
-      "gridPos": { "h": 4, "w": 24, "x": 0, "y": 1 },
+      "gridPos": {
+        "h": 4,
+        "w": 24,
+        "x": 0,
+        "y": 1
+      },
       "options": {
         "mode": "markdown",
-        "content": "## Traces show the journey of each request through the system\n\nEvery transaction submitted to the Ciphera node creates a **trace** — a timeline showing:\n- When the RPC request arrived\n- How long proof verification took\n- When the transaction entered the mempool\n- When it was included in a block\n\n**How to explore:** Use Grafana's **Explore** view (compass icon in sidebar) → select **Jaeger** datasource → search by service name (`node`) → click any trace to see the full waterfall.\n\nThe panels below show recent trace activity to give you a starting point."
+        "content": "## Traces show the journey of each request through the system\n\nEvery transaction submitted to the Ciphera node creates a **trace** \u2014 a timeline showing:\n- When the RPC request arrived\n- How long proof verification took\n- When the transaction entered the mempool\n- When it was included in a block\n\n**How to explore:** Use Grafana's **Explore** view (compass icon in sidebar) \u2192 select **Jaeger** datasource \u2192 search by service name (`node`) \u2192 click any trace to see the full waterfall.\n\nThe panels below show recent trace activity to give you a starting point."
       }
     },
-
     {
       "type": "row",
       "title": "Trace Search (use Explore view for full power)",
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 5 },
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 5
+      },
       "collapsed": false
     },
     {
-      "title": "Recent Traces — Validator Node",
+      "title": "Recent Traces \u2014 Validator Node",
       "description": "Click any trace ID to see the full request waterfall. Use the Explore view (compass icon) for advanced search.",
       "type": "table",
-      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 6 },
-      "targets": [{
-        "datasource": {"type": "jaeger", "uid": "jaeger"},
-        "queryType": "search",
-        "service": "node",
-        "limit": 20,
-        "refId": "A"
-      }],
+      "gridPos": {
+        "h": 10,
+        "w": 24,
+        "x": 0,
+        "y": 6
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "jaeger",
+            "uid": "jaeger"
+          },
+          "queryType": "search",
+          "service": "node",
+          "limit": 20,
+          "refId": "A"
+        }
+      ],
       "fieldConfig": {
         "defaults": {},
         "overrides": []
+      },
+      "datasource": {
+        "type": "jaeger",
+        "uid": "jaeger"
       }
     },
-
     {
       "type": "row",
       "title": "Quick Links",
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 16 },
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 16
+      },
       "collapsed": false
     },
     {
       "title": "Explore Traces",
       "type": "text",
-      "gridPos": { "h": 6, "w": 12, "x": 0, "y": 17 },
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 0,
+        "y": 17
+      },
       "options": {
         "mode": "markdown",
         "content": "### To explore traces in detail:\n\n1. Click the **compass icon** (Explore) in the left sidebar\n2. Select **Jaeger** from the datasource dropdown at the top\n3. Set **Service** to `node`\n4. Click **Run query**\n5. Click any trace row to expand it into a waterfall view\n\nYou'll see each span (unit of work) and how long it took. This is how you debug slow transactions or find where errors happen."
@@ -67,19 +116,33 @@
     {
       "title": "Explore Logs",
       "type": "text",
-      "gridPos": { "h": 6, "w": 12, "x": 12, "y": 17 },
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 12,
+        "y": 17
+      },
       "options": {
         "mode": "markdown",
-        "content": "### To search logs:\n\n1. Click the **compass icon** (Explore) in the left sidebar\n2. Select **Loki** from the datasource dropdown\n3. Use LogQL queries like:\n   - `{container=\"autoplayer\"}` — all autoplayer logs\n   - `{container=\"ciphera-prover\"} |~ \"proving\"` — prover activity\n   - `{container=~\".+\"} |~ \"error\"` — all errors\n4. Click **Run query**\n\nOr just use the **Logs Explorer** dashboard (linked at top) for pre-built views."
+        "content": "### To search logs:\n\n1. Click the **compass icon** (Explore) in the left sidebar\n2. Select **Loki** from the datasource dropdown\n3. Use LogQL queries like:\n   - `{container=\"autoplayer\"}` \u2014 all autoplayer logs\n   - `{container=\"ciphera-prover\"} |~ \"proving\"` \u2014 prover activity\n   - `{container=~\".+\"} |~ \"error\"` \u2014 all errors\n4. Click **Run query**\n\nOr just use the **Logs Explorer** dashboard (linked at top) for pre-built views."
       }
     }
   ],
   "refresh": "",
   "schemaVersion": 39,
   "style": "dark",
-  "tags": ["ciphera", "testenv", "traces"],
-  "templating": { "list": [] },
-  "time": { "from": "now-1h", "to": "now" },
+  "tags": [
+    "ciphera",
+    "testenv",
+    "traces"
+  ],
+  "templating": {
+    "list": []
+  },
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
   "timepicker": {},
   "timezone": "browser",
   "title": "Ciphera Traces Explorer",
