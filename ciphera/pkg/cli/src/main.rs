@@ -10,7 +10,10 @@ use tracing::{debug, error};
 use web3::types::{H160, H256};
 
 use barretenberg::Prove;
-use contracts::util::convert_h160_to_element;
+use contracts::util::{convert_element_to_h256, convert_h160_to_element};
+use hash::hash_merge;
+use rand::{RngCore, rngs::OsRng};
+use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::Path;
 use std::str::FromStr;
@@ -122,6 +125,16 @@ enum Commands {
     Contract {
         #[arg(required = true, long, short)]
         geth_rpc: String,
+    },
+    /// Deposit via Lightning Network using an external onramp service
+    DepoLn {
+        /// Amount to deposit in satoshis
+        #[arg(required = true, short, long)]
+        amount: u64,
+
+        /// Onramp service base URI
+        #[arg(long, default_value = "https://testnet.lx.dev")]
+        onramp_uri: String,
     },
 }
 
@@ -493,6 +506,156 @@ async fn handle_import(name: &str, notefile: &str) -> Result<()> {
     }
 }
 
+async fn handle_depo_ln(
+    name: &str,
+    host: &str,
+    port: u16,
+    timeout_secs: u64,
+    use_tls: bool,
+    chain: u64,
+    amount: u64,
+    onramp_uri: &str,
+) -> Result<()> {
+    // 1. Generate preimage and payment_hash
+    let mut preimage = [0u8; 32];
+    OsRng.fill_bytes(&mut preimage);
+    let payment_hash: [u8; 32] = Sha256::digest(preimage).into();
+    let preimage_hex = hex::encode(preimage);
+    let payment_hash_hex = hex::encode(payment_hash);
+
+    // 2. Build NodeClient and prepare mint note
+    let mut client = NodeClient::builder()
+        .name(name)
+        .host(host)
+        .port(port)
+        .timeout_secs(timeout_secs)
+        .build(chain, use_tls, false)?;
+
+    // 4. Init swap: GET /onramp/{amount}/{payment_hash}
+    let http = reqwest::Client::new();
+    let init_url = format!("{}/onramp/{}/{}", onramp_uri, amount, payment_hash_hex);
+    let init_resp = http
+        .get(&init_url)
+        .send()
+        .await
+        .map_err(|e| color_eyre::eyre::eyre!("Failed to reach onramp service: {}", e))?;
+
+    if !init_resp.status().is_success() {
+        return Err(color_eyre::eyre::eyre!(
+            "Onramp service error: {}",
+            init_resp.status()
+        ));
+    }
+
+    let init: serde_json::Value = init_resp
+        .json()
+        .await
+        .map_err(|e| color_eyre::eyre::eyre!("Failed to parse onramp response: {}", e))?;
+
+    let invoice = init["invoice"]
+        .as_str()
+        .ok_or_else(|| color_eyre::eyre::eyre!("Missing 'invoice' in onramp response"))?
+        .to_string();
+    let swap_id = init["id"]
+        .as_str()
+        .ok_or_else(|| color_eyre::eyre::eyre!("Missing 'id' in onramp response"))?
+        .to_string();
+
+    // 5. Print invoice for user to pay
+    println!("\n⚡ Lightning Invoice:");
+    println!("   {invoice}");
+    println!("\n   Swap ID: {swap_id}");
+    println!("\nPay the invoice and wait...\n");
+
+    use serde::{Deserialize, Serialize};
+    #[derive(Deserialize, Serialize, Debug)]
+    struct OnrampResponse {
+        state: u32,
+        amount: u64,
+        #[serde(rename = "stateDescription")]
+        state_description: String,
+    }
+
+    // 7. Poll for payment
+    let status_url = format!("{}/onramp/{}", onramp_uri, swap_id);
+    let mut amount_out;
+    loop {
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+
+        let resp = http
+            .get(&status_url)
+            .send()
+            .await
+            .map_err(|e| color_eyre::eyre::eyre!("Poll error: {}", e))?;
+
+        let response: OnrampResponse = resp
+            .json()
+            .await
+            .map_err(|e| color_eyre::eyre::eyre!("Failed to parse status response: {}", e))?;
+
+        println!("State: {}", response.state);
+        println!("Description: {}", response.state_description);
+
+        if response.state == 2 {
+            amount_out = response.amount;
+            break
+        }
+    }
+
+    let (prepared_wallet, utxo) = client.get_wallet().prepare_mint(amount_out, "WCBTC")?;
+
+    let note = &utxo.output_notes[0];
+    let mint_hash = hash_merge([note.psi, Note::padding_note().psi]);
+    let note_kind = note.contract;
+
+    let mint_hash_h256 = convert_element_to_h256(&mint_hash);
+    let note_kind_h256 = convert_element_to_h256(&note_kind);
+
+    println!("Generating zero-knowledge proof...");
+    let snark = utxo.prove().unwrap();
+    println!("✅ Proof ready.\n");
+
+    // 8. Reveal preimage to claim the deposit
+    println!("\nClaiming deposit...");
+    let claim_resp = http
+        .post(&status_url)
+        .json(&serde_json::json!({
+            "preimage": preimage_hex,
+            "mint_hash": format!("{:x}", mint_hash_h256),
+            "note_kind": format!("{:x}", note_kind_h256),
+        }))
+        .send()
+        .await
+        .map_err(|e| color_eyre::eyre::eyre!("Failed to send claim: {}", e))?;
+
+    if !claim_resp.status().is_success() {
+        return Err(color_eyre::eyre::eyre!(
+            "Claim failed with status: {}",
+            claim_resp.status()
+        ));
+    }
+    println!("✅ Preimage revealed, onramp mint triggered.");
+
+    // 9. Submit ZK proof to the Ciphera node
+    match client.transaction(&snark).await {
+        Ok(tx) => {
+            println!("\n✅ Transaction {} has been sent!", tx.txn_hash);
+            println!("   Height: {}", tx.height);
+
+            prepared_wallet.save()?;
+            client.replace_wallet(prepared_wallet);
+
+            let b = client.get_wallet().balance;
+            println!("\nBalance {b} WCBTC");
+            Ok(())
+        }
+        Err(e) => {
+            eprintln!("\n❌ Could not send transaction!");
+            Err(e)
+        }
+    }
+}
+
 async fn handle_mint(
     name: &str,
     host: &str,
@@ -785,6 +948,22 @@ async fn main() -> Result<()> {
         }
         Commands::Contract { geth_rpc } => {
             handle_rollup(&geth_rpc, cli.chain, &cli.rollup).await?;
+        }
+        Commands::DepoLn {
+            amount,
+            onramp_uri,
+        } => {
+            handle_depo_ln(
+                &cli.name,
+                &cli.host,
+                cli.port,
+                cli.timeout,
+                use_tls,
+                cli.chain,
+                amount,
+                &onramp_uri,
+            )
+            .await?;
         }
     }
 
