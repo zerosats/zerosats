@@ -627,7 +627,7 @@ contract RollupV1 is Initializable, OwnableUpgradeable {
     // Function for EscrowManager only. As of Mar 2026 the best working solution
     function mintClaimed(
         bytes32 mint_hash,
-        bytes32 value,
+        uint256 value,
         bytes32 note_kind
     ) public onlyEscrowManager {
         if (mints[mint_hash].amount != 0) {
@@ -641,11 +641,11 @@ contract RollupV1 is Initializable, OwnableUpgradeable {
         );
         mints[mint_hash] = Mint({
             note_kind: note_kind,
-            amount: uint256(value),
+            amount: value,
             spent: false
         });
 
-        emit MintAdded(mint_hash, uint256(value), note_kind);
+        emit MintAdded(mint_hash, value, note_kind);
     }
 
     // Anyone can call mint, although this is likely to be performed on behalf of the user

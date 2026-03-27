@@ -126,6 +126,11 @@ enum Commands {
         #[arg(required = true, long, short)]
         geth_rpc: String,
     },
+    /// List all mint hashes stored in the rollup contract with their values
+    Mints {
+        #[arg(required = true, long, short)]
+        geth_rpc: String,
+    },
     /// Deposit via Lightning Network using an external onramp service
     DepoLn {
         /// Amount to deposit in satoshis
@@ -578,7 +583,8 @@ async fn handle_depo_ln(
 
     // 7. Poll for payment
     let status_url = format!("{}/onramp/{}", onramp_uri, swap_id);
-    let mut amount_out;
+
+    let amount_out;
     loop {
         tokio::time::sleep(std::time::Duration::from_secs(2)).await;
 
@@ -597,7 +603,7 @@ async fn handle_depo_ln(
         println!("Description: {}", response.state_description);
 
         if response.state == 2 {
-            amount_out = response.amount;
+            amount_out = response.amount.saturating_mul(10_000_000_000u64);
             break
         }
     }
@@ -610,6 +616,8 @@ async fn handle_depo_ln(
 
     let mint_hash_h256 = convert_element_to_h256(&mint_hash);
     let note_kind_h256 = convert_element_to_h256(&note_kind);
+
+    println!("Note amount: {}, {:x}", amount_out, note.value);
 
     println!("Generating zero-knowledge proof...");
     let snark = utxo.prove().unwrap();
@@ -814,6 +822,35 @@ async fn handle_rollup(geth_rpc: &str, chain: u64, rollup: &str) -> Result<()> {
     Ok(())
 }
 
+async fn handle_mints(geth_rpc: &str, chain: u64, rollup: &str) -> Result<()> {
+    let client = contracts::Client::new(geth_rpc, None);
+    let rollup = contracts::ReadonlyRollupContract::load(client, rollup).await?;
+
+    let events = rollup.get_all_mint_added_events().await?;
+
+    println!("\nMint Hashes in Contract\n");
+    println!("\tChain: {chain}");
+    println!("\tTotal mints: {}\n", events.len());
+
+    if events.is_empty() {
+        println!("\tNo mints found.");
+    } else {
+        println!(
+            "\t{:<66}  {:>20}  {:<66}  {}",
+            "Mint Hash", "Value", "Note Kind", "Block"
+        );
+        println!("\t{}", "-".repeat(160));
+        for event in &events {
+            println!(
+                "\t{:#x}  {:>20}  {:#x}  {}",
+                event.mint_hash, event.value, event.note_kind, event.block_number
+            );
+        }
+    }
+
+    Ok(())
+}
+
 /// Initialize logging based on verbosity level
 fn init_logging(verbose: bool) {
     let log_level = if verbose { "debug" } else { "error" };
@@ -948,6 +985,9 @@ async fn main() -> Result<()> {
         }
         Commands::Contract { geth_rpc } => {
             handle_rollup(&geth_rpc, cli.chain, &cli.rollup).await?;
+        }
+        Commands::Mints { geth_rpc } => {
+            handle_mints(&geth_rpc, cli.chain, &cli.rollup).await?;
         }
         Commands::DepoLn {
             amount,

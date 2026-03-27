@@ -686,6 +686,55 @@ impl ReadonlyRollupContract {
         Ok(events)
     }
 
+    /// Gets all MintAdded events from the contract
+    #[tracing::instrument(err, ret, skip(self))]
+    pub async fn get_all_mint_added_events(&self) -> Result<Vec<MintAddedEvent>> {
+        let event_signature = H256::from_slice(
+            &Keccak256::digest(b"MintAdded(bytes32,uint256,bytes32)").as_slice()[0..32],
+        );
+
+        let filter = FilterBuilder::default()
+            .address(vec![self.contract.address()])
+            .from_block(BlockNumber::Earliest)
+            .to_block(BlockNumber::Latest)
+            .topics(
+                Some(vec![event_signature]),
+                None,
+                None,
+                None,
+            )
+            .build();
+
+        let logs = self.client.client().eth().logs(filter).await?;
+
+        let mut events = Vec::new();
+        for log in logs {
+            if log.data.0.len() >= 64
+                && log.topics.len() >= 2
+                && log.transaction_hash.is_some()
+                && log.block_number.is_some()
+            {
+                let mint_hash = log.topics[1];
+
+                let amount = U256::from_big_endian(&log.data.0[0..32]);
+
+                let mut note_kind = [0u8; 32];
+                note_kind.copy_from_slice(&log.data.0[32..64]);
+                let note_kind = H256::from(note_kind);
+
+                events.push(MintAddedEvent {
+                    mint_hash,
+                    value: amount,
+                    note_kind,
+                    transaction_hash: log.transaction_hash.unwrap(),
+                    block_number: log.block_number.unwrap().as_u64(),
+                });
+            }
+        }
+
+        Ok(events)
+    }
+
     #[tracing::instrument(err, ret, skip(self))]
     pub async fn has_burn(&self, key: &Element) -> Result<bool> {
         let exists: bool = self
