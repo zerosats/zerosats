@@ -1,11 +1,6 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
-import {IEscrowManager} from "atomiq-contracts-evm/contracts/escrow_manager/EscrowManager.sol";
-import {EscrowData} from "atomiq-contracts-evm/contracts/escrow_manager/structs/Escrow.sol";
-import {ExecutionAction} from "atomiq-contracts-evm/contracts/execution_proxy/structs/ExecutionAction.sol";
-import {IDepositOnlyWETH} from "atomiq-contracts-evm/contracts/transfer_utils/interfaces/IDepositOnlyWETH.sol";
-
 import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
