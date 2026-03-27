@@ -73,17 +73,6 @@ contract RollupV1 is Initializable, OwnableUpgradeable {
     event ProverRemoved(address indexed prover);
     event RootHashUpdated(bytes32 indexed oldRoot, bytes32 indexed newRoot);
 
-
-    event NativeConverted(uint256 amount);
-    event PreimageClaimed(
-        address indexed offerer,
-        address indexed claimer,
-        bytes32 indexed escrowHash,
-        bytes32 preimage,
-        address token,
-        uint256 amount
-    );
-
     address public escrowManagerAddress;
     address public wrappedCBTC;
 
@@ -871,16 +860,5 @@ contract RollupV1 is Initializable, OwnableUpgradeable {
         bytes32 acceptMsg
     ) external pure returns (bytes memory) {
         return abi.encodePacked(NETWORK_LEN, NETWORK, acceptMsg);
-    }
-
-    /**
-     * @notice Get the escrow hash for a given escrow data (useful for tracking)
-     * @param escrowData The complete escrow data structure
-     * @return The keccak256 hash of the escrow data
-     */
-    function getEscrowHash(
-        EscrowData calldata escrowData
-    ) public pure returns (bytes32) {
-        return keccak256(abi.encode(escrowData));
     }
 }
