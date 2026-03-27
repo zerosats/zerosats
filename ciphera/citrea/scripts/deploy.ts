@@ -32,6 +32,8 @@ async function main() {
   let validators =
     process.env.VALIDATORS?.split(",") ?? ([] as Array<`0x${string}`>);
 
+  let escrowManagerAddress = process.env.ESCROW_MANAGER;
+
   console.log("    Citrea Testnet - ", isTestnet);
   console.log("    Prover Address - ", proverAddress);
   console.log("    Validators - ", validators);
@@ -239,6 +241,7 @@ async function main() {
     functionName: "initialize",
     args: [
       ownerAddress,
+      escrowManagerAddress,
       erc20Address,
       aggregateVerifierAddr,
       proverAddress,

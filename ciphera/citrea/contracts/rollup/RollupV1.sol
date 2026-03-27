@@ -73,7 +73,7 @@ contract RollupV1 is Initializable, OwnableUpgradeable {
     event ProverRemoved(address indexed prover);
     event RootHashUpdated(bytes32 indexed oldRoot, bytes32 indexed newRoot);
 
-    address public escrowManagerAddress;
+    address public escrowManager;
     address public wrappedCBTC;
 
     // Since the Initializable._initialized version number is private, we need to keep track of it ourselves
@@ -118,7 +118,7 @@ contract RollupV1 is Initializable, OwnableUpgradeable {
 
     function initialize(
         address owner,
-        address _escrowManagerAddress,
+        address _escrowManager,
         address _tokenAddress,
         address _verifierAddress,
         address prover,
@@ -144,11 +144,11 @@ contract RollupV1 is Initializable, OwnableUpgradeable {
             0x0577b5b4aa3eaba75b2a919d5d7c63b7258aa507d38e346bf2ff1d48790379ff
         );
         tokens[
-        0x000200000000000013fb8d0c9d1c17ae5e40fff9be350f57840e9e66cd930000
+            0x000200000000000013fb8d0c9d1c17ae5e40fff9be350f57840e9e66cd930000
         ] = _tokenAddress;
         burnSubstitutors[owner] = true;
 
-        escrowManagerAddress = _escrowManagerAddress;
+        escrowManager = _escrowManager;
         wrappedCBTC = _tokenAddress;
     }
 
@@ -816,7 +816,7 @@ contract RollupV1 is Initializable, OwnableUpgradeable {
             newEscrowManagerAddress != address(0),
             "Claimer: Invalid escrow manager address"
         );
-        escrowManagerAddress = newEscrowManagerAddress;
+        escrowManager = newEscrowManagerAddress;
     }
 
     function updateValidatorSetIndex(uint256 height) internal {
