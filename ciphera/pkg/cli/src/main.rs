@@ -581,12 +581,28 @@ async fn handle_depo_ln(
         state_description: String,
     }
 
+    // Conversion factor: 1 sat = 10^10 token base units (WCBTC has 10 decimals).
+    const SATS_TO_TOKEN_UNITS: u64 = 10_000_000_000;
+    // Maximum number of status-poll attempts before giving up (~10 minutes).
+    const MAX_POLL_ATTEMPTS: u32 = 150;
+    // Seconds between each status poll.
+    const POLL_INTERVAL_SECS: u64 = 4;
+
     // 7. Poll for payment
     let status_url = format!("{}/onramp/{}", onramp_uri, swap_id);
 
     let amount_out;
+    let mut attempts = 0u32;
     loop {
-        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+        tokio::time::sleep(std::time::Duration::from_secs(POLL_INTERVAL_SECS)).await;
+
+        attempts += 1;
+        if attempts > MAX_POLL_ATTEMPTS {
+            return Err(color_eyre::eyre::eyre!(
+                "Timed out waiting for onramp payment after {} attempts",
+                MAX_POLL_ATTEMPTS
+            ));
+        }
 
         let resp = http
             .get(&status_url)
@@ -594,17 +610,37 @@ async fn handle_depo_ln(
             .await
             .map_err(|e| color_eyre::eyre::eyre!("Poll error: {}", e))?;
 
+        let http_status = resp.status();
+        if !http_status.is_success() {
+            let body = resp.text().await.unwrap_or_default();
+            return Err(color_eyre::eyre::eyre!(
+                "Onramp status check failed with HTTP {}: {}",
+                http_status,
+                body
+            ));
+        }
+
         let response: OnrampResponse = resp
             .json()
             .await
             .map_err(|e| color_eyre::eyre::eyre!("Failed to parse status response: {}", e))?;
 
-        println!("State: {}", response.state);
-        println!("Description: {}", response.state_description);
+        println!("State: {} - {}", response.state, response.state_description);
 
-        if response.state == 2 {
-            amount_out = response.amount.saturating_mul(10_000_000_000u64);
-            break
+        match response.state {
+            2 => {
+                amount_out = response.amount.saturating_mul(SATS_TO_TOKEN_UNITS);
+                break;
+            }
+            // States > 2 are terminal failure states (e.g. refunded, expired, failed).
+            s if s > 2 => {
+                return Err(color_eyre::eyre::eyre!(
+                    "Onramp swap reached terminal failure state {}: {}",
+                    s,
+                    response.state_description
+                ));
+            }
+            _ => {} // Still pending/in-progress; keep polling.
         }
     }
 
