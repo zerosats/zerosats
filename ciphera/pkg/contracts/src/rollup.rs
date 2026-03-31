@@ -1192,7 +1192,7 @@ impl ReadonlyRollupContract {
 
     // Array getter (requires index)
 
-    #[tracing::instrument(err, ret, skip(self))]
+    #[tracing::instrument(err(level = "debug"), ret, skip(self))]
     pub async fn zk_verifier_keys(&self, index: U256) -> Result<H256> {
         let key = self
             .client

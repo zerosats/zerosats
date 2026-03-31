@@ -862,11 +862,15 @@ async fn handle_rollup(geth_rpc: &str, chain: u64, rollup: &str) -> Result<()> {
     loop {
         match rollup.zk_verifier_keys(U256::from(index)).await {
             Ok(key_hash) => {
-                let (address, circuit_id, enabled) = rollup.zk_verifiers(key_hash).await?;
-                println!(
-                    "\t[{index}]\n\tkey={key_hash:#x}\n\taddress={address:#x}\n\t\
-                    circuit_id={circuit_id}  enabled={enabled}"
-                );
+                match rollup.zk_verifiers(key_hash).await {
+                    Ok((address, circuit_id, enabled)) => {
+                        println!(
+                            "\t[{index}]\n\tkey={key_hash:#x}\n\taddress={address:#x}\n\t\
+                            circuit_id={circuit_id}  enabled={enabled}"
+                        );
+                    }
+                    Err(_) => {}
+                }
                 index += 1;
             }
             Err(_) => break,
