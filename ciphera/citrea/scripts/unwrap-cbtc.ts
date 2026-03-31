@@ -1,5 +1,6 @@
 import { network } from "hardhat";
-import { parseEther, encodeFunctionData, decodeFunctionResult } from "viem";
+import { parseEther } from "viem";
+import { WCBTC_ABI, WCBTC_ADDRESS } from "./shared";
 
 const { viem } = await network.connect({
     network: "citreaTestnet",
@@ -11,31 +12,6 @@ console.log("Sending transaction using the OP chain type");
 const publicClient = await viem.getPublicClient();
 const [senderClient] = await viem.getWalletClients();
 
-const WCBTC_ADDRESS = "0x8d0c9d1c17aE5e40ffF9bE350f57840E9E66Cd93";
-
-const WCBTC_ABI = [
-    {
-        name: "deposit",
-        type: "function",
-        stateMutability: "payable",
-        inputs: [],
-        outputs: [],
-    },
-    {
-        name: "withdraw",
-        type: "function",
-        stateMutability: "nonpayable",
-        inputs: [{ name: "wad", type: "uint256" }],
-        outputs: [],
-    },
-    {
-        name: "balanceOf",
-        type: "function",
-        stateMutability: "view",
-        inputs: [{ name: "owner", type: "address" }],
-        outputs: [{ name: "", type: "uint256" }],
-    },
-] as const;
 
 console.log("Wallet address:", senderClient.account.address);
 

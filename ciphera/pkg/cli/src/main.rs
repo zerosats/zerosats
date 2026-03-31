@@ -1,16 +1,19 @@
 use clap::{Parser, Subcommand};
-use cli::NodeClient;
-use cli::Wallet;
 use cli::address::citrea_ticker_from_contract;
 use cli::address::decode_address;
-use cli::note_url::{CipheraURL, decode_url};
+use cli::note_url::{decode_url, CipheraURL};
+use cli::NodeClient;
+use cli::Wallet;
 
 use color_eyre::Result;
 use tracing::{debug, error};
-use web3::types::{H160, H256};
+use web3::types::{H160, H256, U256};
 
 use barretenberg::Prove;
-use contracts::util::convert_h160_to_element;
+use contracts::util::{convert_element_to_h256, convert_h160_to_element};
+use hash::hash_merge;
+use rand::{rngs::OsRng, RngCore};
+use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::Path;
 use std::str::FromStr;
@@ -122,6 +125,21 @@ enum Commands {
     Contract {
         #[arg(required = true, long, short)]
         geth_rpc: String,
+    },
+    /// List all mint hashes stored in the rollup contract with their values
+    Mints {
+        #[arg(required = true, long, short)]
+        geth_rpc: String,
+    },
+    /// Deposit via Lightning Network using an external onramp service
+    DepoLn {
+        /// Amount to deposit in satoshis
+        #[arg(required = true, short, long)]
+        amount_sat: u64,
+
+        /// Onramp service base URI
+        #[arg(long, default_value = "https://testnet.lx.dev")]
+        onramp_uri: String,
     },
 }
 
@@ -493,6 +511,195 @@ async fn handle_import(name: &str, notefile: &str) -> Result<()> {
     }
 }
 
+async fn handle_depo_ln(
+    name: &str,
+    host: &str,
+    port: u16,
+    timeout_secs: u64,
+    use_tls: bool,
+    chain: u64,
+    amount_sat: u64,
+    onramp_uri: &str,
+) -> Result<()> {
+    // 1. Generate preimage and payment_hash
+    let mut preimage = [0u8; 32];
+    OsRng.fill_bytes(&mut preimage);
+    let payment_hash: [u8; 32] = Sha256::digest(preimage).into();
+    let preimage_hex = hex::encode(preimage);
+    let payment_hash_hex = hex::encode(payment_hash);
+
+    // 2. Build NodeClient and prepare mint note
+    let mut client = NodeClient::builder()
+        .name(name)
+        .host(host)
+        .port(port)
+        .timeout_secs(timeout_secs)
+        .build(chain, use_tls, false)?;
+
+    // 4. Init swap: GET /onramp/{amount}/{payment_hash}
+    let http = reqwest::Client::new();
+    let init_url = format!("{}/onramp/{}/{}", onramp_uri, amount_sat, payment_hash_hex);
+    let init_resp = http
+        .get(&init_url)
+        .send()
+        .await
+        .map_err(|e| color_eyre::eyre::eyre!("Failed to reach onramp service: {}", e))?;
+
+    if !init_resp.status().is_success() {
+        return Err(color_eyre::eyre::eyre!(
+            "Onramp service error: {}",
+            init_resp.status()
+        ));
+    }
+
+    let init: serde_json::Value = init_resp
+        .json()
+        .await
+        .map_err(|e| color_eyre::eyre::eyre!("Failed to parse onramp response: {}", e))?;
+
+    let invoice = init["invoice"]
+        .as_str()
+        .ok_or_else(|| color_eyre::eyre::eyre!("Missing 'invoice' in onramp response"))?
+        .to_string();
+    let swap_id = init["id"]
+        .as_str()
+        .ok_or_else(|| color_eyre::eyre::eyre!("Missing 'id' in onramp response"))?
+        .to_string();
+
+    // 5. Print invoice for user to pay
+    println!("\n⚡ Lightning Invoice:");
+    println!("   {invoice}");
+    println!("\n   Swap ID: {swap_id}");
+    println!("\nPay the invoice and wait...\n");
+
+    use serde::{Deserialize, Serialize};
+    #[derive(Deserialize, Serialize, Debug)]
+    struct OnrampResponse {
+        state: u32,
+        amount: u64,
+        #[serde(rename = "stateDescription")]
+        state_description: String,
+    }
+
+    // Conversion factor: 1 sat = 10^10 token base units (WCBTC has 10 decimals).
+    const SATS_TO_TOKEN_UNITS: u64 = 10_000_000_000;
+    // Maximum number of status-poll attempts before giving up (~10 minutes).
+    const MAX_POLL_ATTEMPTS: u32 = 150;
+    // Seconds between each status poll.
+    const POLL_INTERVAL_SECS: u64 = 4;
+
+    // 7. Poll for payment
+    let status_url = format!("{}/onramp/{}", onramp_uri, swap_id);
+
+    let amount_out;
+    let mut attempts = 0u32;
+    loop {
+        tokio::time::sleep(std::time::Duration::from_secs(POLL_INTERVAL_SECS)).await;
+
+        attempts += 1;
+        if attempts > MAX_POLL_ATTEMPTS {
+            return Err(color_eyre::eyre::eyre!(
+                "Timed out waiting for onramp payment after {} attempts",
+                MAX_POLL_ATTEMPTS
+            ));
+        }
+
+        let resp = http
+            .get(&status_url)
+            .send()
+            .await
+            .map_err(|e| color_eyre::eyre::eyre!("Poll error: {}", e))?;
+
+        let http_status = resp.status();
+        if !http_status.is_success() {
+            let body = resp.text().await.unwrap_or_default();
+            return Err(color_eyre::eyre::eyre!(
+                "Onramp status check failed with HTTP {}: {}",
+                http_status,
+                body
+            ));
+        }
+
+        let response: OnrampResponse = resp
+            .json()
+            .await
+            .map_err(|e| color_eyre::eyre::eyre!("Failed to parse status response: {}", e))?;
+
+        println!("State: {} - {}", response.state, response.state_description);
+
+        match response.state {
+            2 => {
+                amount_out = response.amount.saturating_mul(SATS_TO_TOKEN_UNITS);
+                break;
+            }
+            // States > 2 are terminal failure states (e.g. refunded, expired, failed).
+            s if s > 2 => {
+                return Err(color_eyre::eyre::eyre!(
+                    "Onramp swap reached terminal failure state {}: {}",
+                    s,
+                    response.state_description
+                ));
+            }
+            _ => {} // Still pending/in-progress; keep polling.
+        }
+    }
+
+    let (prepared_wallet, utxo) = client.get_wallet().prepare_mint(amount_out, "WCBTC")?;
+
+    let note = &utxo.output_notes[0];
+    let mint_hash = hash_merge([note.psi, Note::padding_note().psi]);
+    let note_kind = note.contract;
+
+    let mint_hash_h256 = convert_element_to_h256(&mint_hash);
+    let note_kind_h256 = convert_element_to_h256(&note_kind);
+
+    println!("Note amount: {}, {:x}", amount_out, note.value);
+
+    println!("Generating zero-knowledge proof...");
+    let snark = utxo.prove().unwrap();
+    println!("✅ Proof ready.\n");
+
+    // 8. Reveal preimage to claim the deposit
+    println!("\nClaiming deposit...");
+    let claim_resp = http
+        .post(&status_url)
+        .json(&serde_json::json!({
+            "preimage": preimage_hex,
+            "mint_hash": format!("{:x}", mint_hash_h256),
+            "note_kind": format!("{:x}", note_kind_h256),
+        }))
+        .send()
+        .await
+        .map_err(|e| color_eyre::eyre::eyre!("Failed to send claim: {}", e))?;
+
+    if !claim_resp.status().is_success() {
+        return Err(color_eyre::eyre::eyre!(
+            "Claim failed with status: {}",
+            claim_resp.status()
+        ));
+    }
+    println!("✅ Preimage revealed, onramp mint triggered.");
+
+    // 9. Submit ZK proof to the Ciphera node
+    match client.transaction(&snark).await {
+        Ok(tx) => {
+            println!("\n✅ Transaction {} has been sent!", tx.txn_hash);
+            println!("   Height: {}", tx.height);
+
+            prepared_wallet.save()?;
+            client.replace_wallet(prepared_wallet);
+
+            let b = client.get_wallet().balance;
+            println!("\nBalance {b} WCBTC");
+            Ok(())
+        }
+        Err(e) => {
+            eprintln!("\n❌ Could not send transaction!");
+            Err(e)
+        }
+    }
+}
+
 async fn handle_mint(
     name: &str,
     host: &str,
@@ -629,6 +836,7 @@ async fn handle_rollup(geth_rpc: &str, chain: u64, rollup: &str) -> Result<()> {
 
     let rh = rollup.root_hash().await?;
     let b = rollup.block_height().await?;
+    let version = rollup.version().await?;
     let kind_wcbtc = H256::from_slice(
         &hex::decode("000200000000000013fb8d0c9d1c17ae5e40fff9be350f57840e9e66cd930000").unwrap(),
     );
@@ -642,11 +850,79 @@ async fn handle_rollup(geth_rpc: &str, chain: u64, rollup: &str) -> Result<()> {
 
     println!("\nRollup State Info\n");
     println!("\tChain                :{chain} ");
+    println!("\tVersion              :{version} ");
     println!("\tToken kind WBTC      :{token_wbtc:#x} ");
     println!("\tToken kind USDC      :{token_usdc:#x} ");
-
     println!("\tBlock                :{b} ");
     println!("\tRoot hash            :{rh:#x} ");
+
+    // Enumerate zkVerifierKeys array and look up each entry in the zkVerifiers mapping
+    println!("\nZK Verifiers\n");
+    let mut index = 0u64;
+    loop {
+        match rollup.zk_verifier_keys(U256::from(index)).await {
+            Ok(key_hash) => {
+                let (address, circuit_id, enabled) = rollup.zk_verifiers(key_hash).await?;
+                println!(
+                    "\t[{index}]\n\tkey={key_hash:#x}\n\taddress={address:#x}\n\t\
+                    circuit_id={circuit_id}  enabled={enabled}"
+                );
+                index += 1;
+            }
+            Err(_) => break,
+        }
+    }
+    if index == 0 {
+        println!("\tNo ZK verifiers found.");
+    }
+
+    // Last mint events
+    println!("\nLast Mint Events\n");
+    let mint_events = rollup.get_all_mint_added_events().await?;
+    println!("\tTotal mints: {}\n", mint_events.len());
+    if mint_events.is_empty() {
+        println!("\tNo mints found.");
+    } else {
+        println!(
+            "\t{:<66}  {:>20}  {:<66}  {}",
+            "Mint Hash", "Value", "Note Kind", "Block"
+        );
+        for event in &mint_events {
+            println!(
+                "\t{:#x}  {:>20}  {:#x}  {}",
+                event.mint_hash, event.value, event.note_kind, event.block_number
+            );
+        }
+    }
+
+    Ok(())
+}
+
+async fn handle_mints(geth_rpc: &str, chain: u64, rollup: &str) -> Result<()> {
+    let client = contracts::Client::new(geth_rpc, None);
+    let rollup = contracts::ReadonlyRollupContract::load(client, rollup).await?;
+
+    let events = rollup.get_all_mint_added_events().await?;
+
+    println!("\nMint Hashes in Contract\n");
+    println!("\tChain: {chain}");
+    println!("\tTotal mints: {}\n", events.len());
+
+    if events.is_empty() {
+        println!("\tNo mints found.");
+    } else {
+        println!(
+            "\t{:<66}  {:>20}  {:<66}  {}",
+            "Mint Hash", "Value", "Note Kind", "Block"
+        );
+        println!("\t{}", "-".repeat(160));
+        for event in &events {
+            println!(
+                "\t{:#x}  {:>20}  {:#x}  {}",
+                event.mint_hash, event.value, event.note_kind, event.block_number
+            );
+        }
+    }
 
     Ok(())
 }
@@ -785,6 +1061,25 @@ async fn main() -> Result<()> {
         }
         Commands::Contract { geth_rpc } => {
             handle_rollup(&geth_rpc, cli.chain, &cli.rollup).await?;
+        }
+        Commands::Mints { geth_rpc } => {
+            handle_mints(&geth_rpc, cli.chain, &cli.rollup).await?;
+        }
+        Commands::DepoLn {
+            amount_sat,
+            onramp_uri,
+        } => {
+            handle_depo_ln(
+                &cli.name,
+                &cli.host,
+                cli.port,
+                cli.timeout,
+                use_tls,
+                cli.chain,
+                amount_sat,
+                &onramp_uri,
+            )
+            .await?;
         }
     }
 

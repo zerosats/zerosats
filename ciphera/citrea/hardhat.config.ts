@@ -18,7 +18,7 @@ const config: HardhatUserConfig = {
         },
       },
       {
-        version: "0.8.20", // Add other versions as needed
+        version: "0.8.28", // Add other versions as needed
         settings: {
             viaIR: true,
           optimizer: {

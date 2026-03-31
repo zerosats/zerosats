@@ -18,6 +18,9 @@ const tx = await senderClient.sendTransaction({
   value: 1n,
 });
 
-await publicClient.waitForTransactionReceipt({ hash: tx });
+const receipt = await publicClient.waitForTransactionReceipt({ hash: tx });
 
+if (receipt.status !== "success") {
+  throw new Error("Transaction reverted");
+}
 console.log("Transaction sent successfully");

@@ -32,6 +32,8 @@ async function main() {
   let validators =
     process.env.VALIDATORS?.split(",") ?? ([] as Array<`0x${string}`>);
 
+  let escrowManagerAddress = process.env.ESCROW_MANAGER;
+
   console.log("    Citrea Testnet - ", isTestnet);
   console.log("    Prover Address - ", proverAddress);
   console.log("    Validators - ", validators);
@@ -51,6 +53,7 @@ async function main() {
     if (proverAddress === undefined)
       throw new Error("PROVER_ADDRESS is not set");
     if (validators.length === 0) throw new Error("VALIDATORS is not set");
+    if (!escrowManagerAddress) throw new Error("ESCROW_MANAGER is not set");
 
     walletClient = createWalletClient({
       account,
@@ -80,6 +83,10 @@ async function main() {
       validators = [account.address];
     }
 
+    if (!escrowManagerAddress) {
+      escrowManagerAddress = account.address;
+    }
+
     walletClient = createWalletClient({
       account,
       chain: {
@@ -95,6 +102,13 @@ async function main() {
       }),
     });
   }
+
+  if (!/^0x[0-9a-fA-F]{40}$/.test(escrowManagerAddress!)) {
+    throw new Error(
+      `ESCROW_MANAGER is not a valid Ethereum address: "${escrowManagerAddress}"`,
+    );
+  }
+  const escrowManager = escrowManagerAddress as `0x${string}`;
 
   let ownerAddress = account.address;
   console.log("    Owner - ", ownerAddress);
@@ -150,27 +164,6 @@ async function main() {
   let receipt;
 
   if (isTestnet) {
-    let seed = process.env.MNEMONIC as string;
-    account = mnemonicToAccount(seed);
-    rpcUrl = "https://rpc.testnet.citrea.xyz";
-    if (proverAddress === undefined)
-      throw new Error("PROVER_ADDRESS is not set");
-    if (validators.length === 0) throw new Error("VALIDATORS is not set");
-
-    walletClient = createWalletClient({
-      account,
-      chain: {
-        ...citreaTestChain,
-        rpcUrls: {
-          default: { http: [rpcUrl] },
-          public: { http: [rpcUrl] },
-        },
-      },
-      transport: http(rpcUrl, {
-        timeout: 60000,
-        retryCount: 3,
-      }),
-    });
     erc20Address = "0x8d0c9d1c17aE5e40ffF9bE350f57840E9E66Cd93";
     console.log(`✅ Using wrapped cBTC token`);
   } else {
@@ -186,11 +179,10 @@ async function main() {
       hash: erc20Tx,
     });
 
-    if (receipt.status == "success") {
-      console.log(`✅ Transaction confirmed in block`);
-    } else {
-      console.log(`❌ Transaction reverted`);
+    if (receipt.status !== "success") {
+      throw new Error("ERC20 deploy reverted");
     }
+    console.log(`✅ Transaction confirmed in block`);
     erc20Address = receipt.contractAddress;
     console.log(`✅ ERC20 Deployed`);
   }
@@ -224,11 +216,10 @@ async function main() {
     hash: rollupV1,
   });
 
-  if (receipt.status == "success") {
-    console.log(`✅ Transaction confirmed in block`);
-  } else {
-    console.log(`❌ Transaction reverted`);
+  if (receipt.status !== "success") {
+    throw new Error("RollupV1 implementation deploy reverted");
   }
+  console.log(`✅ Transaction confirmed in block`);
 
   let rollupAddress = receipt.contractAddress;
 
@@ -239,6 +230,7 @@ async function main() {
     functionName: "initialize",
     args: [
       ownerAddress,
+      escrowManager,
       erc20Address,
       aggregateVerifierAddr,
       proverAddress,
@@ -259,11 +251,10 @@ async function main() {
     hash: rollupProxyTx,
   });
 
-  if (receipt.status == "success") {
-    console.log(`✅ Transaction confirmed in block`);
-  } else {
-    console.log(`❌ Transaction reverted`);
+  if (receipt.status !== "success") {
+    throw new Error("RollupV1 proxy deploy reverted");
   }
+  console.log(`✅ Transaction confirmed in block`);
   let rollupProxyAddr = receipt.contractAddress;
 
   console.log(`✅ Rollup Contract (Proxy): ${rollupProxyAddr}`);
@@ -312,11 +303,10 @@ async function main() {
     hash: hash,
   });
 
-  if (receipt.status == "success") {
-    console.log(`✅ Approved maxUint256 to ${rollupProxyAddr}: ${hash}`);
-  } else {
-    console.log(`❌ Transaction reverted`);
+  if (receipt.status !== "success") {
+    throw new Error("ERC20 approve reverted");
   }
+  console.log(`✅ Approved maxUint256 to ${rollupProxyAddr}: ${hash}`);
 
   // Register the mock BTC note kind used by the Rust test suite.
   // RollupV1.initialize() only registers the Citrea testnet note kind (chain 5115),

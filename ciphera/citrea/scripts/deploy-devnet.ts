@@ -5,14 +5,11 @@ import {
   createPublicClient,
   createWalletClient,
   http,
-  parseEther,
   formatEther,
   encodeFunctionData,
 } from "viem";
-import { privateKeyToAccount, mnemonicToAccount } from "viem/accounts";
-import { deployBin, citreaDevChain } from "./shared";
-import { readFile } from "fs/promises";
-import { join } from "path";
+import { privateKeyToAccount } from "viem/accounts";
+import { citreaDevChain } from "./shared";
 
 // Auto-updated by generate_fixturecs.sh - do not modify manually
 const AGG_AGG_VERIFICATION_KEY_HASH =
@@ -24,8 +21,7 @@ const aggregateVerifierAddr = "0xcf7ed3acca5a467e9e704c703e8d87f634fb0fc9";
 async function main() {
   console.log("🚀 Connecting to Citrea...");
 
-  // Auto-detect environment and set URL
-  const rpcUrl = "http://localhost:12345";
+  const rpcUrl = process.env.TESTING_URL || "http://localhost:12345";
   console.log(`RPC URL: ${rpcUrl}`);
 
   // Create clients with dynamic RPC URL
@@ -43,10 +39,9 @@ async function main() {
     }),
   });
 
-  const privateKey =
-    "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
-  const account = privateKeyToAccount(privateKey as `0x${string}`);
-  //const account = mnemonicToAccount('rail flame music embark label blade bomb front reform mango aisle moment')
+  const privateKey = (process.env.PRIVATE_KEY ||
+    "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80") as `0x${string}`;
+  const account = privateKeyToAccount(privateKey);
 
   const walletClient = createWalletClient({
     account,
@@ -97,11 +92,10 @@ async function main() {
     hash: rollupV1,
   });
 
-  if (receipt.status == "success") {
-    console.log(`✅ Transaction confirmed in block`);
-  } else {
-    console.log(`❌ Transaction reverted`);
+  if (receipt.status !== "success") {
+    throw new Error("RollupV1 implementation deploy reverted");
   }
+  console.log(`✅ Transaction confirmed in block`);
 
   let rollupAddress = receipt.contractAddress;
 
@@ -132,11 +126,10 @@ async function main() {
     hash: rollupProxyTx,
   });
 
-  if (receipt.status == "success") {
-    console.log(`✅ Transaction confirmed in block`);
-  } else {
-    console.log(`❌ Transaction reverted`);
+  if (receipt.status !== "success") {
+    throw new Error("RollupV1 proxy deploy reverted");
   }
+  console.log(`✅ Transaction confirmed in block`);
 
   console.log(`✅ Rollup Contract (Proxy): ${receipt.contractAddress}`);
 

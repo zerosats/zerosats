@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: UNLICENSED
-pragma solidity ^0.8.20;
+pragma solidity ^0.8.28;
 
 import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
@@ -108,6 +108,9 @@ contract RollupV1 is Initializable, OwnableUpgradeable {
     // Burn substitutors
     mapping(address => bool) private burnSubstitutors;
 
+    address public escrowManager;
+    address public wrappedCBTC;
+
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
         _disableInitializers();
@@ -115,6 +118,7 @@ contract RollupV1 is Initializable, OwnableUpgradeable {
 
     function initialize(
         address owner,
+        address _escrowManager,
         address _tokenAddress,
         address _verifierAddress,
         address prover,
@@ -143,6 +147,9 @@ contract RollupV1 is Initializable, OwnableUpgradeable {
             0x000200000000000013fb8d0c9d1c17ae5e40fff9be350f57840e9e66cd930000
         ] = _tokenAddress;
         burnSubstitutors[owner] = true;
+
+        escrowManager = _escrowManager;
+        wrappedCBTC = _tokenAddress;
     }
 
     modifier onlyProver() {
@@ -166,6 +173,11 @@ contract RollupV1 is Initializable, OwnableUpgradeable {
             burnSubstitutors[msg.sender] == true,
             "RollupV1: You are not a burn substitutor"
         );
+        _;
+    }
+
+    modifier onlyEscrowManager() {
+        require(msg.sender == escrowManager, "RollupV1: Only escrow manager");
         _;
     }
 
@@ -282,7 +294,7 @@ contract RollupV1 is Initializable, OwnableUpgradeable {
 
     function DOMAIN_SEPARATOR() public view returns (bytes32) {
         return
-            keccak256(
+                        keccak256(
                 abi.encode(
                     keccak256(
                         "EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"
@@ -306,7 +318,7 @@ contract RollupV1 is Initializable, OwnableUpgradeable {
         uint256 height,
         bytes32 verificationKeyHash,
         bytes calldata aggrProof,
-        // oldRoot, newRoot, commitHash, <messages_length>, 16x kzg
+    // oldRoot, newRoot, commitHash, <messages_length>, 16x kzg
         bytes32[] calldata publicInputs,
         bytes32 otherHashFromBlockHash,
         Signature[] calldata signatures
@@ -318,7 +330,7 @@ contract RollupV1 is Initializable, OwnableUpgradeable {
 
         require(
             publicInputs.length ==
-                zkVerifiers[verificationKeyHash].messages_length + 3,
+            zkVerifiers[verificationKeyHash].messages_length + 3,
             "RollupV1: Invalid publicInputs length"
         );
 
@@ -338,7 +350,7 @@ contract RollupV1 is Initializable, OwnableUpgradeable {
         );
 
         verifyAllMessages(
-            // Skip the first 3 public inputs as these are never messages
+        // Skip the first 3 public inputs as these are never messages
             3,
             publicInputs,
             zkVerifiers[verificationKeyHash].messages_length,
@@ -485,7 +497,7 @@ contract RollupV1 is Initializable, OwnableUpgradeable {
         uint256 burnBlockHeight
     ) internal pure returns (bytes32) {
         return
-            keccak256(
+                        keccak256(
                 abi.encode(hash, burnAddress, noteKind, amount, burnBlockHeight)
             );
     }
@@ -612,6 +624,30 @@ contract RollupV1 is Initializable, OwnableUpgradeable {
         return mints[hash];
     }
 
+    // Function for EscrowManager only. As of Mar 2026 the best working solution
+    function mintClaimed(
+        bytes32 mint_hash,
+        uint256 value,
+        bytes32 note_kind
+    ) public onlyEscrowManager {
+        if (mints[mint_hash].amount != 0) {
+            revert("RollupV1: Mint already exists");
+        }
+
+        address tokenAddress = tokens[note_kind];
+        require(
+            tokenAddress != address(0),
+            "RollupV1: Token not found for note kind"
+        );
+        mints[mint_hash] = Mint({
+            note_kind: note_kind,
+            amount: value,
+            spent: false
+        });
+
+        emit MintAdded(mint_hash, value, note_kind);
+    }
+
     // Anyone can call mint, although this is likely to be performed on behalf of the user
     // as they may not have gas to pay for the txn
     function mint(bytes32 mint_hash, bytes32 value, bytes32 note_kind) public {
@@ -735,7 +771,7 @@ contract RollupV1 is Initializable, OwnableUpgradeable {
     ) private {
         require(
             validatorSets.length == 0 ||
-                validatorSets[validatorSets.length - 1].validFrom < validFrom,
+            validatorSets[validatorSets.length - 1].validFrom < validFrom,
             "RollupV1: New validator set must have a validFrom greater than the last set"
         );
         require(
@@ -769,6 +805,20 @@ contract RollupV1 is Initializable, OwnableUpgradeable {
         _setValidators(validFrom, validators);
     }
 
+    /**
+     * @notice Update the EscrowManager address (onlyOwner)
+     * @param newEscrowManagerAddress The new EscrowManager address
+     */
+    function setEscrowManager(
+        address newEscrowManagerAddress
+    ) external onlyOwner {
+        require(
+            newEscrowManagerAddress != address(0),
+            "RollupV1: Invalid escrow manager address"
+        );
+        escrowManager = newEscrowManagerAddress;
+    }
+
     function updateValidatorSetIndex(uint256 height) internal {
         for (uint256 i = validatorSetIndex + 1; i < validatorSets.length; i++) {
             if (validatorSets[i].validFrom > height) {
@@ -794,9 +844,9 @@ contract RollupV1 is Initializable, OwnableUpgradeable {
         uint256 height,
         bytes32 otherHashFromBlockHash
     )
-        external
-        pure
-        returns (bytes32 proposalHash, bytes32 acceptMsg, bytes32 sigMsg)
+    external
+    pure
+    returns (bytes32 proposalHash, bytes32 acceptMsg, bytes32 sigMsg)
     {
         proposalHash = keccak256(
             abi.encode(newRoot, height, otherHashFromBlockHash)

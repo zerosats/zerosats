@@ -27,6 +27,10 @@ use web3::{
     types::Address,
 };
 
+/// Maximum number of blocks to scan in a single getLogs call.
+/// Citrea RPC API enforces a 1000-block limit for event scanning.
+const MAX_SCAN_DEPTH: u64 = 1000;
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ValidatorSet {
     pub validators: Vec<Address>,
@@ -642,11 +646,18 @@ impl ReadonlyRollupContract {
         // Convert the mint_hash Element to H256
         let mint_hash_h256 = convert_element_to_h256(mint_hash);
 
+        // Resolve to_block to a concrete block number so we can apply the scan-depth limit.
+        let to_block_num = match to_block {
+            BlockNumber::Number(n) => n,
+            _ => self.client.client().eth().block_number().await?,
+        };
+        let from_block_num = to_block_num.saturating_sub(U64::from(MAX_SCAN_DEPTH - 1));
+
         // Build the filter
         let filter = FilterBuilder::default()
             .address(vec![self.contract.address()])
-            .from_block(BlockNumber::Earliest)
-            .to_block(to_block)
+            .from_block(BlockNumber::Number(from_block_num))
+            .to_block(BlockNumber::Number(to_block_num))
             .topics(
                 Some(vec![event_signature]), // Event signature
                 Some(vec![mint_hash_h256]),  // First indexed parameter (mint_hash)
@@ -675,6 +686,61 @@ impl ReadonlyRollupContract {
 
                 events.push(MintAddedEvent {
                     mint_hash: mint_hash_h256,
+                    value: amount,
+                    note_kind,
+                    transaction_hash: log.transaction_hash.unwrap(),
+                    block_number: log.block_number.unwrap().as_u64(),
+                });
+            }
+        }
+
+        Ok(events)
+    }
+
+    /// Gets MintAdded events from the contract within the last `MAX_SCAN_DEPTH` blocks.
+    ///
+    /// Note: Due to the Citrea RPC API 1000-block scan limit, only events from the
+    /// most recent `MAX_SCAN_DEPTH` blocks are returned, not from the chain's genesis.
+    #[tracing::instrument(err, ret, skip(self))]
+    pub async fn get_all_mint_added_events(&self) -> Result<Vec<MintAddedEvent>> {
+        let event_signature = H256::from_slice(
+            &Keccak256::digest(b"MintAdded(bytes32,uint256,bytes32)").as_slice()[0..32],
+        );
+
+        let latest = self.client.client().eth().block_number().await?;
+        let from_block_num = latest.saturating_sub(U64::from(MAX_SCAN_DEPTH - 1));
+
+        let filter = FilterBuilder::default()
+            .address(vec![self.contract.address()])
+            .from_block(BlockNumber::Number(from_block_num))
+            .to_block(BlockNumber::Number(latest))
+            .topics(
+                Some(vec![event_signature]),
+                None,
+                None,
+                None,
+            )
+            .build();
+
+        let logs = self.client.client().eth().logs(filter).await?;
+
+        let mut events = Vec::new();
+        for log in logs {
+            if log.data.0.len() >= 64
+                && log.topics.len() >= 2
+                && log.transaction_hash.is_some()
+                && log.block_number.is_some()
+            {
+                let mint_hash = log.topics[1];
+
+                let amount = U256::from_big_endian(&log.data.0[0..32]);
+
+                let mut note_kind = [0u8; 32];
+                note_kind.copy_from_slice(&log.data.0[32..64]);
+                let note_kind = H256::from(note_kind);
+
+                events.push(MintAddedEvent {
+                    mint_hash,
                     value: amount,
                     note_kind,
                     transaction_hash: log.transaction_hash.unwrap(),
