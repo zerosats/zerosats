@@ -1,18 +1,18 @@
 use clap::{Parser, Subcommand};
-use cli::NodeClient;
-use cli::Wallet;
 use cli::address::citrea_ticker_from_contract;
 use cli::address::decode_address;
-use cli::note_url::{CipheraURL, decode_url};
+use cli::note_url::{decode_url, CipheraURL};
+use cli::NodeClient;
+use cli::Wallet;
 
 use color_eyre::Result;
 use tracing::{debug, error};
-use web3::types::{H160, H256};
+use web3::types::{H160, H256, U256};
 
 use barretenberg::Prove;
 use contracts::util::{convert_element_to_h256, convert_h160_to_element};
 use hash::hash_merge;
-use rand::{RngCore, rngs::OsRng};
+use rand::{rngs::OsRng, RngCore};
 use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::Path;
@@ -836,6 +836,7 @@ async fn handle_rollup(geth_rpc: &str, chain: u64, rollup: &str) -> Result<()> {
 
     let rh = rollup.root_hash().await?;
     let b = rollup.block_height().await?;
+    let version = rollup.version().await?;
     let kind_wcbtc = H256::from_slice(
         &hex::decode("000200000000000013fb8d0c9d1c17ae5e40fff9be350f57840e9e66cd930000").unwrap(),
     );
@@ -849,11 +850,31 @@ async fn handle_rollup(geth_rpc: &str, chain: u64, rollup: &str) -> Result<()> {
 
     println!("\nRollup State Info\n");
     println!("\tChain                :{chain} ");
+    println!("\tVersion              :{version} ");
     println!("\tToken kind WBTC      :{token_wbtc:#x} ");
     println!("\tToken kind USDC      :{token_usdc:#x} ");
-
     println!("\tBlock                :{b} ");
     println!("\tRoot hash            :{rh:#x} ");
+
+    // Enumerate zkVerifierKeys array and look up each entry in the zkVerifiers mapping
+    println!("\nZK Verifiers\n");
+    let mut index = 0u64;
+    loop {
+        match rollup.zk_verifier_keys(U256::from(index)).await {
+            Ok(key_hash) => {
+                let (address, circuit_id, enabled) = rollup.zk_verifiers(key_hash).await?;
+                println!(
+                    "\t[{index}]\n\tkey={key_hash:#x}\n\taddress={address:#x}\n\t\
+                    circuit_id={circuit_id}  enabled={enabled}"
+                );
+                index += 1;
+            }
+            Err(_) => break,
+        }
+    }
+    if index == 0 {
+        println!("\tNo ZK verifiers found.");
+    }
 
     Ok(())
 }
