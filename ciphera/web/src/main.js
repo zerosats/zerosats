@@ -48,9 +48,8 @@ class CipheraApp {
             connected: false,
             cliReady: false,
             pendingNote: null, // Stores note waiting to be saved
-            nodeHost: null,
+            nodeHost: null,    // includes scheme prefix, e.g. "https://ciphera.satsbridge.com"
             nodePort: null,
-            nodeTls: true,
             chainId: null,
             rollupContract: null,
         };
@@ -348,7 +347,6 @@ class CipheraApp {
         if (!connected) {
             this.state.nodeHost = null;
             this.state.nodePort = null;
-            this.state.nodeTls = true;
             this.state.chainId = null;
             this.state.rollupContract = null;
             // Stop explorer polling when disconnected
@@ -376,21 +374,20 @@ class CipheraApp {
         }
     }
 
-    parseTlsAnswer(value) {
-        const normalized = String(value ?? '').trim().toLowerCase();
-        return !['n', 'no', 'false', '0', 'off', 'http'].includes(normalized);
+    parseHostScheme(host) {
+        const h = String(host ?? '').trim();
+        if (h.startsWith('https://')) return { scheme: 'https', bareHost: h.slice(8) };
+        if (h.startsWith('http://')) return { scheme: 'http', bareHost: h.slice(7) };
+        return { scheme: 'http', bareHost: h };
     }
 
-    getNodeProtocol(useTls = this.state.nodeTls) {
-        return useTls === false ? 'http' : 'https';
+    getNodeEndpoint(host = this.state.nodeHost, port = this.state.nodePort) {
+        const { scheme, bareHost } = this.parseHostScheme(host);
+        return `${scheme}://${bareHost}:${port}`;
     }
 
-    getNodeEndpoint(host = this.state.nodeHost, port = this.state.nodePort, useTls = this.state.nodeTls) {
-        return `${this.getNodeProtocol(useTls)}://${host}:${port}`;
-    }
-
-    getNodeBaseUrl(host = this.state.nodeHost, port = this.state.nodePort, useTls = this.state.nodeTls) {
-        return `${this.getNodeEndpoint(host, port, useTls)}/v0`;
+    getNodeBaseUrl(host = this.state.nodeHost, port = this.state.nodePort) {
+        return `${this.getNodeEndpoint(host, port)}/v0`;
     }
 
     truncateAddress(address) {
@@ -896,9 +893,8 @@ class CipheraApp {
         this.terminal.log('CONNECT TO NODE', 'info');
         this.terminal.log('Type "clear" to return home', 'dim');
         this.startPromptSequence('sync', [
-            {key: 'host', label: 'Host:', placeholder: 'ciphera.satsbridge.com', default: 'ciphera.satsbridge.com'},
+            {key: 'host', label: 'Host:', placeholder: 'https://ciphera.satsbridge.com', default: 'https://ciphera.satsbridge.com'},
             {key: 'port', label: 'Port:', placeholder: '443', default: '443'},
-            {key: 'tls', label: 'Use TLS (https)? [Y/n]:', placeholder: 'yes', default: 'yes'}
         ]);
     }
 
@@ -915,8 +911,7 @@ class CipheraApp {
 
         const nextNodeHost = answers.host;
         const nextNodePort = parseInt(answers.port);
-        const nextNodeTls = this.parseTlsAnswer(answers.tls);
-        const nextNodeEndpoint = this.getNodeEndpoint(nextNodeHost, nextNodePort, nextNodeTls);
+        const nextNodeEndpoint = this.getNodeEndpoint(nextNodeHost, nextNodePort);
 
         this.updateStatus(`⏳ CONNECT: Reaching ${nextNodeEndpoint}...`);
 
@@ -924,7 +919,6 @@ class CipheraApp {
             this.state.walletName,
             nextNodeHost,
             nextNodePort,
-            !nextNodeTls,
         );
 
         if (!result.success) {
@@ -934,7 +928,7 @@ class CipheraApp {
 
         // Fetch network info to get chain_id and rollup_contract
         try {
-            const networkRes = await fetch(`${this.getNodeBaseUrl(nextNodeHost, nextNodePort, nextNodeTls)}/network`);
+            const networkRes = await fetch(`${this.getNodeBaseUrl(nextNodeHost, nextNodePort)}/network`);
             if (!networkRes.ok) {
                 throw new Error(`HTTP ${networkRes.status}`);
             }
@@ -971,7 +965,6 @@ class CipheraApp {
 
         this.state.nodeHost = nextNodeHost;
         this.state.nodePort = nextNodePort;
-        this.state.nodeTls = nextNodeTls;
         this.updateConnectionStatus(true, nextNodeEndpoint);
 
         this.completeStatus(true, `CONNECTED: ${nextNodeEndpoint}`);
@@ -1051,7 +1044,6 @@ class CipheraApp {
             gethRpc: answers.gethRpc,
             host: this.state.nodeHost,
             port: this.state.nodePort,
-            noTls: !this.state.nodeTls,
             chain: this.state.chainId,
             rollup: rollupContract,
         });
@@ -1140,7 +1132,6 @@ class CipheraApp {
             this.state.chainId,
             this.state.nodeHost,
             this.state.nodePort,
-            !this.state.nodeTls,
         );
 
         if (!result.success) {
@@ -1218,7 +1209,6 @@ class CipheraApp {
             noteFile: answers.noteFile,
             host: this.state.nodeHost,
             port: this.state.nodePort,
-            noTls: !this.state.nodeTls,
             chain: this.state.chainId,
         });
 
@@ -1302,7 +1292,6 @@ class CipheraApp {
             address: answers.address,
             host: this.state.nodeHost,
             port: this.state.nodePort,
-            noTls: !this.state.nodeTls,
             chain: this.state.chainId,
         });
 
