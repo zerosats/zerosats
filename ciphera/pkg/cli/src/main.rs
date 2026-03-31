@@ -135,7 +135,7 @@ enum Commands {
     DepoLn {
         /// Amount to deposit in satoshis
         #[arg(required = true, short, long)]
-        amount: u64,
+        amount_sat: u64,
 
         /// Onramp service base URI
         #[arg(long, default_value = "https://testnet.lx.dev")]
@@ -518,7 +518,7 @@ async fn handle_depo_ln(
     timeout_secs: u64,
     use_tls: bool,
     chain: u64,
-    amount: u64,
+    amount_sat: u64,
     onramp_uri: &str,
 ) -> Result<()> {
     // 1. Generate preimage and payment_hash
@@ -538,7 +538,7 @@ async fn handle_depo_ln(
 
     // 4. Init swap: GET /onramp/{amount}/{payment_hash}
     let http = reqwest::Client::new();
-    let init_url = format!("{}/onramp/{}/{}", onramp_uri, amount, payment_hash_hex);
+    let init_url = format!("{}/onramp/{}/{}", onramp_uri, amount_sat, payment_hash_hex);
     let init_resp = http
         .get(&init_url)
         .send()
@@ -990,7 +990,7 @@ async fn main() -> Result<()> {
             handle_mints(&geth_rpc, cli.chain, &cli.rollup).await?;
         }
         Commands::DepoLn {
-            amount,
+            amount_sat,
             onramp_uri,
         } => {
             handle_depo_ln(
@@ -1000,7 +1000,7 @@ async fn main() -> Result<()> {
                 cli.timeout,
                 use_tls,
                 cli.chain,
-                amount,
+                amount_sat,
                 &onramp_uri,
             )
             .await?;

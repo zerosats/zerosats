@@ -73,9 +73,6 @@ contract RollupV1 is Initializable, OwnableUpgradeable {
     event ProverRemoved(address indexed prover);
     event RootHashUpdated(bytes32 indexed oldRoot, bytes32 indexed newRoot);
 
-    address public escrowManager;
-    address public wrappedCBTC;
-
     // Since the Initializable._initialized version number is private, we need to keep track of it ourselves
     uint8 public version;
 
@@ -110,6 +107,9 @@ contract RollupV1 is Initializable, OwnableUpgradeable {
 
     // Burn substitutors
     mapping(address => bool) private burnSubstitutors;
+
+    address public escrowManager;
+    address public wrappedCBTC;
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
@@ -814,7 +814,7 @@ contract RollupV1 is Initializable, OwnableUpgradeable {
     ) external onlyOwner {
         require(
             newEscrowManagerAddress != address(0),
-            "Claimer: Invalid escrow manager address"
+            "RollupV1: Invalid escrow manager address"
         );
         escrowManager = newEscrowManagerAddress;
     }
