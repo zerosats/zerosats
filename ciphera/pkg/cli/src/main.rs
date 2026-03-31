@@ -508,7 +508,6 @@ async fn handle_depo_ln(
     host: &str,
     port: u16,
     timeout_secs: u64,
-    use_tls: bool,
     chain: u64,
     amount_sat: u64,
     onramp_uri: &str,
@@ -526,7 +525,7 @@ async fn handle_depo_ln(
         .host(host)
         .port(port)
         .timeout_secs(timeout_secs)
-        .build(chain, use_tls, false)?;
+        .build(chain, false)?;
 
     // 4. Init swap: GET /onramp/{amount}/{payment_hash}
     let http = reqwest::Client::new();
@@ -1061,7 +1060,6 @@ async fn main() -> Result<()> {
                 &cli.host,
                 cli.port,
                 cli.timeout,
-                use_tls,
                 cli.chain,
                 amount_sat,
                 &onramp_uri,
