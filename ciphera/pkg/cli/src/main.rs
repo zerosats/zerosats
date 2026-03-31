@@ -800,7 +800,7 @@ async fn handle_burn(
     }
 
     let (wallet_with_burner_note, _) =
-        client.get_wallet().prepare_import_note(&burner_note.note)?;
+        client.get_wallet().prepare_add_to_avail(burner_note.clone())?;
     wallet_with_burner_note.save()?;
     client.replace_wallet(wallet_with_burner_note);
 
