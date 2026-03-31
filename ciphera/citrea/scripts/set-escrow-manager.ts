@@ -2,7 +2,7 @@ import rollupV1Artifact from "../artifacts/contracts/rollup/RollupV1.sol/RollupV
 import { network } from "hardhat";
 import {createWalletClient, getContract, http} from "viem";
 import {mnemonicToAccount} from "viem/accounts";
-import {citreaTestChain} from "./shared.js";
+import {citreaTestChain} from "./shared";
 
 const { viem } = await network.connect({
     network: "citreaTestnet",
@@ -15,9 +15,10 @@ const NEW_ESCROW_MANAGER = process.env.NEW_ESCROW_MANAGER as `0x${string}`;
 async function main() {
     if (!ROLLUP_ADDRESS) throw new Error("ROLLUP_ADDRESS env var is not set");
     if (!NEW_ESCROW_MANAGER) throw new Error("NEW_ESCROW_MANAGER env var is not set");
-    let seed = process.env.MNEMONIC as string;
+    const seed = process.env.MNEMONIC;
+    if (!seed) throw new Error("MNEMONIC env var is not set");
     let account = mnemonicToAccount(seed);
-    let rpcUrl = "https://rpc.testnet.citrea.xyz";
+    const rpcUrl = process.env.TESTNET_RPC_URL || "https://rpc.testnet.citrea.xyz";
 
     const publicClient = await viem.getPublicClient();
 
@@ -57,12 +58,11 @@ async function main() {
 
     const receipt = await publicClient.waitForTransactionReceipt({ hash });
 
-    if (receipt.status == "success") {
-        console.log(`✅ Transaction confirmed in block`);
-    } else {
-        console.log(`❌ Transaction reverted`);
-        console.log(receipt);
+    if (receipt.status !== "success") {
+        console.error(`❌ Transaction reverted`, receipt);
+        throw new Error("setEscrowManager transaction reverted");
     }
+    console.log(`✅ Transaction confirmed in block`);
 }
 
 main()

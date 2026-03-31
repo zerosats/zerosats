@@ -3,17 +3,13 @@ import {
   createPublicClient,
   createWalletClient,
   http,
-  parseEther,
   formatEther,
-  encodeFunctionData,
   getContract,
   parseUnits,
   maxUint256,
 } from "viem";
-import { privateKeyToAccount, mnemonicToAccount } from "viem/accounts";
-import { deployBin, citreaDevChain } from "./shared";
-import { readFile } from "fs/promises";
-import { join } from "path";
+import { privateKeyToAccount } from "viem/accounts";
+import { citreaDevChain } from "./shared";
 
 const usdcAddress = "0x5fbdb2315678afecb367f032d93f642f64180aa3";
 const rollupProxyAddr = "0x610178da211fef7d417bc0e6fed39f05609ad788";
@@ -21,8 +17,7 @@ const rollupProxyAddr = "0x610178da211fef7d417bc0e6fed39f05609ad788";
 async function main() {
   console.log("🚀 Connecting to Citrea...");
 
-  // Auto-detect environment and set URL
-  const rpcUrl = "http://localhost:12345";
+  const rpcUrl = process.env.TESTING_URL || "http://localhost:12345";
   console.log(`RPC URL: ${rpcUrl}`);
 
   // Create clients with dynamic RPC URL
@@ -40,10 +35,9 @@ async function main() {
     }),
   });
 
-  const privateKey =
-    "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
-  const account = privateKeyToAccount(privateKey as `0x${string}`);
-  //const account = mnemonicToAccount('rail flame music embark label blade bomb front reform mango aisle moment')
+  const privateKey = (process.env.PRIVATE_KEY ||
+    "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80") as `0x${string}`;
+  const account = privateKeyToAccount(privateKey);
 
   const walletClient = createWalletClient({
     account,
@@ -144,7 +138,7 @@ async function main() {
   });
   await publicClient.waitForTransactionReceipt({ hash });
 
-  console.error("All transactions executed");
+  console.log("All transactions executed");
 }
 
 main()

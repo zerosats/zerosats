@@ -1,4 +1,5 @@
-import { parseGwei, serializeTransaction } from "viem";
+import { parseGwei } from "viem";
+import type { PublicClient, WalletClient } from "viem";
 import { readFile } from "fs/promises";
 
 // Simple custom chain definition for Citrea local regtest configuration
@@ -42,10 +43,36 @@ export const citreaTestChain = {
   },
 } as const;
 
+export const WCBTC_ADDRESS = "0x8d0c9d1c17aE5e40ffF9bE350f57840E9E66Cd93" as const;
+
+export const WCBTC_ABI = [
+  {
+    name: "deposit",
+    type: "function",
+    stateMutability: "payable",
+    inputs: [],
+    outputs: [],
+  },
+  {
+    name: "withdraw",
+    type: "function",
+    stateMutability: "nonpayable",
+    inputs: [{ name: "wad", type: "uint256" }],
+    outputs: [],
+  },
+  {
+    name: "balanceOf",
+    type: "function",
+    stateMutability: "view",
+    inputs: [{ name: "owner", type: "address" }],
+    outputs: [{ name: "", type: "uint256" }],
+  },
+] as const;
+
 export async function deployBin(
   binFile: string,
-  publicClient: any,
-  walletClient: any,
+  publicClient: PublicClient,
+  walletClient: WalletClient,
 ): Promise<`0x${string}`> {
   const bin = (await readFile(`contracts/${binFile}`)).toString().trimEnd();
 
@@ -72,11 +99,13 @@ export async function deployBin(
     hash: verifierTx,
   });
 
-  if (receipt.status == "success") {
-    console.log(`✅ Transaction confirmed in block`);
-  } else {
-    console.log(`❌ Transaction reverted`);
+  if (receipt.status !== "success") {
+    throw new Error(`Deploy of ${binFile} reverted`);
   }
+  console.log(`✅ Transaction confirmed in block`);
 
+  if (!receipt.contractAddress) {
+    throw new Error(`Deploy of ${binFile} succeeded but no contract address in receipt`);
+  }
   return receipt.contractAddress;
 }

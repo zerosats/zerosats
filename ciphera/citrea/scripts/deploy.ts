@@ -152,27 +152,6 @@ async function main() {
   let receipt;
 
   if (isTestnet) {
-    let seed = process.env.MNEMONIC as string;
-    account = mnemonicToAccount(seed);
-    rpcUrl = "https://rpc.testnet.citrea.xyz";
-    if (proverAddress === undefined)
-      throw new Error("PROVER_ADDRESS is not set");
-    if (validators.length === 0) throw new Error("VALIDATORS is not set");
-
-    walletClient = createWalletClient({
-      account,
-      chain: {
-        ...citreaTestChain,
-        rpcUrls: {
-          default: { http: [rpcUrl] },
-          public: { http: [rpcUrl] },
-        },
-      },
-      transport: http(rpcUrl, {
-        timeout: 60000,
-        retryCount: 3,
-      }),
-    });
     erc20Address = "0x8d0c9d1c17aE5e40ffF9bE350f57840E9E66Cd93";
     console.log(`✅ Using wrapped cBTC token`);
   } else {
@@ -188,11 +167,10 @@ async function main() {
       hash: erc20Tx,
     });
 
-    if (receipt.status == "success") {
-      console.log(`✅ Transaction confirmed in block`);
-    } else {
-      console.log(`❌ Transaction reverted`);
+    if (receipt.status !== "success") {
+      throw new Error("ERC20 deploy reverted");
     }
+    console.log(`✅ Transaction confirmed in block`);
     erc20Address = receipt.contractAddress;
     console.log(`✅ ERC20 Deployed`);
   }
@@ -226,11 +204,10 @@ async function main() {
     hash: rollupV1,
   });
 
-  if (receipt.status == "success") {
-    console.log(`✅ Transaction confirmed in block`);
-  } else {
-    console.log(`❌ Transaction reverted`);
+  if (receipt.status !== "success") {
+    throw new Error("RollupV1 implementation deploy reverted");
   }
+  console.log(`✅ Transaction confirmed in block`);
 
   let rollupAddress = receipt.contractAddress;
 
@@ -262,11 +239,10 @@ async function main() {
     hash: rollupProxyTx,
   });
 
-  if (receipt.status == "success") {
-    console.log(`✅ Transaction confirmed in block`);
-  } else {
-    console.log(`❌ Transaction reverted`);
+  if (receipt.status !== "success") {
+    throw new Error("RollupV1 proxy deploy reverted");
   }
+  console.log(`✅ Transaction confirmed in block`);
   let rollupProxyAddr = receipt.contractAddress;
 
   console.log(`✅ Rollup Contract (Proxy): ${rollupProxyAddr}`);
@@ -315,11 +291,10 @@ async function main() {
     hash: hash,
   });
 
-  if (receipt.status == "success") {
-    console.log(`✅ Approved maxUint256 to ${rollupProxyAddr}: ${hash}`);
-  } else {
-    console.log(`❌ Transaction reverted`);
+  if (receipt.status !== "success") {
+    throw new Error("ERC20 approve reverted");
   }
+  console.log(`✅ Approved maxUint256 to ${rollupProxyAddr}: ${hash}`);
 
   // Register the mock BTC note kind used by the Rust test suite.
   // RollupV1.initialize() only registers the Citrea testnet note kind (chain 5115),
