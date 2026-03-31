@@ -876,6 +876,25 @@ async fn handle_rollup(geth_rpc: &str, chain: u64, rollup: &str) -> Result<()> {
         println!("\tNo ZK verifiers found.");
     }
 
+    // Last mint events
+    println!("\nLast Mint Events\n");
+    let mint_events = rollup.get_all_mint_added_events().await?;
+    println!("\tTotal mints: {}\n", mint_events.len());
+    if mint_events.is_empty() {
+        println!("\tNo mints found.");
+    } else {
+        println!(
+            "\t{:<66}  {:>20}  {:<66}  {}",
+            "Mint Hash", "Value", "Note Kind", "Block"
+        );
+        for event in &mint_events {
+            println!(
+                "\t{:#x}  {:>20}  {:#x}  {}",
+                event.mint_hash, event.value, event.note_kind, event.block_number
+            );
+        }
+    }
+
     Ok(())
 }
 
