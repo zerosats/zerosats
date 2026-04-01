@@ -505,9 +505,10 @@ ipcMain.handle('note:read', async (event, name) => {
  * Open file dialog for importing notes
  */
 ipcMain.handle('dialog:openFile', async () => {
-    // Do not pass a parent window — passing mainWindow triggers GtkFileChooserNative
-    // on Linux/GTK3 which crashes with an invalid cast error.
-    const result = await dialog.showOpenDialog({
+    // GTK_USE_PORTAL=0 is set at startup to prevent GtkFileChooserNative crashes
+    // on Linux/GTK3. With that in place, passing mainWindow is safe and ensures
+    // the dialog appears in front of the app window instead of behind it.
+    const result = await dialog.showOpenDialog(mainWindow, {
         properties: ['openFile'],
         filters: [
             { name: 'JSON Files', extensions: ['json'] },

@@ -1470,26 +1470,38 @@ class CipheraApp {
     }
 
     async importWallet() {
-        const fileResult = await window.ciphera.openFileDialog();
+        let fileResult;
+        try {
+            fileResult = await window.ciphera.openFileDialog();
+        } catch (e) {
+            this.terminal.separator();
+            this.completeStatus(false, `IMPORT FAILED - ${e.message}`);
+            return;
+        }
+
         if (fileResult.canceled) return;
 
         this.terminal.separator();
         this.updateStatus('⏳ IMPORT: Reading wallet file...');
 
-        const result = await window.ciphera.importWallet(fileResult.filePath);
+        try {
+            const result = await window.ciphera.importWallet(fileResult.filePath);
 
-        if (!result.success) {
-            this.completeStatus(false, `IMPORT FAILED - ${result.error}`);
-            return;
+            if (!result.success) {
+                this.completeStatus(false, `IMPORT FAILED - ${result.error}`);
+                return;
+            }
+
+            const wallet = result.wallet;
+            this.activateWallet(wallet, wallet.name);
+
+            this.completeStatus(true, `WALLET IMPORTED: ${wallet.name}`);
+            this.terminal.log(`Address: ${this.truncateAddress(wallet.pk)}`, 'dim');
+            this.terminal.log(`Balance: ${this.formatBalance(this.state.balance)} wcBTC`, 'dim');
+            this.terminal.log('Connect to a node to sync (type "2" or "connect")', 'info');
+        } catch (e) {
+            this.completeStatus(false, `IMPORT FAILED - ${e.message}`);
         }
-
-        const wallet = result.wallet;
-        this.activateWallet(wallet, wallet.name);
-
-        this.completeStatus(true, `WALLET IMPORTED: ${wallet.name}`);
-        this.terminal.log(`Address: ${this.truncateAddress(wallet.pk)}`, 'dim');
-        this.terminal.log(`Balance: ${this.formatBalance(this.state.balance)} wcBTC`, 'dim');
-        this.terminal.log('Connect to a node to sync (type "2" or "connect")', 'info');
     }
 
     async showAbout() {
