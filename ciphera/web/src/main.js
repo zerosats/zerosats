@@ -1458,7 +1458,7 @@ class CipheraApp {
     async handleSettingsAction(action) {
         switch (action) {
             case 'export':
-                this.terminal.log('Export wallet feature coming soon...', 'info');
+                await this.exportWallet();
                 break;
             case 'import':
                 await this.importWallet();
@@ -1466,6 +1466,36 @@ class CipheraApp {
             case 'about':
                 this.showAbout();
                 break;
+        }
+    }
+
+    async exportWallet() {
+        if (!this.state.walletName) {
+            this.terminal.separator();
+            this.terminal.log('No wallet loaded to export', 'error');
+            return;
+        }
+
+        this.terminal.separator();
+        this.updateStatus('⏳ EXPORT: Choose save location...');
+
+        try {
+            const result = await window.ciphera.exportWallet(this.state.walletName);
+
+            if (result.canceled) {
+                this.updateStatus('');
+                return;
+            }
+
+            if (!result.success) {
+                this.completeStatus(false, `EXPORT FAILED - ${result.error}`);
+                return;
+            }
+
+            this.completeStatus(true, `WALLET EXPORTED: ${this.state.walletName}`);
+            this.terminal.log(`Saved to: ${result.path}`, 'dim');
+        } catch (e) {
+            this.completeStatus(false, `EXPORT FAILED - ${e.message}`);
         }
     }
 

@@ -457,6 +457,41 @@ ipcMain.handle('wallet:import', async (event, filePath) => {
 });
 
 /**
+ * Export a wallet file to a user-chosen location
+ */
+ipcMain.handle('wallet:export', async (event, name) => {
+    try {
+        const walletPath = resolveWalletPath(name);
+        if (!walletPath) {
+            return { success: false, error: 'Invalid wallet name' };
+        }
+
+        if (!fs.existsSync(walletPath)) {
+            return { success: false, error: 'Wallet file not found' };
+        }
+
+        const result = await dialog.showSaveDialog(mainWindow, {
+            defaultPath: `${name}.json`,
+            filters: [
+                { name: 'JSON Files', extensions: ['json'] },
+                { name: 'All Files', extensions: ['*'] },
+            ],
+        });
+
+        if (result.canceled) {
+            return { success: true, canceled: true };
+        }
+
+        const content = fs.readFileSync(walletPath, 'utf8');
+        fs.writeFileSync(result.filePath, content, { encoding: 'utf8', mode: 0o600 });
+
+        return { success: true, canceled: false, path: result.filePath };
+    } catch (e) {
+        return { success: false, error: e.message };
+    }
+});
+
+/**
  * List wallet files
  */
 ipcMain.handle('wallet:list', async () => {
