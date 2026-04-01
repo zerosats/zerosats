@@ -137,11 +137,7 @@ class CipheraApp {
         // Check for existing wallets
         let hasWallet = false;
         try {
-            const result = await window.ciphera.listWallets();
-            hasWallet = result.wallets && result.wallets.length > 0;
-            if (hasWallet) {
-                await this.loadSavedWallet();
-            }
+            hasWallet = await this.loadSavedWallet();
         } catch (e) {
             console.error('Failed to check wallets:', e);
         }
@@ -149,6 +145,7 @@ class CipheraApp {
         // Show appropriate welcome message
         if (hasWallet) {
             this.showReturningUserMessage();
+            this.autoConnectDefaultServer();
         } else {
             this.showWelcomeMessage();
         }
@@ -311,11 +308,13 @@ class CipheraApp {
 
                 if (walletData.exists && walletData.wallet) {
                     this.activateWallet(walletData.wallet, name);
+                    return true;
                 }
             }
         } catch (e) {
             console.error('Failed to load wallet:', e);
         }
+        return false;
     }
 
     updateWalletDisplay() {
@@ -371,6 +370,44 @@ class CipheraApp {
         // Update endpoint display
         if (this.elements.nodeEndpoint) {
             this.elements.nodeEndpoint.textContent = connected && endpoint ? endpoint : 'DISCONNECTED';
+        }
+    }
+
+    async autoConnectDefaultServer() {
+        if (!this.state.walletName || !this.state.cliReady) return;
+
+        const defaultHost = 'https://ciphera.satsbridge.com';
+        const defaultPort = 443;
+        const endpoint = this.getNodeEndpoint(defaultHost, defaultPort);
+
+        this.terminal.log(`⏳ Auto-connecting to ${endpoint}...`, 'dim');
+
+        try {
+            const result = await window.ciphera.connect(
+                this.state.walletName,
+                defaultHost,
+                defaultPort,
+            );
+
+            if (!result.success) {
+                this.terminal.log('Auto-connect failed — use "connect" to retry manually', 'dim');
+                return;
+            }
+
+            const networkRes = await fetch(`${this.getNodeBaseUrl(defaultHost, defaultPort)}/network`);
+            if (!networkRes.ok) throw new Error(`HTTP ${networkRes.status}`);
+
+            const network = await networkRes.json();
+            this.state.chainId = network.chain_id;
+            this.state.rollupContract = network.rollup_contract;
+            this.state.nodeHost = defaultHost;
+            this.state.nodePort = defaultPort;
+            this.updateConnectionStatus(true, endpoint);
+
+            this.terminal.log(`✓ Connected: ${endpoint}`, 'success');
+        } catch (e) {
+            this.terminal.log('Auto-connect failed — use "connect" to retry manually', 'dim');
+            console.warn('Auto-connect error:', e);
         }
     }
 
@@ -472,10 +509,10 @@ class CipheraApp {
                 break;
             default:
                 // Check for explorer commands: "tx {hash}" or "block {number}"
-                if (cmd === 'tx' && parts.length > 1) {
-                    this.lookupTransaction(parts[1]);
-                } else if (cmd === 'block' && parts.length > 1) {
-                    this.lookupBlock(parts[1]);
+                if (cmd === 'tx' && args.length > 0) {
+                    this.lookupTransaction(args[0]);
+                } else if (cmd === 'block' && args.length > 0) {
+                    this.lookupBlock(args[0]);
                 } else {
                     this.terminal.log(`Unknown command: ${cmd}. Type "help" for commands.`, 'error');
                 }
@@ -877,8 +914,13 @@ class CipheraApp {
 
             // Reload wallet data
             const walletData = await window.ciphera.readWallet(answers.name);
-            if (walletData.exists) {
+            if (walletData.exists && walletData.wallet) {
                 this.activateWallet(walletData.wallet, answers.name);
+            } else {
+                // Wallet file created but couldn't be read back (e.g. missing name field) —
+                // activate with minimal state so the UI reflects the new wallet.
+                if (walletData.error) console.warn('Could not read wallet after creation:', walletData.error);
+                this.activateWallet({ pk: null, balance: 0 }, answers.name);
             }
 
             this.completeStatus(true, `WALLET CREATED: Welcome, ${answers.name}!`);
