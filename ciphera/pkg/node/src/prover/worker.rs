@@ -472,7 +472,8 @@ async fn run_rollup_worker(
 
         let rollup_contract_root_hash =
             Element::from_be_bytes(rollup_contract.root_hash().await?.0);
-        let rollup = if rollup.old_root() != rollup_contract_root_hash {
+        let next_height = contract_height.next();
+        let rollup = if rollup.old_root() != rollup_contract_root_hash || height != next_height {
             info!(
                 ?contract_height,
                 ?rollup_contract_root_hash,
@@ -482,14 +483,15 @@ async fn run_rollup_worker(
             );
 
             if let Some(postgres_db) = postgres_db.as_ref() {
+                let next_height_i64 = next_height.0 as i64;
                 let mut rows = postgres_db
                     .query(
                         "
                         WITH pending_rollup AS MATERIALIZED (
-                            SELECT height, proof FROM rollup_proofs WHERE old_root = $1 AND now() - added_at > $2::text::interval LIMIT 1
+                            SELECT height, proof FROM rollup_proofs WHERE old_root = $1 AND height = $3 AND now() - added_at > $2::text::interval LIMIT 1
                         ) SELECT proof FROM pending_rollup WHERE pg_try_advisory_lock(height::bigint)
                         ",
-                        &[&rollup_contract_root_hash.to_be_bytes().to_vec(), &"5 minutes"]
+                        &[&rollup_contract_root_hash.to_be_bytes().to_vec(), &"5 minutes", &next_height_i64]
                     )
                     .await?;
                 if let Some(row) = rows.pop() {
