@@ -132,7 +132,6 @@ function sanitizeInputNoteMap(value) {
 function normalizeImportedWallet(wallet) {
     const normalizedWallet = {
         pk: wallet.pk,
-        keys: [...wallet.keys],
         pending: sanitizeInputNoteMap(wallet.pending),
         avail: sanitizeInputNoteMap(wallet.avail),
         name: wallet.name,
@@ -161,10 +160,6 @@ function validateImportedWallet(wallet) {
 
     if (!isSerializedElement(wallet.pk)) {
         return 'Invalid wallet file (missing or malformed pk)';
-    }
-
-    if (!Array.isArray(wallet.keys) || !wallet.keys.every(isSerializedElement)) {
-        return 'Invalid wallet file (missing or malformed keys)';
     }
 
     if (

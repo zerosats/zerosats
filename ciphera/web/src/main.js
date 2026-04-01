@@ -297,15 +297,28 @@ class CipheraApp {
         this.state.rollupContract = null;
         this.updateConnectionStatus(false);
         this.applyWalletState(wallet, fallbackName);
+        if (this.state.walletName) {
+            localStorage.setItem('lastWalletName', this.state.walletName);
+        }
     }
 
     async loadSavedWallet() {
         try {
-            const result = await window.ciphera.listWallets();
-            if (result.wallets && result.wallets.length > 0) {
-                const name = result.wallets[0];
-                const walletData = await window.ciphera.readWallet(name);
+            // Try the last-used wallet first
+            const lastWalletName = localStorage.getItem('lastWalletName');
+            if (lastWalletName) {
+                const walletData = await window.ciphera.readWallet(lastWalletName);
+                if (walletData.exists && walletData.wallet) {
+                    this.activateWallet(walletData.wallet, lastWalletName);
+                    return true;
+                }
+            }
 
+            // Fall back to first valid wallet in the directory
+            const result = await window.ciphera.listWallets();
+            for (const name of (result.wallets ?? [])) {
+                if (name === lastWalletName) continue; // already tried above
+                const walletData = await window.ciphera.readWallet(name);
                 if (walletData.exists && walletData.wallet) {
                     this.activateWallet(walletData.wallet, name);
                     return true;
@@ -1475,7 +1488,7 @@ class CipheraApp {
             fileResult = await window.ciphera.openFileDialog();
         } catch (e) {
             this.terminal.separator();
-            this.completeStatus(false, `IMPORT FAILED - ${e.message}`);
+            this.completeStatus(false, `FILE OPEN FAILED - ${e.message}`);
             return;
         }
 
@@ -1488,7 +1501,7 @@ class CipheraApp {
             const result = await window.ciphera.importWallet(fileResult.filePath);
 
             if (!result.success) {
-                this.completeStatus(false, `IMPORT FAILED - ${result.error}`);
+                this.completeStatus(false, `WALLET LOADING FAILED - ${result.error}`);
                 return;
             }
 
@@ -1498,7 +1511,7 @@ class CipheraApp {
             this.completeStatus(true, `WALLET IMPORTED: ${wallet.name}`);
             this.terminal.log(`Address: ${this.truncateAddress(wallet.pk)}`, 'dim');
             this.terminal.log(`Balance: ${this.formatBalance(this.state.balance)} wcBTC`, 'dim');
-            this.terminal.log('Connect to a node to sync (type "2" or "connect")', 'info');
+            this.autoConnectDefaultServer();
         } catch (e) {
             this.completeStatus(false, `IMPORT FAILED - ${e.message}`);
         }
