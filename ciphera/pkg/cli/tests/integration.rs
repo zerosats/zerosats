@@ -1,9 +1,10 @@
 //! Integration tests for the CLI module.
 //!
 //! These tests connect to the live Ciphera testnet node.
-//!   tls=true  → https://
-//!   tls=false → http://
-//! Live-node tests use tls=true for the remote endpoint.
+//! TLS is inferred from the scheme prefix of the host URI:
+//!   "https://…" → HTTPS
+//!   "http://…" or bare host → HTTP
+//! Live-node tests use an https:// host for the remote endpoint.
 //!
 //! Run all integration tests:
 //!   cargo test --test integration -- --nocapture
@@ -20,11 +21,9 @@ use cli::rpc::ListTxnsQuery;
 use std::path::Path;
 use tempdir::TempDir;
 
-const NODE_HOST: &str = "ciphera.satsbridge.com";
+const NODE_HOST: &str = "https://ciphera.satsbridge.com";
 const NODE_PORT: u16 = 80;
 const CHAIN_ID: u64 = 5115; // Citrea testnet
-// Use TLS when targeting the remote testnet node.
-const HTTPS: bool = true;
 
 fn wallet_name(suffix: &str) -> String {
     format!("integration-test-{suffix}")
@@ -44,7 +43,7 @@ fn build_client_in(wallet_dir: &Path, name: &str) -> cli::NodeClient {
         .host(NODE_HOST)
         .port(NODE_PORT)
         .wallet_dir(wallet_dir)
-        .build(CHAIN_ID, HTTPS, create)
+        .build(CHAIN_ID, create)
         .unwrap_or_else(|e| panic!("NodeClient::build failed for '{name}': {e}"))
 }
 
@@ -211,14 +210,14 @@ fn test_build_create_fails_when_wallet_exists() {
     NodeClient::builder()
         .name(name)
         .wallet_dir(wallet_dir.path())
-        .build(CHAIN_ID, HTTPS, true)
+        .build(CHAIN_ID, true)
         .expect("first create should succeed");
 
     // Second creation on the same name must fail.
     let result = NodeClient::builder()
         .name(name)
         .wallet_dir(wallet_dir.path())
-        .build(CHAIN_ID, HTTPS, true);
+        .build(CHAIN_ID, true);
 
     let err = result.expect_err("create_wallet=true must fail when wallet already exists");
     let msg = format!("{err}");
@@ -237,13 +236,13 @@ fn test_build_load_succeeds_when_wallet_exists() {
     NodeClient::builder()
         .name(name)
         .wallet_dir(wallet_dir.path())
-        .build(CHAIN_ID, HTTPS, true)
+        .build(CHAIN_ID, true)
         .expect("pre-create");
 
     let result = NodeClient::builder()
         .name(name)
         .wallet_dir(wallet_dir.path())
-        .build(CHAIN_ID, HTTPS, false);
+        .build(CHAIN_ID, false);
 
     assert!(
         result.is_ok(),
@@ -261,7 +260,7 @@ fn test_build_load_fails_when_wallet_absent() {
     let result = NodeClient::builder()
         .name(name)
         .wallet_dir(wallet_dir.path())
-        .build(CHAIN_ID, HTTPS, false);
+        .build(CHAIN_ID, false);
 
     let err = result.expect_err("create_wallet=false must fail when file is absent");
     let msg = format!("{err}");
@@ -280,13 +279,13 @@ fn test_build_load_rejects_wrong_chain_id() {
     NodeClient::builder()
         .name(name)
         .wallet_dir(wallet_dir.path())
-        .build(CHAIN_ID, HTTPS, true)
+        .build(CHAIN_ID, true)
         .expect("pre-create with CHAIN_ID=5115");
 
     let result = NodeClient::builder()
         .name(name)
         .wallet_dir(wallet_dir.path())
-        .build(9999, HTTPS, false); // different chain_id
+        .build(9999, false); // different chain_id
 
     let err = result.expect_err("mismatched chain_id must be rejected");
     let msg = format!("{err}");
@@ -315,7 +314,7 @@ fn test_build_propagates_serialization_error_on_bad_json() {
     let result = NodeClient::builder()
         .name(name)
         .wallet_dir(wallet_dir.path())
-        .build(CHAIN_ID, HTTPS, false); // load, not create
+        .build(CHAIN_ID, false); // load, not create
 
     let err = result.expect_err("build must fail with malformed wallet file");
     let msg = format!("{err}");

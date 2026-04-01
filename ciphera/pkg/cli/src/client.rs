@@ -97,10 +97,21 @@ impl NodeClientBuilder {
     }
 
     /// Build the NodeClient
-    pub fn build(self, chain_id: u64, tls: bool, create_wallet: bool) -> Result<NodeClient> {
-        let proto = if tls { "https" } else { "http" };
-
-        let base_url = format!("{}://{}:{}/v0", proto, self.host, self.port);
+    ///
+    /// TLS is inferred from the scheme prefix of `host`:
+    /// - `"https://…"` → HTTPS
+    /// - `"http://…"` or no scheme → HTTP
+    pub fn build(self, chain_id: u64, create_wallet: bool) -> Result<NodeClient> {
+        let base_url = {
+            let (proto, bare_host) = if let Some(h) = self.host.strip_prefix("https://") {
+                ("https", h)
+            } else if let Some(h) = self.host.strip_prefix("http://") {
+                ("http", h)
+            } else {
+                ("http", self.host.as_str())
+            };
+            format!("{}://{}:{}/v0", proto, bare_host, self.port)
+        };
 
         debug!("Building NodeClient for: {}", base_url);
 
@@ -174,7 +185,7 @@ impl NodeClient {
             .host(host)
             .port(port)
             .timeout_secs(timeout_secs)
-            .build(5115, false, true)
+            .build(5115, true)
     }
 
     /// Get the base URL of the node
@@ -445,12 +456,12 @@ mod client_tests {
     }
 
     // =====================================================================
-    // build() — URL scheme (tls flag)
-    //   tls=true  → "https://"
-    //   tls=false → "http://"
+    // build() — URL scheme (inferred from host URI prefix)
+    //   "https://…" host → "https://"
+    //   "http://…" or bare host → "http://"
     // =====================================================================
 
-    /// tls=true produces https://
+    /// host with "https://" prefix produces https://
     #[test]
     fn test_build_tls_true_gives_https_scheme() {
         let name = "scheme-http-test-wallet";
@@ -459,21 +470,21 @@ mod client_tests {
 
         let client = NodeClientBuilder::new()
             .name(name)
-            .host("node.example.com")
+            .host("https://node.example.com")
             .port(80)
-            .build(CHAIN_ID, true, true)
+            .build(CHAIN_ID, true)
             .expect("build should succeed");
 
         let _ = std::fs::remove_file(&file);
 
         assert!(
             client.base_url().starts_with("https://node.example.com:80"),
-            "tls=true should produce https://; got: {}",
+            "https:// host prefix should produce https://; got: {}",
             client.base_url()
         );
     }
 
-    /// tls=false produces http://
+    /// host with "http://" prefix produces http://
     #[test]
     fn test_build_tls_false_gives_http_scheme() {
         let name = "scheme-https-test-wallet";
@@ -482,16 +493,39 @@ mod client_tests {
 
         let client = NodeClientBuilder::new()
             .name(name)
-            .host("node.example.com")
+            .host("http://node.example.com")
             .port(443)
-            .build(CHAIN_ID, false, true)
+            .build(CHAIN_ID, true)
             .expect("build should succeed");
 
         let _ = std::fs::remove_file(&file);
 
         assert!(
             client.base_url().starts_with("http://node.example.com:443"),
-            "tls=false should produce http://; got: {}",
+            "http:// host prefix should produce http://; got: {}",
+            client.base_url()
+        );
+    }
+
+    /// bare host (no scheme) defaults to http://
+    #[test]
+    fn test_build_bare_host_defaults_to_http() {
+        let name = "scheme-bare-host-test-wallet";
+        let file = format!("{name}.json");
+        let _ = std::fs::remove_file(&file);
+
+        let client = NodeClientBuilder::new()
+            .name(name)
+            .host("node.example.com")
+            .port(8091)
+            .build(CHAIN_ID, true)
+            .expect("build should succeed");
+
+        let _ = std::fs::remove_file(&file);
+
+        assert!(
+            client.base_url().starts_with("http://node.example.com:8091"),
+            "bare host should default to http://; got: {}",
             client.base_url()
         );
     }
@@ -507,7 +541,7 @@ mod client_tests {
             .name(name)
             .host("host")
             .port(1234)
-            .build(CHAIN_ID, true, true)
+            .build(CHAIN_ID, true)
             .expect("build");
 
         let _ = std::fs::remove_file(&file);
@@ -532,7 +566,7 @@ mod client_tests {
 
         let result = NodeClientBuilder::new()
             .name(name)
-            .build(CHAIN_ID, true, true);
+            .build(CHAIN_ID, true);
 
         let _ = std::fs::remove_file(&file);
 
@@ -552,11 +586,11 @@ mod client_tests {
         // Pre-create the wallet.
         let _ = NodeClientBuilder::new()
             .name(name)
-            .build(CHAIN_ID, true, true);
+            .build(CHAIN_ID, true);
 
         let result = NodeClientBuilder::new()
             .name(name)
-            .build(CHAIN_ID, true, true);
+            .build(CHAIN_ID, true);
 
         let _ = std::fs::remove_file(&file);
 
@@ -578,12 +612,12 @@ mod client_tests {
         // Create the wallet first.
         NodeClientBuilder::new()
             .name(name)
-            .build(CHAIN_ID, true, true)
+            .build(CHAIN_ID, true)
             .expect("pre-create wallet");
 
         let result = NodeClientBuilder::new()
             .name(name)
-            .build(CHAIN_ID, true, false);
+            .build(CHAIN_ID, false);
 
         let _ = std::fs::remove_file(&file);
 
@@ -603,7 +637,7 @@ mod client_tests {
 
         let result = NodeClientBuilder::new()
             .name(name)
-            .build(CHAIN_ID, true, false);
+            .build(CHAIN_ID, false);
 
         let err = result.expect_err("create_wallet=false must fail when wallet file absent");
         let msg = format!("{err}");
@@ -623,11 +657,11 @@ mod client_tests {
         // Create wallet with chain_id=5115.
         NodeClientBuilder::new()
             .name(name)
-            .build(CHAIN_ID, true, true)
+            .build(CHAIN_ID, true)
             .expect("pre-create wallet");
 
         // Load with a different chain_id.
-        let result = NodeClientBuilder::new().name(name).build(9999, true, false);
+        let result = NodeClientBuilder::new().name(name).build(9999, false);
 
         let _ = std::fs::remove_file(&file);
 
@@ -658,7 +692,7 @@ mod client_tests {
         let client = NodeClientBuilder::new()
             .name(name)
             .wallet_dir(wallet_dir.path())
-            .build(CHAIN_ID, true, false)
+            .build(CHAIN_ID, false)
             .expect("legacy wallet without chain_id must still load");
 
         assert_eq!(client.get_wallet().chain_id, None);
@@ -682,7 +716,7 @@ mod client_tests {
 
         let result = NodeClientBuilder::new()
             .name(name)
-            .build(CHAIN_ID, true, false); // load, not create
+            .build(CHAIN_ID, false); // load, not create
 
         let _ = std::fs::remove_file(&file);
 

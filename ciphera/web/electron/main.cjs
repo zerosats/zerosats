@@ -13,6 +13,11 @@ const fs = require('fs');
 // Disable GPU for compatibility
 app.disableHardwareAcceleration();
 
+// Prevent GTK from using GtkFileChooserNative (causes cast errors on Linux/GTK3)
+if (process.platform === 'linux') {
+    process.env.GTK_USE_PORTAL = '0';
+}
+
 // Keep a global reference of the window object
 let mainWindow = null;
 
@@ -500,6 +505,9 @@ ipcMain.handle('note:read', async (event, name) => {
  * Open file dialog for importing notes
  */
 ipcMain.handle('dialog:openFile', async () => {
+    // GTK_USE_PORTAL=0 is set at startup to prevent GtkFileChooserNative crashes
+    // on Linux/GTK3. With that in place, passing mainWindow is safe and ensures
+    // the dialog appears in front of the app window instead of behind it.
     const result = await dialog.showOpenDialog(mainWindow, {
         properties: ['openFile'],
         filters: [

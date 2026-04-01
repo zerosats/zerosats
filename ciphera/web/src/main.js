@@ -48,9 +48,8 @@ class CipheraApp {
             connected: false,
             cliReady: false,
             pendingNote: null, // Stores note waiting to be saved
-            nodeHost: null,
+            nodeHost: null,    // includes scheme prefix, e.g. "https://ciphera.satsbridge.com"
             nodePort: null,
-            nodeTls: true,
             chainId: null,
             rollupContract: null,
         };
@@ -138,11 +137,7 @@ class CipheraApp {
         // Check for existing wallets
         let hasWallet = false;
         try {
-            const result = await window.ciphera.listWallets();
-            hasWallet = result.wallets && result.wallets.length > 0;
-            if (hasWallet) {
-                await this.loadSavedWallet();
-            }
+            hasWallet = await this.loadSavedWallet();
         } catch (e) {
             console.error('Failed to check wallets:', e);
         }
@@ -150,6 +145,7 @@ class CipheraApp {
         // Show appropriate welcome message
         if (hasWallet) {
             this.showReturningUserMessage();
+            this.autoConnectDefaultServer();
         } else {
             this.showWelcomeMessage();
         }
@@ -312,11 +308,13 @@ class CipheraApp {
 
                 if (walletData.exists && walletData.wallet) {
                     this.activateWallet(walletData.wallet, name);
+                    return true;
                 }
             }
         } catch (e) {
             console.error('Failed to load wallet:', e);
         }
+        return false;
     }
 
     updateWalletDisplay() {
@@ -348,7 +346,6 @@ class CipheraApp {
         if (!connected) {
             this.state.nodeHost = null;
             this.state.nodePort = null;
-            this.state.nodeTls = true;
             this.state.chainId = null;
             this.state.rollupContract = null;
             // Stop explorer polling when disconnected
@@ -376,21 +373,58 @@ class CipheraApp {
         }
     }
 
-    parseTlsAnswer(value) {
-        const normalized = String(value ?? '').trim().toLowerCase();
-        return !['n', 'no', 'false', '0', 'off', 'http'].includes(normalized);
+    async autoConnectDefaultServer() {
+        if (!this.state.walletName || !this.state.cliReady) return;
+
+        const defaultHost = 'https://ciphera.satsbridge.com';
+        const defaultPort = 443;
+        const endpoint = this.getNodeEndpoint(defaultHost, defaultPort);
+
+        this.terminal.log(`⏳ Auto-connecting to ${endpoint}...`, 'dim');
+
+        try {
+            const result = await window.ciphera.connect(
+                this.state.walletName,
+                defaultHost,
+                defaultPort,
+            );
+
+            if (!result.success) {
+                this.terminal.log('Auto-connect failed — use "connect" to retry manually', 'dim');
+                return;
+            }
+
+            const networkRes = await fetch(`${this.getNodeBaseUrl(defaultHost, defaultPort)}/network`);
+            if (!networkRes.ok) throw new Error(`HTTP ${networkRes.status}`);
+
+            const network = await networkRes.json();
+            this.state.chainId = network.chain_id;
+            this.state.rollupContract = network.rollup_contract;
+            this.state.nodeHost = defaultHost;
+            this.state.nodePort = defaultPort;
+            this.updateConnectionStatus(true, endpoint);
+
+            this.terminal.log(`✓ Connected: ${endpoint}`, 'success');
+        } catch (e) {
+            this.terminal.log('Auto-connect failed — use "connect" to retry manually', 'dim');
+            console.warn('Auto-connect error:', e);
+        }
     }
 
-    getNodeProtocol(useTls = this.state.nodeTls) {
-        return useTls === false ? 'http' : 'https';
+    parseHostScheme(host) {
+        const h = String(host ?? '').trim();
+        if (h.startsWith('https://')) return { scheme: 'https', bareHost: h.slice(8) };
+        if (h.startsWith('http://')) return { scheme: 'http', bareHost: h.slice(7) };
+        return { scheme: 'http', bareHost: h };
     }
 
-    getNodeEndpoint(host = this.state.nodeHost, port = this.state.nodePort, useTls = this.state.nodeTls) {
-        return `${this.getNodeProtocol(useTls)}://${host}:${port}`;
+    getNodeEndpoint(host = this.state.nodeHost, port = this.state.nodePort) {
+        const { scheme, bareHost } = this.parseHostScheme(host);
+        return `${scheme}://${bareHost}:${port}`;
     }
 
-    getNodeBaseUrl(host = this.state.nodeHost, port = this.state.nodePort, useTls = this.state.nodeTls) {
-        return `${this.getNodeEndpoint(host, port, useTls)}/v0`;
+    getNodeBaseUrl(host = this.state.nodeHost, port = this.state.nodePort) {
+        return `${this.getNodeEndpoint(host, port)}/v0`;
     }
 
     truncateAddress(address) {
@@ -475,10 +509,10 @@ class CipheraApp {
                 break;
             default:
                 // Check for explorer commands: "tx {hash}" or "block {number}"
-                if (cmd === 'tx' && parts.length > 1) {
-                    this.lookupTransaction(parts[1]);
-                } else if (cmd === 'block' && parts.length > 1) {
-                    this.lookupBlock(parts[1]);
+                if (cmd === 'tx' && args.length > 0) {
+                    this.lookupTransaction(args[0]);
+                } else if (cmd === 'block' && args.length > 0) {
+                    this.lookupBlock(args[0]);
                 } else {
                     this.terminal.log(`Unknown command: ${cmd}. Type "help" for commands.`, 'error');
                 }
@@ -880,8 +914,13 @@ class CipheraApp {
 
             // Reload wallet data
             const walletData = await window.ciphera.readWallet(answers.name);
-            if (walletData.exists) {
+            if (walletData.exists && walletData.wallet) {
                 this.activateWallet(walletData.wallet, answers.name);
+            } else {
+                // Wallet file created but couldn't be read back (e.g. missing name field) —
+                // activate with minimal state so the UI reflects the new wallet.
+                if (walletData.error) console.warn('Could not read wallet after creation:', walletData.error);
+                this.activateWallet({ pk: null, balance: 0 }, answers.name);
             }
 
             this.completeStatus(true, `WALLET CREATED: Welcome, ${answers.name}!`);
@@ -896,9 +935,8 @@ class CipheraApp {
         this.terminal.log('CONNECT TO NODE', 'info');
         this.terminal.log('Type "clear" to return home', 'dim');
         this.startPromptSequence('sync', [
-            {key: 'host', label: 'Host:', placeholder: 'ciphera.satsbridge.com', default: 'ciphera.satsbridge.com'},
+            {key: 'host', label: 'Host:', placeholder: 'https://ciphera.satsbridge.com', default: 'https://ciphera.satsbridge.com'},
             {key: 'port', label: 'Port:', placeholder: '443', default: '443'},
-            {key: 'tls', label: 'Use TLS (https)? [Y/n]:', placeholder: 'yes', default: 'yes'}
         ]);
     }
 
@@ -915,8 +953,7 @@ class CipheraApp {
 
         const nextNodeHost = answers.host;
         const nextNodePort = parseInt(answers.port);
-        const nextNodeTls = this.parseTlsAnswer(answers.tls);
-        const nextNodeEndpoint = this.getNodeEndpoint(nextNodeHost, nextNodePort, nextNodeTls);
+        const nextNodeEndpoint = this.getNodeEndpoint(nextNodeHost, nextNodePort);
 
         this.updateStatus(`⏳ CONNECT: Reaching ${nextNodeEndpoint}...`);
 
@@ -924,7 +961,6 @@ class CipheraApp {
             this.state.walletName,
             nextNodeHost,
             nextNodePort,
-            !nextNodeTls,
         );
 
         if (!result.success) {
@@ -934,7 +970,7 @@ class CipheraApp {
 
         // Fetch network info to get chain_id and rollup_contract
         try {
-            const networkRes = await fetch(`${this.getNodeBaseUrl(nextNodeHost, nextNodePort, nextNodeTls)}/network`);
+            const networkRes = await fetch(`${this.getNodeBaseUrl(nextNodeHost, nextNodePort)}/network`);
             if (!networkRes.ok) {
                 throw new Error(`HTTP ${networkRes.status}`);
             }
@@ -971,7 +1007,6 @@ class CipheraApp {
 
         this.state.nodeHost = nextNodeHost;
         this.state.nodePort = nextNodePort;
-        this.state.nodeTls = nextNodeTls;
         this.updateConnectionStatus(true, nextNodeEndpoint);
 
         this.completeStatus(true, `CONNECTED: ${nextNodeEndpoint}`);
@@ -1051,7 +1086,6 @@ class CipheraApp {
             gethRpc: answers.gethRpc,
             host: this.state.nodeHost,
             port: this.state.nodePort,
-            noTls: !this.state.nodeTls,
             chain: this.state.chainId,
             rollup: rollupContract,
         });
@@ -1140,7 +1174,6 @@ class CipheraApp {
             this.state.chainId,
             this.state.nodeHost,
             this.state.nodePort,
-            !this.state.nodeTls,
         );
 
         if (!result.success) {
@@ -1218,7 +1251,6 @@ class CipheraApp {
             noteFile: answers.noteFile,
             host: this.state.nodeHost,
             port: this.state.nodePort,
-            noTls: !this.state.nodeTls,
             chain: this.state.chainId,
         });
 
@@ -1302,7 +1334,6 @@ class CipheraApp {
             address: answers.address,
             host: this.state.nodeHost,
             port: this.state.nodePort,
-            noTls: !this.state.nodeTls,
             chain: this.state.chainId,
         });
 
@@ -1439,26 +1470,38 @@ class CipheraApp {
     }
 
     async importWallet() {
-        const fileResult = await window.ciphera.openFileDialog();
+        let fileResult;
+        try {
+            fileResult = await window.ciphera.openFileDialog();
+        } catch (e) {
+            this.terminal.separator();
+            this.completeStatus(false, `IMPORT FAILED - ${e.message}`);
+            return;
+        }
+
         if (fileResult.canceled) return;
 
         this.terminal.separator();
         this.updateStatus('⏳ IMPORT: Reading wallet file...');
 
-        const result = await window.ciphera.importWallet(fileResult.filePath);
+        try {
+            const result = await window.ciphera.importWallet(fileResult.filePath);
 
-        if (!result.success) {
-            this.completeStatus(false, `IMPORT FAILED - ${result.error}`);
-            return;
+            if (!result.success) {
+                this.completeStatus(false, `IMPORT FAILED - ${result.error}`);
+                return;
+            }
+
+            const wallet = result.wallet;
+            this.activateWallet(wallet, wallet.name);
+
+            this.completeStatus(true, `WALLET IMPORTED: ${wallet.name}`);
+            this.terminal.log(`Address: ${this.truncateAddress(wallet.pk)}`, 'dim');
+            this.terminal.log(`Balance: ${this.formatBalance(this.state.balance)} wcBTC`, 'dim');
+            this.terminal.log('Connect to a node to sync (type "2" or "connect")', 'info');
+        } catch (e) {
+            this.completeStatus(false, `IMPORT FAILED - ${e.message}`);
         }
-
-        const wallet = result.wallet;
-        this.activateWallet(wallet, wallet.name);
-
-        this.completeStatus(true, `WALLET IMPORTED: ${wallet.name}`);
-        this.terminal.log(`Address: ${this.truncateAddress(wallet.pk)}`, 'dim');
-        this.terminal.log(`Balance: ${this.formatBalance(this.state.balance)} wcBTC`, 'dim');
-        this.terminal.log('Connect to a node to sync (type "2" or "connect")', 'info');
     }
 
     async showAbout() {
