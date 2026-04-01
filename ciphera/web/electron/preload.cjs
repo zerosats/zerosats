@@ -112,6 +112,13 @@ contextBridge.exposeInMainWorld('ciphera', {
      * @returns {Promise<{success: boolean, wallet?: object, error?: string}>}
      */
     importWallet: (filePath) => ipcRenderer.invoke('wallet:import', filePath),
+
+    /**
+     * Export the active wallet to a user-chosen file location
+     * @param {string} name - Wallet name (without .json extension)
+     * @returns {Promise<{success: boolean, canceled?: boolean, path?: string, error?: string}>}
+     */
+    exportWallet: (name) => ipcRenderer.invoke('wallet:export', name),
     
     // ==========================================================================
     // APP INFO
