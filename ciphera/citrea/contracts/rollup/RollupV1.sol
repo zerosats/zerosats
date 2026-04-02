@@ -69,8 +69,6 @@ contract RollupV1 is Initializable, OwnableUpgradeable {
         uint32 messages_length
     );
     event VerifierRemoved(bytes32 verificationKey, address zkVerifierAddress);
-    event ProverAdded(address indexed prover);
-    event ProverRemoved(address indexed prover);
     event RootHashUpdated(bytes32 indexed oldRoot, bytes32 indexed newRoot);
 
     // Since the Initializable._initialized version number is private, we need to keep track of it ourselves
@@ -98,9 +96,6 @@ contract RollupV1 is Initializable, OwnableUpgradeable {
     // Allowed Tokens
     mapping(bytes32 => address) tokens;
 
-    // Actors
-    mapping(address => uint) provers;
-
     // Validators
     ValidatorSet[] private validatorSets;
     uint256 private validatorSetIndex;
@@ -126,7 +121,6 @@ contract RollupV1 is Initializable, OwnableUpgradeable {
         address _escrowManager,
         address _tokenAddress,
         address _verifierAddress,
-        address prover,
         address[] calldata initialValidators,
         bytes32 verifierKeyHash
     ) public initializer {
@@ -139,8 +133,6 @@ contract RollupV1 is Initializable, OwnableUpgradeable {
         // Set the init aggregate verifier
         _setZkVerifierProperties(verifierKeyHash, _verifierAddress, 6 * 5);
         zkVerifierKeys.push(verifierKeyHash);
-
-        provers[prover] = 1;
 
         _setValidators(0, initialValidators);
 
@@ -155,22 +147,6 @@ contract RollupV1 is Initializable, OwnableUpgradeable {
 
         escrowManager = _escrowManager;
         wrappedCBTC = _tokenAddress;
-    }
-
-    modifier onlyProver() {
-        require(provers[msg.sender] == 1, "You are not a prover");
-        _;
-    }
-
-    function addProver(address prover) public onlyOwner {
-        provers[prover] = 1;
-        emit ProverAdded(prover);
-    }
-
-    function removeProver(address prover) public onlyOwner {
-        require(provers[prover] == 1, "Address is not a prover");
-        provers[prover] = 0;
-        emit ProverRemoved(prover);
     }
 
     modifier onlyBurnSubstitutor() {
@@ -327,7 +303,7 @@ contract RollupV1 is Initializable, OwnableUpgradeable {
         bytes32[] calldata publicInputs,
         bytes32 otherHashFromBlockHash,
         Signature[] calldata signatures
-    ) public onlyProver {
+    ) public {
         require(
             zkVerifiers[verificationKeyHash].enabled,
             "RollupV1: ZK verifier not allowed"

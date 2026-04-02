@@ -28,14 +28,12 @@ async function main() {
   console.log("Initialization...");
   let aggregateVerifierAddr = process.env.VERIFIER;
   const isTestnet = process.env.IS_TESTNET === "1";
-  let proverAddress = process.env.PROVER_ADDRESS as `0x${string}`;
   let validators =
     process.env.VALIDATORS?.split(",") ?? ([] as Array<`0x${string}`>);
 
   let escrowManagerAddress = process.env.ESCROW_MANAGER;
 
   console.log("    Citrea Testnet - ", isTestnet);
-  console.log("    Prover Address - ", proverAddress);
   console.log("    Validators - ", validators);
   console.log("    Verifier - ", aggregateVerifierAddr);
 
@@ -50,8 +48,7 @@ async function main() {
     let seed = process.env.MNEMONIC as string;
     account = mnemonicToAccount(seed);
     rpcUrl = "https://rpc.testnet.citrea.xyz";
-    if (proverAddress === undefined)
-      throw new Error("PROVER_ADDRESS is not set");
+
     if (validators.length === 0) throw new Error("VALIDATORS is not set");
     if (!escrowManagerAddress) throw new Error("ESCROW_MANAGER is not set");
 
@@ -74,10 +71,6 @@ async function main() {
       "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
     account = privateKeyToAccount(privateKey as `0x${string}`);
     rpcUrl = process.env.TESTING_URL || "http://localhost:12345";
-
-    if (proverAddress === undefined) {
-      proverAddress = account.address;
-    }
 
     if (validators.length === 0) {
       validators = [account.address];
@@ -233,7 +226,6 @@ async function main() {
       escrowManager,
       erc20Address,
       aggregateVerifierAddr,
-      proverAddress,
       validators,
       AGG_AGG_VERIFICATION_KEY_HASH,
     ],
