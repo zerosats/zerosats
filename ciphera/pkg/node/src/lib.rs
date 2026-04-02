@@ -10,6 +10,7 @@ mod network;
 mod network_handler;
 mod node;
 pub mod prover;
+pub mod validator;
 mod rpc;
 mod sync;
 mod types;

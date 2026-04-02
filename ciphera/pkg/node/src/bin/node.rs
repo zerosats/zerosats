@@ -126,12 +126,25 @@ async fn main() -> Result<()> {
             Box::pin(async { futures::future::pending().await })
         };
 
+    let validator_task: Pin<Box<dyn Future<Output = Result<(), node::validator::Error>>>> =
+        if config.mode == Mode::Validator {
+            Box::pin(node::validator::worker::run_validator(
+                &config,
+                Arc::clone(&node.shared),
+            ))
+        } else {
+            Box::pin(async { futures::future::pending().await })
+        };
+
     tokio::select! {
         res = node.run() => {
             tracing::info!("node shutdown: {:?}", res);
         }
         res = prover_task => {
             tracing::info!("prover shutdown: {:?}", res);
+        }
+        res = validator_task => {
+            tracing::info!("validator shutdown: {:?}", res);
         }
         res = server => {
             tracing::info!("rpc server shutdown: {:?}", res);
