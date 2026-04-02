@@ -1102,6 +1102,51 @@ impl SignedRollupContract {
 
         Ok(call_tx)
     }
+
+    /// Call `setCheckpoint` on the contract.
+    ///
+    /// Only succeeds when:
+    /// - `msg.sender` is the leader for `height` (i.e. `validators[height % len]`)
+    /// - signatures cover a 2/3+ quorum of the validator set
+    /// - no mints or substituted burns are pending in the contract queues
+    #[tracing::instrument(err, ret, skip(self, signatures))]
+    pub async fn set_checkpoint(
+        &self,
+        new_root: &Element,
+        height: u64,
+        other_hash: [u8; 32],
+        signatures: &[&[u8]],
+    ) -> Result<H256> {
+        let signatures = signatures
+            .iter()
+            .map(|sig| {
+                let r = sig[0..32].to_vec();
+                let s = sig[32..64].to_vec();
+                let v = sig[64];
+                let v = if v < 27 { v + 27 } else { v };
+
+                Token::Tuple(vec![
+                    Token::FixedBytes(r),
+                    Token::FixedBytes(s),
+                    Token::Uint(v.into()),
+                ])
+            })
+            .collect::<Vec<Token>>();
+
+        let call_tx = self
+            .call(
+                "setCheckpoint",
+                (
+                    convert_element_to_h256(new_root),
+                    U256::from(height),
+                    H256::from_slice(&other_hash),
+                    Token::Array(signatures),
+                ),
+            )
+            .await?;
+
+        Ok(call_tx)
+    }
 }
 
 impl ReadonlyRollupContract {

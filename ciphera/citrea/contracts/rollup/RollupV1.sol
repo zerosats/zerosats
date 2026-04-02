@@ -111,6 +111,11 @@ contract RollupV1 is Initializable, OwnableUpgradeable {
     address public escrowManager;
     address public wrappedCBTC;
 
+    // Counters for pending queue entries.
+    // Appended here to preserve the upgradeable storage layout.
+    uint256 public pendingMintsCount;
+    uint256 public pendingSubstitutedBurnsCount;
+
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
         _disableInitializers();
@@ -439,6 +444,7 @@ contract RollupV1 is Initializable, OwnableUpgradeable {
         );
         require(mints[hash].spent == false, "RollupV1: Mint already spent");
         mints[hash].spent = true;
+        pendingMintsCount--;
 
         emit Minted(hash, value, note_kind);
 
@@ -467,6 +473,7 @@ contract RollupV1 is Initializable, OwnableUpgradeable {
         address substitutor = substitutedBurns[substituteBurnKey];
         if (substitutor != address(0)) {
             executeBurn(token, substitutor, hash, value, false);
+            pendingSubstitutedBurnsCount--;
         } else {
             executeBurn(token, burn_addr, hash, value, false);
         }
@@ -612,6 +619,7 @@ contract RollupV1 is Initializable, OwnableUpgradeable {
 
         // This will be returned to the msg.sender when the rollup block for it is submitted
         substitutedBurns[substituteBurnKey] = substituteAddress;
+        pendingSubstitutedBurnsCount++;
     }
 
     /////////////////
@@ -644,6 +652,7 @@ contract RollupV1 is Initializable, OwnableUpgradeable {
             amount: value,
             spent: false
         });
+        pendingMintsCount++;
 
         emit MintAdded(mint_hash, value, note_kind);
     }
@@ -677,8 +686,60 @@ contract RollupV1 is Initializable, OwnableUpgradeable {
             amount: uint256(value),
             spent: false
         });
+        pendingMintsCount++;
 
         emit MintAdded(mint_hash, uint256(value), note_kind);
+    }
+
+    /////////////////
+    //
+    // LEADER ROOT UPDATE
+    //
+    ///////////
+
+    /// @notice Update the root hash without a ZK proof, callable only by the current
+    ///         leader (the validator at index `height % validatorSet.length`).
+    ///         Requires a 2/3+ quorum of validator signatures on the new root and
+    ///         requires that no mints or substituted burns are pending — i.e. the
+    ///         queue mappings are fully drained so no cross-layer messages can be lost.
+    function setCheckpoint(
+        bytes32 newRoot,
+        uint256 height,
+        bytes32 otherHash,
+        Signature[] calldata signatures
+    ) public {
+        require(
+            pendingMintsCount == 0,
+            "RollupV1: Pending mints exist"
+        );
+        require(
+            pendingSubstitutedBurnsCount == 0,
+            "RollupV1: Pending substituted burns exist"
+        );
+        require(
+            height > blockHeight,
+            "RollupV1: New block height must be greater than current"
+        );
+
+        updateValidatorSetIndex(height);
+        ValidatorSet storage validatorSet = getValidators();
+
+        require(
+            validatorSet.validatorsArray.length > 0,
+            "RollupV1: No validators"
+        );
+
+        address leader = validatorSet.validatorsArray[
+            0 //height % validatorSet.validatorsArray.length
+        ];
+        require(msg.sender == leader, "RollupV1: Caller is not the leader");
+
+        verifyValidatorSignatures(newRoot, height, otherHash, signatures);
+
+        _setRootHash(newRoot);
+        blockHeight = height;
+
+        emit RollupVerified(height, newRoot);
     }
 
     /////////////////
