@@ -47,7 +47,8 @@ pub async fn run_prover(config: &Config, node: Arc<NodeShared>) -> Result<()> {
 
     let contracts_client =
         contracts::Client::new(&config.evm_rpc_url, config.minimum_gas_price_gwei);
-    let contract = contracts::RollupContract::load(
+
+    let contract = RollupContract::load(
         contracts_client,
         &config.chain_id,
         &config.rollup_contract_addr,
