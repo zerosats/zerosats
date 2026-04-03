@@ -45,7 +45,7 @@ async fn run_validator_worker(
     _block_notifier: Arc<Notify>,
 ) -> Result<()> {
     let initial_contract_block_height = BlockHeight(contract.block_height().await?);
-    info!(initial_contract_block_height =? initial_contract_block_height, "Rollup contract height");
+    debug!(initial_contract_block_height =? initial_contract_block_height, "Rollup contract height");
     let block_delta = config.min_block_duration as u64;
     // Wait for node to notice it's out of sync
     tokio::time::sleep(Duration::from_millis(2 * block_delta)).await;
@@ -79,7 +79,7 @@ async fn run_validator_worker(
 
         let prev_height = BlockHeight(commit_height.0 - 1);
         let Some(prev_block) = node.get_block(prev_height)? else {
-            info!(?prev_height, "Prev block not found in store, skipping");
+            debug!(?prev_height, "Prev block not found in store, skipping");
             continue;
         };
         let prev_block = prev_block.into_block();
@@ -87,7 +87,19 @@ async fn run_validator_worker(
         let prev_other_hash = *prev_block.content.header_hash().inner();
 
         if prev_root_hash == contract_root_hash {
-            info!(?commit_height, "Contract root already matches block, skipping");
+            debug!(?commit_height, "Contract root already matches block, skipping");
+            continue;
+        }
+
+        let pending_mints = contract.pending_mints_count().await?;
+        if !pending_mints.is_zero() {
+            debug!(?pending_mints, "Pending mints exist, skipping checkpoint");
+            continue;
+        }
+
+        let pending_burns = contract.pending_substituted_burns_count().await?;
+        if !pending_burns.is_zero() {
+            debug!(?pending_burns, "Pending substituted burns exist, skipping checkpoint");
             continue;
         }
 

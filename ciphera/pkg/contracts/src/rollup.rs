@@ -961,6 +961,38 @@ impl ReadonlyRollupContract {
     }
 
     #[tracing::instrument(err, ret, skip(self))]
+    pub async fn pending_mints_count(&self) -> Result<U256> {
+        let mints_count = self.client
+            .query(
+                &self.contract,
+                "pendingMintsCount",
+                (),
+                None,
+                Default::default(),
+                self.block_height.map(|x| x.into()),
+            )
+            .await?;
+
+        Ok(mints_count)
+    }
+
+    #[tracing::instrument(err, ret, skip(self))]
+    pub async fn pending_substituted_burns_count(&self) -> Result<U256> {
+        let burns_count = self.client
+            .query(
+                &self.contract,
+                "pendingSubstitutedBurnsCount",
+                (),
+                None,
+                Default::default(),
+                self.block_height.map(|x| x.into()),
+            )
+            .await?;
+
+        Ok(burns_count)
+    }
+
+    #[tracing::instrument(err, ret, skip(self))]
     pub async fn block_hash(&self) -> Result<H256> {
         let block_hash = self
             .client
