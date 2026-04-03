@@ -684,6 +684,7 @@ contract RollupV1 is Initializable, OwnableUpgradeable {
         bytes32 otherHash,
         Signature[] calldata signatures
     ) public {
+        // check if this is not mints or burns
         require(
             pendingMintsCount == 0,
             "RollupV1: Pending mints exist"
@@ -692,9 +693,15 @@ contract RollupV1 is Initializable, OwnableUpgradeable {
             pendingSubstitutedBurnsCount == 0,
             "RollupV1: Pending substituted burns exist"
         );
+        // check if update is more recent
         require(
             height > blockHeight,
             "RollupV1: New block height must be greater than current"
+        );
+        // check actual change of the root hash to avoid overwriting height
+        require(
+            newRoot != rootHash,
+            "RollupV1: New root hash must be different"
         );
 
         updateValidatorSetIndex(height);
@@ -710,7 +717,12 @@ contract RollupV1 is Initializable, OwnableUpgradeable {
         ];
         require(msg.sender == leader, "RollupV1: Caller is not the leader");
 
-        verifyValidatorSignatures(newRoot, height, otherHash, signatures);
+        verifyValidatorSignatures(
+            newRoot,
+            height,
+            otherHash,
+            signatures
+        );
 
         _setRootHash(newRoot);
         blockHeight = height;

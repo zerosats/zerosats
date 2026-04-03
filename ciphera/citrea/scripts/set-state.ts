@@ -6,22 +6,22 @@ import {
     http,
     getContract,
 } from "viem";
-import { privateKeyToAccount } from "viem/accounts";
-import { citreaDevChain } from "./shared";
+import {mnemonicToAccount, privateKeyToAccount} from "viem/accounts";
+import {citreaDevChain, citreaTestChain} from "./shared";
 
 async function main() {
-    const rollupV1Address = process.env.ROLLUP_V1_ADDRESS as `0x${string}`;
+    const rollupV1Address = process.env.ROLLUP_ADDRESS as `0x${string}`;
     if (!rollupV1Address) {
-        throw new Error("ROLLUP_V1_ADDRESS environment variable is not set");
+        throw new Error("ROLLUP_ADDRESS environment variable is not set");
     }
 
-    const rpcUrl = process.env.TESTING_URL || "http://localhost:12345";
-    const privateKey = (process.env.PRIVATE_KEY ||
-        "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80") as `0x${string}`;
-    const account = privateKeyToAccount(privateKey);
+    const rpcUrl = process.env.TESTING_URL || "https://rpc.testnet.citrea.xyz";
+    const seed = process.env.MNEMONIC;
+    if (!seed) throw new Error("MNEMONIC env var is not set");
+    let account = mnemonicToAccount(seed);
 
     const chain = {
-        ...citreaDevChain,
+        ...citreaTestChain,
         rpcUrls: {
             default: { http: [rpcUrl] },
             public: { http: [rpcUrl] },
