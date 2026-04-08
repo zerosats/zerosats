@@ -137,6 +137,24 @@ enum Commands {
         #[arg(long, default_value = "https://testnet.lx.dev")]
         onramp_uri: String,
     },
+    /// Withdraw via Lightning Network by burning cBTC through an offramp service
+    WithdrawLn {
+        /// BOLT11 Lightning invoice to pay out
+        #[arg(required = true, long)]
+        invoice: String,
+
+        /// Burn substitutor EVM address (middleware)
+        #[arg(required = true, long)]
+        substitutor: String,
+
+        /// Address to be encoded into burn note
+        #[arg(required = true, long)]
+        address: String,
+
+        /// Offramp service base URI
+        #[arg(long, default_value = "https://testnet.lx.dev")]
+        offramp_uri: String,
+    },
 }
 
 use thiserror::Error;
@@ -691,6 +709,86 @@ async fn handle_depo_ln(
     }
 }
 
+async fn handle_withdraw_ln(
+    name: &str,
+    host: &str,
+    port: u16,
+    timeout_secs: u64,
+    chain: u64,
+    invoice: &str,
+    substitutor: &str,
+    address: &str,
+    offramp_uri: &str,
+) -> Result<()> {
+    // Step 1 — GET /offramp/{lnInvoice}/{substitutorAddress}
+    // Returns the swap quote: swap ID and the cBTC amount the user must burn.
+    let http = reqwest::Client::new();
+    let quote_url = format!("{}/offramp/{}/{}", offramp_uri, invoice, substitutor);
+
+    println!("\n⚡ Requesting offramp quote...");
+
+    let quote_resp = http
+        .get(&quote_url)
+        .send()
+        .await
+        .map_err(|e| color_eyre::eyre::eyre!("Failed to reach offramp service: {}", e))?;
+
+    if !quote_resp.status().is_success() {
+        let status = quote_resp.status();
+        let body = quote_resp.text().await.unwrap_or_default();
+        return Err(color_eyre::eyre::eyre!(
+            "Offramp service error {}: {}",
+            status,
+            body
+        ));
+    }
+
+    let quote: serde_json::Value = quote_resp
+        .json()
+        .await
+        .map_err(|e| color_eyre::eyre::eyre!("Failed to parse offramp quote: {}", e))?;
+
+    let swap_id = quote["id"]
+        .as_str()
+        .ok_or_else(|| color_eyre::eyre::eyre!("Missing 'id' in offramp quote"))?
+        .to_string();
+
+    // inputAmountWei is the burn amount in ERC-20 wei (cBTC has 18 decimals).
+    // Convert to satoshis: 1 sat = 1e10 wei  (1 BTC = 1e8 sats = 1e18 wei).
+    let input_amount_wei: u64 = quote["inputAmountWei"]
+        .as_u64()
+        .ok_or_else(|| color_eyre::eyre::eyre!("Missing or invalid 'inputAmountWei' in offramp quote"))?;
+    let input_amount: u64 = input_amount_wei / 10_000_000_000; // wei → satoshis
+
+    let quote_expiry = quote["quoteExpiry"].as_u64().unwrap_or(0);
+
+    println!("\n✅ Offramp quote received!");
+    println!("   Swap ID:      {swap_id}");
+    println!("   Burn amount:  {input_amount} sats ({input_amount_wei} wei)");
+    println!("   Quote expiry: {quote_expiry} (unix timestamp)");
+    println!("\n   Burning {input_amount} cBTC to substitutor {substitutor}...");
+
+    // Step 2 — Create a burn note for inputAmount and submit it to the Ciphera node.
+    // The substitutor address is the burn target: the offramp service claims the burned
+    // cBTC on the EVM side and settles the Lightning invoice.
+    handle_burn(
+        name,
+        host,
+        port,
+        timeout_secs,
+        chain,
+        address,
+        input_amount,
+        "WCBTC",
+    )
+    .await?;
+
+    println!("\n✅ Offramp initiated! The substitutor will settle the Lightning invoice.");
+    println!("   Swap ID: {swap_id}");
+
+    Ok(())
+}
+
 async fn handle_mint(
     name: &str,
     host: &str,
@@ -1063,6 +1161,25 @@ async fn main() -> Result<()> {
                 cli.chain,
                 amount_sat,
                 &onramp_uri,
+            )
+            .await?;
+        }
+        Commands::WithdrawLn {
+            invoice,
+            substitutor,
+            address,
+            offramp_uri,
+        } => {
+            handle_withdraw_ln(
+                &cli.name,
+                &cli.host,
+                cli.port,
+                cli.timeout,
+                cli.chain,
+                &invoice,
+                &substitutor,
+                &address,
+                &offramp_uri,
             )
             .await?;
         }
