@@ -783,8 +783,71 @@ async fn handle_withdraw_ln(
     )
     .await?;
 
-    println!("\n✅ Offramp initiated! The substitutor will settle the Lightning invoice.");
-    println!("   Swap ID: {swap_id}");
+    println!("\n✅ Burn submitted. Waiting for the substitutor to settle the Lightning invoice...");
+
+    // Step 3 — Poll /offramp/{swapId} until the swap reaches a terminal state.
+    use serde::Deserialize;
+    #[derive(Deserialize, Debug)]
+    struct OfframpStatusResponse {
+        state: String,
+        description: String,
+    }
+
+    const MAX_POLL_ATTEMPTS: u32 = 150; // ~10 minutes at 4 s intervals
+    const POLL_INTERVAL_SECS: u64 = 4;
+
+    let status_url = format!("{}/offramp/{}", offramp_uri, swap_id);
+    let mut attempts = 0u32;
+    loop {
+        tokio::time::sleep(std::time::Duration::from_secs(POLL_INTERVAL_SECS)).await;
+
+        attempts += 1;
+        if attempts > MAX_POLL_ATTEMPTS {
+            return Err(color_eyre::eyre::eyre!(
+                "Timed out waiting for offramp swap to complete after {} attempts",
+                MAX_POLL_ATTEMPTS
+            ));
+        }
+
+        let resp = http
+            .get(&status_url)
+            .send()
+            .await
+            .map_err(|e| color_eyre::eyre::eyre!("Poll error: {}", e))?;
+
+        let http_status = resp.status();
+        if !http_status.is_success() {
+            let body = resp.text().await.unwrap_or_default();
+            return Err(color_eyre::eyre::eyre!(
+                "Offramp status check failed with HTTP {}: {}",
+                http_status,
+                body
+            ));
+        }
+
+        let response: OfframpStatusResponse = resp
+            .json()
+            .await
+            .map_err(|e| color_eyre::eyre::eyre!("Failed to parse offramp status: {}", e))?;
+
+        println!("State: {} - {}", response.state, response.description);
+
+        match response.state.as_str() {
+            "PAID" => {
+                println!("\n✅ Lightning invoice settled! Swap complete.");
+                println!("   Swap ID: {swap_id}");
+                break;
+            }
+            "REFUNDED" | "EXPIRED" => {
+                return Err(color_eyre::eyre::eyre!(
+                    "Offramp swap reached terminal failure state {}: {}",
+                    response.state,
+                    response.description
+                ));
+            }
+            _ => {} // CREATED, COMMITED, or other in-progress states; keep polling.
+        }
+    }
 
     Ok(())
 }
