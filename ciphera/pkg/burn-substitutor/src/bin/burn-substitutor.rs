@@ -24,30 +24,30 @@ pub struct Config {
 
     #[arg(
         long,
-        env = "ROLLUP_CONTRACT_ADDRESS",
+        env = "ROLLUP_CONTRACT_ADDR",
         default_value = "0xcf7ed3acca5a467e9e704c703e8d87f634fb0fc9"
     )]
-    rollup_contract_address: String,
+    rollup_contract_addr: String,
 
     #[arg(
         long,
-        env = "erc20_contract_addrESS",
-        default_value = "0x5fbdb2315678afecb367f032d93f642f64180aa3"
+        env = "ERC20_CONTRACT_ADDR",
+        default_value = "0x8d0c9d1c17aE5e40ffF9bE350f57840E9E66Cd93"
     )]
-    erc20_contract_address: String,
+    erc20_contract_addr: String,
 
     #[arg(
         long,
-        env = "EVM_SECRET_KEY",
+        env = "SECRET_KEY",
         default_value = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
     )]
-    evm_secret_key: String,
+    secret_key: String,
 
     #[arg(long, env = "EVM_RPC_URL", default_value = "http://localhost:8545")]
     evm_rpc_url: String,
 
-    #[arg(long, env = "NODE_RPC_URL", default_value = "http://localhost:8080")]
-    node_rpc_url: String,
+    #[arg(long, env = "HOST", default_value = "https://ciphera.satsbridge.com")]
+    host: String,
 
     #[arg(long, env = "MINIMUM_GAS_PRICE_GWEI")]
     minimum_gas_price_gwei: Option<u64>,
@@ -78,7 +78,7 @@ async fn main() -> Result<(), eyre::Error> {
 
     let secret_key = contracts::SecretKey::from_str(
         config
-            .evm_secret_key
+            .secret_key
             .strip_prefix("0x")
             .context("Secret key must start with 0x")?,
     )?;
@@ -87,16 +87,18 @@ async fn main() -> Result<(), eyre::Error> {
     let rollup_contract = RollupContract::load(
         client.clone(),
         &config.chain_id,
-        &config.rollup_contract_address,
+        &config.rollup_contract_addr,
         secret_key,
     )
     .await?;
     let erc20_contract =
-        contracts::ERC20Contract::load(client.clone(), &config.erc20_contract_address, secret_key)
+        contracts::ERC20Contract::load(client.clone(), &config.erc20_contract_addr, secret_key)
             .await?;
 
+    let wallet_address = rollup_contract.signer_address;
+
     if erc20_contract
-        .allowance(rollup_contract.signer_address, rollup_contract.address())
+        .allowance(wallet_address, rollup_contract.address())
         .await?
         != U256::MAX
     {
@@ -115,11 +117,11 @@ async fn main() -> Result<(), eyre::Error> {
     let mut substitutor = burn_substitutor::BurnSubstitutor::new(
         rollup_contract,
         erc20_contract,
-        config.node_rpc_url,
+        config.host,
         Duration::from_secs(1),
     );
 
-    tracing::info!("Starting burn substitutor");
+    tracing::info!("Starting burn substitutor with wallet {:#x}", wallet_address);
 
     loop {
         let substitutions = substitutor.tick().await?;
