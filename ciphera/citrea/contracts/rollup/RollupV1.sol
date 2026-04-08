@@ -648,6 +648,36 @@ contract RollupV1 is Initializable, OwnableUpgradeable {
         emit MintAdded(mint_hash, value, note_kind);
     }
 
+    function burnClaimed(
+        address burnAddress,
+        bytes32 note_kind,
+        bytes32 hash,
+        uint256 amount,
+        uint256 burnBlockHeight
+    ) public onlyEscrowManager {
+        bytes32 substituteBurnKey = getSubstituteBurnKey(
+            hash,
+            burnAddress,
+            note_kind,
+            amount,
+            burnBlockHeight
+        );
+        require(
+            substitutedBurns[substituteBurnKey] == address(0),
+            "RollupV1: Burn already substituted"
+        );
+        require(
+            blockHeight < burnBlockHeight,
+            "RollupV1: Block height already rolled up"
+        );
+
+        // This will be returned to the msg.sender when the rollup block for it is submitted
+        substitutedBurns[substituteBurnKey] = substituteAddress;
+
+        address token = tokens[note_kind];
+        emit Burned(token, hash, burnAddress, true, true);
+    }
+
     // Anyone can call mint, although this is likely to be performed on behalf of the user
     // as they may not have gas to pay for the txn
     function mint(bytes32 mint_hash, bytes32 value, bytes32 note_kind) public {
