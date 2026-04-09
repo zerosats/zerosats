@@ -570,42 +570,6 @@ impl SignedRollupContract {
 
         Ok(call_tx)
     }
-
-    #[allow(clippy::too_many_arguments)]
-    #[tracing::instrument(err, ret, skip(self, proof))]
-    pub async fn burn_to_router(
-        &self,
-        kind: &Element,
-        msg_hash: &Element,
-        proof: &[u8],
-        nullifier: &Element,
-        value: &Element,
-        source: &Element,
-        sig: &Element,
-        router: &Address,
-        router_calldata: &[u8],
-        return_address: &Address,
-    ) -> Result<H256> {
-        let call_tx = self
-            .call(
-                "burnToRouter",
-                (
-                    convert_element_to_h256(kind),
-                    convert_element_to_h256(msg_hash),
-                    web3::types::Bytes::from(proof),
-                    convert_element_to_h256(nullifier),
-                    convert_element_to_h256(value),
-                    convert_element_to_h256(source),
-                    convert_element_to_h256(sig),
-                    *router,
-                    web3::types::Bytes::from(router_calldata),
-                    *return_address,
-                ),
-            )
-            .await?;
-
-        Ok(call_tx)
-    }
 }
 
 impl ReadonlyRollupContract {

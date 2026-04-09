@@ -84,7 +84,9 @@ fn main(
         assert(mint_hash == msg_hash, "Mint hash must match message");
         // Assert note kind
         assert(output_notes[0].kind == msg_note_kind, "Mint note kind must match message")
-    } else if (kind == 3) {
+    } else if (kind == 3) | (kind == 4) {
+        // 3 - for native & cross-chain routed burns
+        // 4 - for cross-chain burns
         // BURN
         // Prevent frontrunning the txn and changing the evm address
         assert(pmessage4 == burn_addr, "messages[4] must match private input");

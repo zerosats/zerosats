@@ -58,6 +58,10 @@ contract RollupV1 is Initializable, OwnableUpgradeable {
         bool substitute,
         bool success
     );
+    event BurnClaimed(
+        address indexed substituteAddress,
+        bytes32 indexed substituteBurnKey
+    );
     event MintAdded(
         bytes32 indexed mint_hash,
         uint256 value,
@@ -649,33 +653,12 @@ contract RollupV1 is Initializable, OwnableUpgradeable {
     }
 
     function burnClaimed(
-        address burnAddress,
-        bytes32 note_kind,
-        bytes32 hash,
-        uint256 amount,
-        uint256 burnBlockHeight
+        address substituteAddress,
+        bytes32 substituteBurnKey
     ) public onlyEscrowManager {
-        bytes32 substituteBurnKey = getSubstituteBurnKey(
-            hash,
-            burnAddress,
-            note_kind,
-            amount,
-            burnBlockHeight
-        );
-        require(
-            substitutedBurns[substituteBurnKey] == address(0),
-            "RollupV1: Burn already substituted"
-        );
-        require(
-            blockHeight < burnBlockHeight,
-            "RollupV1: Block height already rolled up"
-        );
-
         // This will be returned to the msg.sender when the rollup block for it is submitted
         substitutedBurns[substituteBurnKey] = substituteAddress;
-
-        address token = tokens[note_kind];
-        emit Burned(token, hash, burnAddress, true, true);
+        emit BurnClaimed(substituteAddress, substituteBurnKey);
     }
 
     // Anyone can call mint, although this is likely to be performed on behalf of the user
