@@ -771,7 +771,7 @@ async fn handle_withdraw_ln(
         }
     };
     let input_amount: u64 = u64::try_from(input_amount_wei / 10_000_000_000u128) // wei → satoshis
-        .map_err(|_| color_eyre::eyre::eyre!("inputAmountWei is too large to fit in satoshis (overflow)"))?;
+        .map_err(|_| color_eyre::eyre::eyre!("Converted satoshi amount exceeds u64 maximum"))?;
 
     let quote_expiry = quote["quoteExpiry"].as_u64().unwrap_or(0);
 
