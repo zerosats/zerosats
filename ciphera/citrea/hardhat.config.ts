@@ -37,8 +37,7 @@ const config: HardhatUserConfig = {
     citreaMainnet: {
       type: "http",
       chainId: 4114,
-      url:
-          `https://citrea-mainnet.g.alchemy.com/v2/${configVariable("ALCHEMY_MAINNET_API_KEY")}`,
+      url: `https://citrea-mainnet.g.alchemy.com/v2/${configVariable("ALCHEMY_MAINNET_API_KEY")}`,
       accounts: { mnemonic: configVariable("MNEMONIC") },
     },
   },
