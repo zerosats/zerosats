@@ -8,7 +8,7 @@ use primitives::{
 };
 use reqwest::StatusCode;
 use std::time::Duration;
-use zk_primitives::{UtxoKindMessages, UtxoProof};
+use zk_primitives::{UtxoKind, UtxoKindMessages, UtxoProof};
 
 pub struct BurnSubstitutor {
     rollup_contract: RollupContract,
@@ -62,6 +62,8 @@ impl BurnSubstitutor {
         tracing::info!("Fetched transactions");
 
         let mut substituted_burns = Vec::new();
+        let mut other_burns = Vec::new();
+
         for txn in &txns {
             if let UtxoKindMessages::Burn(burn_msgs) = txn.proof.kind_messages() {
                 let hash = burn_msgs.burn_hash;
@@ -70,65 +72,70 @@ impl BurnSubstitutor {
                 let amount = burn_msgs.value;
                 let note_kind = burn_msgs.note_kind;
 
-                if self
-                    .rollup_contract
-                    .was_burn_substituted(
-                        &burn_address,
-                        &note_kind,
-                        &hash,
-                        &amount,
-                        txn.block_height.0,
-                    )
-                    .await?
-                {
-                    continue;
-                }
+                if UtxoKind::from(note_kind) == UtxoKind::NoSub {
+                    if self
+                        .rollup_contract
+                        .was_burn_substituted(
+                            &burn_address,
+                            &note_kind,
+                            &hash,
+                            &amount,
+                            txn.block_height.0,
+                        )
+                        .await?
+                    {
+                        continue;
+                    }
 
-                // Calculate the burn value as an EVM U256
-                let burn_value = burn_msgs.value.to_eth_u256();
+                    // Calculate the burn value as an EVM U256
+                    let burn_value = burn_msgs.value.to_eth_u256();
 
-                // Check ERC20 balance and optionally skip if burn exceeds available balance
-                let token_balance = self
-                    .erc20_contract
-                    .balance(self.rollup_contract.signer_address)
-                    .await
-                    .context("Failed to fetch ERC20 balance for burn substitution")?;
+                    // Check ERC20 balance and optionally skip if burn exceeds available balance
+                    let token_balance = self
+                        .erc20_contract
+                        .balance(self.rollup_contract.signer_address)
+                        .await
+                        .context("Failed to fetch ERC20 balance for burn substitution")?;
 
-                if burn_value > token_balance {
-                    tracing::info!(
+                    if burn_value > token_balance {
+                        tracing::info!(
                         ?txn.proof.public_inputs,
                         %burn_value,
                         %token_balance,
                         "Skipping burn: value exceeds substitutor balance"
                     );
-                    continue;
+                        continue;
+                    }
+
+                    let txn = self
+                        .rollup_contract
+                        .substitute_burn(
+                            &burn_address,
+                            &note_kind,
+                            &hash,
+                            &amount,
+                            txn.block_height.0,
+                        )
+                        .await
+                        .context("Failed to substitute burn")?;
+
+                    tracing::info!("Substitution transaction {:x} has been sent", txn);
+
+                    self.rollup_contract
+                        .client
+                        .wait_for_confirm(
+                            txn,
+                            self.eth_txn_confirm_wait_interval,
+                            ConfirmationType::Latest,
+                        )
+                        .await
+                        .context("Failed to wait for burn substitution")?;
+
+                    substituted_burns.push(hash);
+                } else {
+                    tracing::info!("Transaction of NoSubstitution kind");
+                    other_burns.push(hash);
                 }
-
-                let txn = self
-                    .rollup_contract
-                    .substitute_burn(
-                        &burn_address,
-                        &note_kind,
-                        &hash,
-                        &amount,
-                        txn.block_height.0,
-                    )
-                    .await
-                    .context("Failed to substitute burn")?;
-
-                tracing::info!("Substitution transaction {:x} has been sent", txn);
-
-                self.rollup_contract
-                    .client
-                    .wait_for_confirm(
-                        txn,
-                        self.eth_txn_confirm_wait_interval,
-                        ConfirmationType::Latest,
-                    )
-                    .await
-                    .context("Failed to wait for burn substitution")?;
-
-                substituted_burns.push(hash);
             }
         }
 
