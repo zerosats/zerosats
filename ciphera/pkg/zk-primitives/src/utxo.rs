@@ -68,6 +68,17 @@ impl Utxo {
         }
     }
 
+    /// Create a new burn transaction without substitution
+    #[must_use]
+    pub fn new_burn_no_sub(input_notes: [InputNote; 2], evm_address: Element) -> Self {
+        Self {
+            kind: UtxoKind::Burn,
+            input_notes,
+            output_notes: [Note::padding_note(), Note::padding_note()],
+            burn_address: Some(evm_address),
+        }
+    }
+
     /// Create a new mint transaction
     #[must_use]
     pub fn new_mint(output_notes: [Note; 2]) -> Self {
@@ -109,7 +120,7 @@ impl Utxo {
                 self.mint_hash(),
                 Element::ZERO,
             ],
-            UtxoKind::Burn => [
+            UtxoKind::Burn | UtxoKind::NoSub => [
                 Element::new(3),
                 self.input_notes[0].note.contract,
                 self.input_value() - self.output_value(),
@@ -198,6 +209,8 @@ pub enum UtxoKind {
     Mint,
     /// A burn transaction (burning on Ciphera Network)
     Burn,
+    /// A burn transaction, no native burn substitution
+    NoSub,
 }
 
 impl UtxoKind {
@@ -214,6 +227,7 @@ impl From<u8> for UtxoKind {
             1 => UtxoKind::Send,
             2 => UtxoKind::Mint,
             3 => UtxoKind::Burn,
+            4 => UtxoKind::NoSub,
             _ => UtxoKind::Null,
         }
     }
@@ -225,6 +239,7 @@ impl From<UtxoKind> for u8 {
             UtxoKind::Send => 1,
             UtxoKind::Mint => 2,
             UtxoKind::Burn => 3,
+            UtxoKind::NoSub => 4,
             UtxoKind::Null => 0,
         }
     }
@@ -364,7 +379,7 @@ impl UtxoPublicInput {
                 value: self.messages[2],
                 mint_hash: self.messages[3],
             }),
-            UtxoKind::Burn => UtxoKindMessages::Burn(UtxoKindBurnMessages {
+            UtxoKind::Burn | UtxoKind::NoSub => UtxoKindMessages::Burn(UtxoKindBurnMessages {
                 note_kind: self.messages[1],
                 value: self.messages[2],
                 burn_hash: self.messages[3],

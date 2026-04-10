@@ -54,6 +54,7 @@ impl AggUtxo {
                 UtxoKind::Null | UtxoKind::Send => &[][..],
                 UtxoKind::Mint => &proof.utxo_proof.public_inputs.messages[..4],
                 UtxoKind::Burn => &proof.utxo_proof.public_inputs.messages[..],
+                UtxoKind::NoSub => &proof.utxo_proof.public_inputs.messages[..],
             };
 
             for &message in proof_messages {

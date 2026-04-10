@@ -10,14 +10,11 @@ import {
   formatEther,
   encodeFunctionData,
   getContract,
-  parseUnits,
   formatUnits,
   maxUint256,
 } from "viem";
 import { privateKeyToAccount, mnemonicToAccount } from "viem/accounts";
 import { deployBin, citreaDevChain, citreaTestChain } from "./shared";
-import { readFile } from "fs/promises";
-import { join } from "path";
 import IERC20Artifact from "../openzeppelin-contracts/token/ERC20/IERC20.json";
 
 // Auto-updated by generate_fixturecs.sh - do not modify manually
@@ -31,8 +28,6 @@ async function main() {
   let proverAddress = process.env.PROVER_ADDRESS as `0x${string}`;
   let validators =
     process.env.VALIDATORS?.split(",") ?? ([] as Array<`0x${string}`>);
-
-  let escrowManagerAddress = process.env.ESCROW_MANAGER;
 
   console.log("    Citrea Testnet - ", isTestnet);
   console.log("    Prover Address - ", proverAddress);
@@ -53,7 +48,6 @@ async function main() {
     if (proverAddress === undefined)
       throw new Error("PROVER_ADDRESS is not set");
     if (validators.length === 0) throw new Error("VALIDATORS is not set");
-    if (!escrowManagerAddress) throw new Error("ESCROW_MANAGER is not set");
 
     walletClient = createWalletClient({
       account,
@@ -83,10 +77,6 @@ async function main() {
       validators = [account.address];
     }
 
-    if (!escrowManagerAddress) {
-      escrowManagerAddress = account.address;
-    }
-
     walletClient = createWalletClient({
       account,
       chain: {
@@ -102,13 +92,6 @@ async function main() {
       }),
     });
   }
-
-  if (!/^0x[0-9a-fA-F]{40}$/.test(escrowManagerAddress!)) {
-    throw new Error(
-      `ESCROW_MANAGER is not a valid Ethereum address: "${escrowManagerAddress}"`,
-    );
-  }
-  const escrowManager = escrowManagerAddress as `0x${string}`;
 
   let ownerAddress = account.address;
   console.log("    Owner - ", ownerAddress);
@@ -230,7 +213,7 @@ async function main() {
     functionName: "initialize",
     args: [
       ownerAddress,
-      escrowManager,
+      ownerAddress, // escrowManager must be set later
       erc20Address,
       aggregateVerifierAddr,
       proverAddress,
