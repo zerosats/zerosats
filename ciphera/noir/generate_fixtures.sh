@@ -6,9 +6,7 @@ set -euo pipefail
 NARGO=${NARGO:-nargo}
 $NARGO compile --workspace
 
-# REPO_ROOT=/workspace/ciphera
-#REPO_ROOT=$(git rev-parse --show-toplevel)
-REPO_ROOT=/workspace/ciphera
+REPO_ROOT=$(git rev-parse --show-toplevel)
 BACKEND=${BACKEND:-bb}
 
 # Clean target
@@ -44,7 +42,23 @@ is_recursive() {
   return 1  # False in bash
 }
 
-# Generate verification keys for each program
+# Replace a Noir global Field constant's value in-place.
+# Usage: update_noir_hash <file> <global_name> <new_value>
+update_noir_hash() {
+  local file="$1" var="$2" hash="$3"
+  perl -i -pe "s/(?<=global ${var}: Field = )\d+(?=;)/${hash}/" "$file"
+}
+
+# Extract the u256 decimal hash from vk_hash output.
+extract_u256() {
+  awk '/^u256:/ { print $2 }'
+}
+
+# Extract the hex hash from vk_hash output.
+extract_hex() {
+  awk '/^hex:/ { print $2 }'
+}
+
 # Generate verification keys for each program
 for NAME in "${PROGRAMS[@]}"; do
   oracle_hash_args=()
@@ -56,11 +70,16 @@ for NAME in "${PROGRAMS[@]}"; do
   echo "$(echo "$NAME" | tr '[:lower:]' '[:upper:]')"
   echo "================"
 
-  echo "Generating verification key for $NAME..."
-  $BACKEND write_vk ${oracle_hash_args[@]} --scheme ultra_honk -b $REPO_ROOT/fixtures/programs/${NAME}.json -o $REPO_ROOT/fixtures/keys/ \
-    && python3 -c 'import sys, json; d=sys.stdin.buffer.read(); print(json.dumps([f"0x{d[i:i+32].hex()}" for i in range(0, len(d), 32)], indent=2))' < $REPO_ROOT/fixtures/keys/vk > $REPO_ROOT/fixtures/keys/vk_fields.json \
+  recursive_args=()
+  if is_recursive "$NAME"; then
+    echo "Generating verification key for $NAME (with --init_kzg_accumulator)..."
+    recursive_args=("--init_kzg_accumulator")
+  else
+    echo "Generating verification key for $NAME..."
+  fi
+  $BACKEND write_vk "${recursive_args[@]}" ${oracle_hash_args[@]} --scheme ultra_honk --output_format bytes_and_fields -b $REPO_ROOT/fixtures/programs/${NAME}.json -o $REPO_ROOT/fixtures/keys/ \
     && mv $REPO_ROOT/fixtures/keys/{vk,${NAME}_key} && mv $REPO_ROOT/fixtures/keys/{vk_fields.json,${NAME}_key_fields.json} \
-    && rm $REPO_ROOT/fixtures/keys/vk_hash
+    && rm $REPO_ROOT/fixtures/keys/vk_hash $REPO_ROOT/fixtures/keys/vk_hash_fields.json
 
   # Print verification key hash as u256 and hex
   echo "Verification key hash for $NAME:"
@@ -70,31 +89,26 @@ for NAME in "${PROGRAMS[@]}"; do
 
   # Update agg_utxo/src/main.nr with the UTXO verification key hash
   if [ "$NAME" == "utxo" ]; then
-    UTXO_VK_HASH=$(echo "$VK_HASH_OUTPUT" | grep "u256:" | cut -d' ' -f2)
+    UTXO_VK_HASH=$(echo "$VK_HASH_OUTPUT" | extract_u256)
     echo "Updating agg_utxo/src/main.nr with UTXO verification key hash: $UTXO_VK_HASH"
-    sed -i.bak "s/global UTXO_VERIFICATION_KEY_HASH: Field = [0-9]*;/global UTXO_VERIFICATION_KEY_HASH: Field = $UTXO_VK_HASH;/" $REPO_ROOT/noir/agg_utxo/src/main.nr
-    rm $REPO_ROOT/noir/agg_utxo/src/main.nr.bak
+    update_noir_hash $REPO_ROOT/noir/agg_utxo/src/main.nr UTXO_VERIFICATION_KEY_HASH "$UTXO_VK_HASH"
   fi
 
   # Update agg_agg/src/main.nr with the agg_utxo verification key hash
   if [ "$NAME" == "agg_utxo" ]; then
-    AGG_UTXO_VK_HASH=$(echo "$VK_HASH_OUTPUT" | grep "u256:" | cut -d' ' -f2)
+    AGG_UTXO_VK_HASH=$(echo "$VK_HASH_OUTPUT" | extract_u256)
     echo "Updating agg_agg/src/main.nr with agg_utxo verification key hash: $AGG_UTXO_VK_HASH"
-    sed -i.bak "s/global AGG_UTXO_VERIFICATION_KEY_HASH: Field = [0-9]*;/global AGG_UTXO_VERIFICATION_KEY_HASH: Field = $AGG_UTXO_VK_HASH;/" $REPO_ROOT/noir/agg_agg/src/main.nr
-    rm $REPO_ROOT/noir/agg_agg/src/main.nr.bak
+    update_noir_hash $REPO_ROOT/noir/agg_agg/src/main.nr AGG_UTXO_VERIFICATION_KEY_HASH "$AGG_UTXO_VK_HASH"
   fi
 
   if [ "$NAME" == "agg_agg" ]; then
-    AGG_AGG_VK_HASH=$(echo "$VK_HASH_OUTPUT" | grep "u256:" | cut -d' ' -f2)
-    AGG_AGG_VK_HASH_HEX=$(echo "$VK_HASH_OUTPUT" | grep "hex:" | cut -d' ' -f2)
-    echo "Updating agg_agg verification key hash: $AGG_AGG_VK_HASH"
-    echo "Updating citrea/scripts/deploy.ts final verification key hash: $AGG_AGG_VK_HASH"
+    AGG_AGG_VK_HASH=$(echo "$VK_HASH_OUTPUT" | extract_u256)
+    AGG_AGG_VK_HASH_HEX=$(echo "$VK_HASH_OUTPUT" | extract_hex)
+    echo "Updating citrea/scripts/deploy.ts with agg_agg verification key hash: $AGG_AGG_VK_HASH"
+    echo "Updating pkg/contracts/src/rollup.rs with agg_agg verification key hash (hex): $AGG_AGG_VK_HASH_HEX"
 
-    sed -i.bak "s/const AGG_AGG_VERIFICATION_KEY_HASH = \".*\";/const AGG_AGG_VERIFICATION_KEY_HASH = \"$AGG_AGG_VK_HASH\";/" $REPO_ROOT/citrea/scripts/deploy.ts
-    rm $REPO_ROOT/citrea/scripts/deploy.ts.bak
-
-    sed -i.bak "s/pub const AGG_AGG_VERIFICATION_KEY_HASH.*;/pub const AGG_AGG_VERIFICATION_KEY_HASH: &str = \"$AGG_AGG_VK_HASH_HEX\";/" $REPO_ROOT/pkg/contracts/src/rollup.rs
-    rm $REPO_ROOT/pkg/contracts/src/rollup.rs.bak
+    perl -i -pe "s/(?<=const AGG_AGG_VERIFICATION_KEY_HASH = \")[^\"]*(?=\";)/${AGG_AGG_VK_HASH}/" $REPO_ROOT/citrea/scripts/deploy.ts
+    perl -i -pe "s/(?<=AGG_AGG_VERIFICATION_KEY_HASH: &str = \")[^\"]*(?=\";)/${AGG_AGG_VK_HASH_HEX}/" $REPO_ROOT/pkg/contracts/src/rollup.rs
 
     $BACKEND write_solidity_verifier --scheme ultra_honk -k $REPO_ROOT/fixtures/keys/${NAME}_key -o $REPO_ROOT/citrea/noir/${NAME}.sol
     if [[ "$(uname)" == "Darwin" ]]; then
