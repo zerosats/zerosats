@@ -32,8 +32,8 @@ library HonkVerificationKey {
                y: uint256(0x093b074ecae832db4c18b0cafb7a777b9e1bdc2e922ff980be3be18404cde61a)
             }),
             qc: Honk.G1Point({ 
-               x: uint256(0x0c97aa9006247db2aaf20bd53033484d48bfce19b9ab4ce7fbd2065a6a299355),
-               y: uint256(0x0c56b01048c34e3c50ea9c7cb3c90f719e5c1992c3e140e9c143a634cb163574)
+               x: uint256(0x24c6746a6cde128311fca2c5d7518b86f5c70d823d0c9384450d874985c329be),
+               y: uint256(0x07981fd2737a00fac4758814d71f2e005476da62cd84d4edbc435719b26995ef)
             }),
             qLookup: Honk.G1Point({ 
                x: uint256(0x2908804831a6fe78780f1a30dd07d8e6325805c4d10b789541650b83fce14dcd),
@@ -463,7 +463,7 @@ library ZKTranscriptLib {
         uint256 circuitSize,
         uint256 publicInputsSize,
         uint256 pubInputsOffset
-    ) internal pure returns (ZKTranscript memory t) {
+    ) external pure returns (ZKTranscript memory t) {
         Fr previousChallenge;
         (t.relationParameters, previousChallenge) = generateRelationParametersChallenges(
             proof, publicInputs, circuitSize, publicInputsSize, pubInputsOffset, previousChallenge
