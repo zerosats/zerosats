@@ -32,8 +32,8 @@ library HonkVerificationKey {
                y: uint256(0x093b074ecae832db4c18b0cafb7a777b9e1bdc2e922ff980be3be18404cde61a)
             }),
             qc: Honk.G1Point({ 
-               x: uint256(0x0729d5df47e36dbb1e0b3c9a89507edaa171ff36244b7b8b876b5d357c218a12),
-               y: uint256(0x17088e5802b1b678710c3db9aa7a0a07456500c6e9544cac37f81c4ee4756699)
+               x: uint256(0x0c97aa9006247db2aaf20bd53033484d48bfce19b9ab4ce7fbd2065a6a299355),
+               y: uint256(0x0c56b01048c34e3c50ea9c7cb3c90f719e5c1992c3e140e9c143a634cb163574)
             }),
             qLookup: Honk.G1Point({ 
                x: uint256(0x2908804831a6fe78780f1a30dd07d8e6325805c4d10b789541650b83fce14dcd),

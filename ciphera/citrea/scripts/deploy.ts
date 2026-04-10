@@ -17,9 +17,8 @@ import { privateKeyToAccount, mnemonicToAccount } from "viem/accounts";
 import { deployBin, citreaDevChain, citreaTestChain } from "./shared";
 import IERC20Artifact from "../openzeppelin-contracts/token/ERC20/IERC20.json";
 
-// Auto-updated by generate_fixturecs.sh - do not modify manually
-const AGG_AGG_VERIFICATION_KEY_HASH =
-  "0x1594fce0e59bc3785292f9ab4f5a1e45f5795b4a616aff5cdc4d32a223f69f0c";
+// Auto-updated by generate_fixtures.sh - do not modify manually
+const AGG_AGG_VERIFICATION_KEY_HASH = "0x1b1978faa77ef973a8dfa183a65c2c46b45d27947f404f2093c239c33675145f";
 
 async function main() {
   console.log("Initialization...");

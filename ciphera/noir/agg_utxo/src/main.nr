@@ -2,8 +2,7 @@ use dep::std;
 use common::is_one_of;
 use poseidon::poseidon2;
 
-global UTXO_VERIFICATION_KEY_HASH: Field =
-    18779959434705083215725546760451184879298382931437993861134690217528836166710;
+global UTXO_VERIFICATION_KEY_HASH: Field = 7178586389739098130930052586883278896946154519186022101954785736118841392340;
 
 struct AggUtxoProofInput {
     proof: [Field; 508],
@@ -15,7 +14,7 @@ struct AggUtxoProofInput {
 }
 
 fn main(
-    verification_key: [Field; 115],
+    verification_key: [Field; 57],
     verification_key_hash: Field,
     proofs: [AggUtxoProofInput; 3],
     messages: pub [Field; 15],
@@ -197,7 +196,7 @@ fn empty_tree() {
 
 #[test(should_fail_with = "only utxo proof allowed")]
 fn test_invalid_verification_key_hash() {
-    let verification_key = [0; 115];
+    let verification_key = [0; 57];
     let invalid_hash = 1234567890; // Wrong hash
 
     let proofs = [
