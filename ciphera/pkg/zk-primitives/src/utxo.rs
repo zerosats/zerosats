@@ -120,8 +120,15 @@ impl Utxo {
                 self.mint_hash(),
                 Element::ZERO,
             ],
-            UtxoKind::Burn | UtxoKind::NoSub => [
+            UtxoKind::Burn => [
                 Element::new(3),
+                self.input_notes[0].note.contract,
+                self.input_value() - self.output_value(),
+                self.burn_hash(),
+                self.burn_address.unwrap(),
+            ],
+            UtxoKind::NoSub => [
+                Element::new(4),
                 self.input_notes[0].note.contract,
                 self.input_value() - self.output_value(),
                 self.burn_hash(),
@@ -380,6 +387,7 @@ impl UtxoPublicInput {
                 mint_hash: self.messages[3],
             }),
             UtxoKind::Burn | UtxoKind::NoSub => UtxoKindMessages::Burn(UtxoKindBurnMessages {
+                utxo_kind: self.messages[0],
                 note_kind: self.messages[1],
                 value: self.messages[2],
                 burn_hash: self.messages[3],
@@ -413,6 +421,8 @@ pub enum UtxoKindMessages {
 /// Structured messages for burn
 #[derive(Debug, Clone)]
 pub struct UtxoKindBurnMessages {
+    /// Kind of utxo (send, mint, burn)
+    pub utxo_kind: Element,
     /// Kind of note (USDC, etc)
     pub note_kind: Element,
     /// Value of the note

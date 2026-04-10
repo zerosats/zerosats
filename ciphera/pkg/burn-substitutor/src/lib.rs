@@ -72,7 +72,7 @@ impl BurnSubstitutor {
                 let amount = burn_msgs.value;
                 let note_kind = burn_msgs.note_kind;
 
-                if UtxoKind::from(note_kind) == UtxoKind::NoSub {
+                if UtxoKind::from(burn_msgs.utxo_kind) == UtxoKind::NoSub {
                     if self
                         .rollup_contract
                         .was_burn_substituted(

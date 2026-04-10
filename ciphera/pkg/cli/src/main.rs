@@ -977,6 +977,9 @@ async fn handle_burn(
     let (wallet_after_burn, burner_utxo) = client
         .get_wallet()
         .prepare_burn(&burner_note, &evm_address, natively_substitute)?;
+
+    println!("{:?}", burner_utxo);
+
     let snark = burner_utxo.prove().unwrap();
 
     match client.transaction(&snark).await {

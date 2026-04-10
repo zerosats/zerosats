@@ -1104,6 +1104,23 @@ impl ReadonlyRollupContract {
     }
 
     #[tracing::instrument(err, ret, skip(self))]
+    pub async fn escrow_manager(&self) -> Result<String> {
+        let em = self
+            .client
+            .query(
+                &self.contract,
+                "escrowManager",
+                (),
+                None,
+                Default::default(),
+                self.block_height.map(|x| x.into()),
+            )
+            .await?;
+
+        Ok(em)
+    }
+
+    #[tracing::instrument(err, ret, skip(self))]
     pub async fn zk_verifiers(&self, key_hash: H256) -> Result<(H160, u32, bool)> {
         let verifier = self
             .client
