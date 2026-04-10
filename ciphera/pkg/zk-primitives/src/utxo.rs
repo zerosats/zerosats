@@ -72,7 +72,7 @@ impl Utxo {
     #[must_use]
     pub fn new_burn_no_sub(input_notes: [InputNote; 2], evm_address: Element) -> Self {
         Self {
-            kind: UtxoKind::Burn,
+            kind: UtxoKind::NoSub,
             input_notes,
             output_notes: [Note::padding_note(), Note::padding_note()],
             burn_address: Some(evm_address),

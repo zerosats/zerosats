@@ -790,9 +790,10 @@ async fn handle_withdraw_ln(
         port,
         timeout_secs,
         chain,
-        address,
+        address, // refund address
         input_amount,
         "WCBTC",
+        false,
     )
     .await?;
 
@@ -931,6 +932,7 @@ async fn handle_burn(
     address: &str,
     amount: u64,
     ticker: &str,
+    natively_substitute: bool
 ) -> Result<(), AppError> {
     // Build client with fluent API
     let mut client = NodeClient::builder()
@@ -974,7 +976,7 @@ async fn handle_burn(
 
     let (wallet_after_burn, burner_utxo) = client
         .get_wallet()
-        .prepare_burn(&burner_note, &evm_address)?;
+        .prepare_burn(&burner_note, &evm_address, natively_substitute)?;
     let snark = burner_utxo.prove().unwrap();
 
     match client.transaction(&snark).await {
@@ -1216,6 +1218,7 @@ async fn main() -> Result<()> {
                 &address,
                 amount,
                 &ticker_normalized,
+                true
             )
             .await?;
         }
