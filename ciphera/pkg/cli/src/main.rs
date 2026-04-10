@@ -755,10 +755,23 @@ async fn handle_withdraw_ln(
 
     // inputAmountWei is the burn amount in ERC-20 wei (cBTC has 18 decimals).
     // Convert to satoshis: 1 sat = 1e10 wei  (1 BTC = 1e8 sats = 1e18 wei).
-    let input_amount_wei: u64 = quote["inputAmountWei"]
-        .as_u64()
-        .ok_or_else(|| color_eyre::eyre::eyre!("Missing or invalid 'inputAmountWei' in offramp quote"))?;
-    let input_amount: u64 = input_amount_wei / 10_000_000_000; // wei → satoshis
+    // Use u128 for the intermediate wei value: amounts above ~18 BTC overflow u64.
+    // The API may return this field as a decimal string or as a JSON number.
+    let input_amount_wei: u128 = {
+        let v = &quote["inputAmountWei"];
+        if let Some(s) = v.as_str() {
+            s.parse::<u128>()
+                .map_err(|_| color_eyre::eyre::eyre!("Invalid 'inputAmountWei' in offramp quote"))?
+        } else if let Some(n) = v.as_u64() {
+            n as u128
+        } else {
+            return Err(color_eyre::eyre::eyre!(
+                "Missing or invalid 'inputAmountWei' in offramp quote"
+            ));
+        }
+    };
+    let input_amount: u64 = u64::try_from(input_amount_wei / 10_000_000_000u128) // wei → satoshis
+        .map_err(|_| color_eyre::eyre::eyre!("inputAmountWei is too large to fit in satoshis (overflow)"))?;
 
     let quote_expiry = quote["quoteExpiry"].as_u64().unwrap_or(0);
 
