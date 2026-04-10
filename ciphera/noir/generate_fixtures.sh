@@ -104,10 +104,10 @@ for NAME in "${PROGRAMS[@]}"; do
   if [ "$NAME" == "agg_agg" ]; then
     AGG_AGG_VK_HASH=$(echo "$VK_HASH_OUTPUT" | extract_u256)
     AGG_AGG_VK_HASH_HEX=$(echo "$VK_HASH_OUTPUT" | extract_hex)
-    echo "Updating citrea/scripts/deploy.ts with agg_agg verification key hash: $AGG_AGG_VK_HASH"
+    echo "Updating citrea/scripts/deploy.ts with agg_agg verification key hash (hex): $AGG_AGG_VK_HASH_HEX"
     echo "Updating pkg/contracts/src/rollup.rs with agg_agg verification key hash (hex): $AGG_AGG_VK_HASH_HEX"
 
-    perl -i -pe "s/(?<=const AGG_AGG_VERIFICATION_KEY_HASH = \")[^\"]*(?=\";)/${AGG_AGG_VK_HASH}/" $REPO_ROOT/citrea/scripts/deploy.ts
+    perl -i -pe "s/(?<=const AGG_AGG_VERIFICATION_KEY_HASH = \")[^\"]*(?=\";)/${AGG_AGG_VK_HASH_HEX}/" $REPO_ROOT/citrea/scripts/deploy.ts
     perl -i -pe "s/(?<=AGG_AGG_VERIFICATION_KEY_HASH: &str = \")[^\"]*(?=\";)/${AGG_AGG_VK_HASH_HEX}/" $REPO_ROOT/pkg/contracts/src/rollup.rs
 
     $BACKEND write_solidity_verifier --scheme ultra_honk -k $REPO_ROOT/fixtures/keys/${NAME}_key -o $REPO_ROOT/citrea/noir/${NAME}.sol

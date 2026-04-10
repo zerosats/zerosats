@@ -69,12 +69,25 @@ export const WCBTC_ABI = [
   },
 ] as const;
 
+export function linkBin(
+  bin: string,
+  links: Record<string, `0x${string}`>,
+): string {
+  for (const [placeholder, address] of Object.entries(links)) {
+    const addr = address.slice(2).toLowerCase().padStart(40, "0");
+    bin = bin.split(placeholder).join(addr);
+  }
+  return bin;
+}
+
 export async function deployBin(
   binFile: string,
   publicClient: PublicClient,
   walletClient: WalletClient,
+  links?: Record<string, `0x${string}`>,
 ): Promise<`0x${string}`> {
-  const bin = (await readFile(`contracts/${binFile}`)).toString().trimEnd();
+  let bin = (await readFile(`contracts/${binFile}`)).toString().trimEnd();
+  if (links) bin = linkBin(bin, links);
 
   console.log("\n💸 Sending deploy transaction...");
   console.log(
