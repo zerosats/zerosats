@@ -187,15 +187,18 @@ impl BurnSubstitutor {
             .await
             .context("Failed to parse /swaps response")?;
 
-        // Step B — Find a matching swap in CREATED state (state == 0)
+        println!("{:?}", swaps_resp);
+
+        // Step B — Find a matching swap in CREATED (0) or ONGOING (-1) state
         let swap = swaps_resp.swaps.into_iter().find(|s| {
-            let addr_match = s.output_address.eq_ignore_ascii_case(&address_hex);
-            let amount_match = s
-                .amount
-                .parse::<web3::types::U256>()
+            let addr_match = s.input_address.eq_ignore_ascii_case(&address_hex);
+
+            let amount_match = web3::types::U256::from_dec_str(&s.amount)
                 .map(|a| a == burn_value)
                 .unwrap_or(false);
-            let state_match = s.state == 0;
+
+            let state_match = s.state == 0 || s.state == -1;
+
             addr_match && amount_match && state_match
         });
 
@@ -225,6 +228,15 @@ impl BurnSubstitutor {
 
         match resp.status() {
             StatusCode::OK => {}
+            e if e.is_server_error() => {
+                tracing::warn!(
+                    ?burn_hash,
+                    %swap_id,
+                    status = %e,
+                    "Transient server error from /offramp/:id; will retry on next tick"
+                );
+                return Ok(());
+            }
             e => return Err(eyre::eyre!("/offramp/:id returned unexpected status: {e}")),
         }
 
@@ -232,7 +244,7 @@ impl BurnSubstitutor {
             .json::<OfframpResponse>()
             .await
             .context("Failed to parse /offramp response")?;
-
+        println!("{:?}", offramp_resp);
         // Step D — Submit commit transactions if state is CREATED
         if offramp_resp.commit_txs.is_empty() {
             //offramp_resp.state != "CREATED" ||
@@ -254,13 +266,13 @@ impl BurnSubstitutor {
                     .context("Failed to decode commitTx.data")?;
             let data = web3::types::Bytes(data_bytes);
 
-            let value: web3::types::U256 =
-                commit_tx.value.parse().context("Failed to parse commitTx.value")?;
+            let value = web3::types::U256::from_dec_str(&commit_tx.value)
+                .context("Failed to parse commitTx.value")?;
 
             let gas = commit_tx
                 .gas_limit
                 .as_deref()
-                .map(|s| s.parse::<web3::types::U256>())
+                .map(|s| web3::types::U256::from_dec_str(s))
                 .transpose()
                 .context("Failed to parse commitTx.gasLimit")?
                 .unwrap_or_else(|| web3::types::U256::from(1_000_000u64));
@@ -268,14 +280,14 @@ impl BurnSubstitutor {
             let max_fee_per_gas = commit_tx
                 .max_fee_per_gas
                 .as_deref()
-                .map(|s| s.parse::<web3::types::U256>())
+                .map(|s| web3::types::U256::from_dec_str(s))
                 .transpose()
                 .context("Failed to parse commitTx.maxFeePerGas")?;
 
             let max_priority_fee_per_gas = commit_tx
                 .max_priority_fee_per_gas
                 .as_deref()
-                .map(|s| s.parse::<web3::types::U256>())
+                .map(|s| web3::types::U256::from_dec_str(s))
                 .transpose()
                 .context("Failed to parse commitTx.maxPriorityFeePerGas")?;
 
@@ -381,6 +393,8 @@ struct ListTxnsPosition {
 struct SwapEntry {
     id: String,
     state: i32,
+    #[serde(rename = "inputAddress")]
+    input_address: String,
     #[serde(rename = "outputAddress")]
     output_address: String,
     amount: String,
@@ -405,9 +419,17 @@ struct CommitTx {
     nonce: Option<u64>,
 }
 
+fn null_as_empty<'de, D, T>(deserializer: D) -> Result<Vec<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: serde::Deserialize<'de>,
+{
+    Ok(<Option<Vec<T>> as serde::Deserialize>::deserialize(deserializer)?.unwrap_or_default())
+}
+
 #[derive(Debug, serde::Deserialize)]
 struct OfframpResponse {
     state: String,
-    #[serde(rename = "commitTxs", default)]
+    #[serde(rename = "commitTxs", default, deserialize_with = "null_as_empty")]
     commit_txs: Vec<CommitTx>,
 }

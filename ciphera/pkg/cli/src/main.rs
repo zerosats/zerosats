@@ -780,14 +780,15 @@ async fn handle_withdraw_ln(
             ));
         }
     };
-    let input_amount: u64 = u64::try_from(input_amount_wei / 10_000_000_000u128) // wei → satoshis
+
+    let input_amount: u64 = u64::try_from(input_amount_wei)
         .map_err(|_| color_eyre::eyre::eyre!("Converted satoshi amount exceeds u64 maximum"))?;
 
     let quote_expiry = quote["quoteExpiry"].as_u64().unwrap_or(0);
 
     println!("\n✅ Offramp quote received!");
     println!("   Swap ID:      {swap_id}");
-    println!("   Burn amount:  {input_amount} sats ({input_amount_wei} wei)");
+    println!("   Burn amount:  {input_amount} wei");
     println!("   Quote expiry: {quote_expiry} (unix timestamp)");
     println!("\n   Burning {input_amount} cBTC to substitutor {substitutor}...");
 
@@ -857,7 +858,7 @@ async fn handle_withdraw_ln(
         println!("State: {} - {}", response.state, response.description);
 
         match response.state.as_str() {
-            "PAID" => {
+            "PAID" | "CLAIMED" => {
                 println!("\n✅ Lightning invoice settled! Swap complete.");
                 println!("   Swap ID: {swap_id}");
                 break;
