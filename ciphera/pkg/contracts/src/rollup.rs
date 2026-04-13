@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use crate::constants::{UTXO_INPUTS, UTXO_N};
 use crate::error::Result;
-use crate::util::{calculate_domain_separator, convert_element_to_h256, convert_fr_to_u256};
+use crate::util::{calculate_domain_separator, convert_element_to_h256};
 use crate::Client;
 use element::Element;
 use eth_util::Eth;
@@ -715,23 +715,6 @@ impl ReadonlyRollupContract {
 
         Ok(events)
     }
-
-    #[tracing::instrument(err, ret, skip(self))]
-    pub async fn has_burn(&self, key: &Element) -> Result<bool> {
-        let exists: bool = self
-            .client
-            .query(
-                &self.contract,
-                "hasBurn",
-                (convert_element_to_h256(key),),
-                None,
-                Default::default(),
-                self.block_height.map(|x| x.into()),
-            )
-            .await?;
-
-        Ok(exists)
-    }
 }
 
 impl SignedRollupContract {
@@ -780,7 +763,7 @@ impl ReadonlyRollupContract {
                     Token::Address(*burn_address),
                     convert_element_to_h256(note_kind).into_token(),
                     convert_element_to_h256(hash).into_token(),
-                    Token::Uint(convert_fr_to_u256(amount)),
+                    Token::Uint(U256::from_little_endian(&amount.to_le_bytes())),
                     U256::from(burn_block_height),
                 ),
                 None,

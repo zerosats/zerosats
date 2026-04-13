@@ -84,6 +84,7 @@ impl BurnSubstitutor {
                         )
                         .await?
                     {
+                        tracing::info!("Skipping substituted Burn with hash {:2x}", hash);
                         continue;
                     }
 
