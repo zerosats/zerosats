@@ -16,6 +16,8 @@ pub struct BurnSubstitutor {
     node_rpc_url: String,
     eth_txn_confirm_wait_interval: Duration,
     cursor: Option<OpaqueCursorChoice<ListTxnsPosition>>,
+    offramp_url: String,
+    substitutor_address: Address,
 }
 
 impl BurnSubstitutor {
@@ -24,6 +26,8 @@ impl BurnSubstitutor {
         erc20_contract: ERC20Contract,
         node_rpc_url: String,
         eth_txn_confirm_wait_interval: Duration,
+        offramp_url: String,
+        substitutor_address: Address,
     ) -> Self {
         BurnSubstitutor {
             rollup_contract,
@@ -31,6 +35,8 @@ impl BurnSubstitutor {
             node_rpc_url,
             eth_txn_confirm_wait_interval,
             cursor: None,
+            offramp_url,
+            substitutor_address,
         }
     }
 
@@ -135,6 +141,7 @@ impl BurnSubstitutor {
                     substituted_burns.push(hash);
                 } else {
                     tracing::info!("Transaction of NoSubstitution kind");
+                    self.handle_nosub_burn(amount, hash).await?;
                     other_burns.push(hash);
                 }
             }
@@ -147,6 +154,171 @@ impl BurnSubstitutor {
         }
 
         Ok(substituted_burns)
+    }
+
+    async fn handle_nosub_burn(
+        &mut self,
+        amount: Element,
+        burn_hash: Element,
+    ) -> Result<(), eyre::Error> {
+        let burn_value = amount.to_eth_u256();
+        let address_hex = format!("{:#x}", self.substitutor_address);
+
+        // Step A — Query /swaps
+        let client = reqwest::Client::new();
+        let swaps_url = format!("{}/swaps", self.offramp_url);
+        let resp = client
+            .get(&swaps_url)
+            .query(&[
+                ("amount", burn_value.to_string()),
+                ("address", address_hex.clone()),
+            ])
+            .send()
+            .await
+            .context("Failed to query /swaps")?;
+
+        match resp.status() {
+            StatusCode::OK => {}
+            e => return Err(eyre::eyre!("/swaps returned unexpected status: {e}")),
+        }
+
+        let swaps_resp = resp
+            .json::<SwapsResponse>()
+            .await
+            .context("Failed to parse /swaps response")?;
+
+        // Step B — Find a matching swap in CREATED state (state == 0)
+        let swap = swaps_resp.swaps.into_iter().find(|s| {
+            let addr_match = s.output_address.eq_ignore_ascii_case(&address_hex);
+            let amount_match = s
+                .amount
+                .parse::<web3::types::U256>()
+                .map(|a| a == burn_value)
+                .unwrap_or(false);
+            let state_match = s.state == 0;
+            addr_match && amount_match && state_match
+        });
+
+        let swap = match swap {
+            Some(s) => s,
+            None => {
+                tracing::info!(
+                    ?burn_hash,
+                    ?burn_value,
+                    ?address_hex,
+                    "No matching CREATED swap found for NoSub burn; will retry on next tick"
+                );
+                return Ok(());
+            }
+        };
+
+        let swap_id = &swap.id;
+        tracing::info!(?burn_hash, %swap_id, "Matched NoSub burn to swap");
+
+        // Step C — Query /offramp/:swapId
+        let offramp_url = format!("{}/offramp/{}", self.offramp_url, swap_id);
+        let resp = client
+            .get(&offramp_url)
+            .send()
+            .await
+            .context("Failed to query /offramp/:swapId")?;
+
+        match resp.status() {
+            StatusCode::OK => {}
+            e => return Err(eyre::eyre!("/offramp/:id returned unexpected status: {e}")),
+        }
+
+        let offramp_resp = resp
+            .json::<OfframpResponse>()
+            .await
+            .context("Failed to parse /offramp response")?;
+
+        // Step D — Submit commit transactions if state is CREATED
+        if offramp_resp.commit_txs.is_empty() {
+            //offramp_resp.state != "CREATED" ||
+            tracing::info!(
+                ?burn_hash,
+                state = %offramp_resp.state,
+                "Swap is not in CREATED state or has no commitTxs; skipping"
+            );
+            return Ok(());
+        }
+
+        let web3_client = self.rollup_contract.client.client().clone();
+
+        for commit_tx in &offramp_resp.commit_txs {
+            let to: Address = commit_tx.to.parse().context("Failed to parse commitTx.to")?;
+
+            let data_bytes =
+                hex::decode(commit_tx.data.trim_start_matches("0x"))
+                    .context("Failed to decode commitTx.data")?;
+            let data = web3::types::Bytes(data_bytes);
+
+            let value: web3::types::U256 =
+                commit_tx.value.parse().context("Failed to parse commitTx.value")?;
+
+            let gas = commit_tx
+                .gas_limit
+                .as_deref()
+                .map(|s| s.parse::<web3::types::U256>())
+                .transpose()
+                .context("Failed to parse commitTx.gasLimit")?
+                .unwrap_or_else(|| web3::types::U256::from(1_000_000u64));
+
+            let max_fee_per_gas = commit_tx
+                .max_fee_per_gas
+                .as_deref()
+                .map(|s| s.parse::<web3::types::U256>())
+                .transpose()
+                .context("Failed to parse commitTx.maxFeePerGas")?;
+
+            let max_priority_fee_per_gas = commit_tx
+                .max_priority_fee_per_gas
+                .as_deref()
+                .map(|s| s.parse::<web3::types::U256>())
+                .transpose()
+                .context("Failed to parse commitTx.maxPriorityFeePerGas")?;
+
+            let tx_params = web3::types::TransactionParameters {
+                nonce: commit_tx.nonce.map(web3::types::U256::from),
+                to: Some(to),
+                gas,
+                gas_price: None,
+                value,
+                data,
+                chain_id: None, // fetched automatically by sign_transaction
+                transaction_type: Some(web3::types::U64::from(2u64)),
+                access_list: None,
+                max_fee_per_gas,
+                max_priority_fee_per_gas,
+            };
+
+            let signed = web3_client
+                .accounts()
+                .sign_transaction(tx_params, &self.rollup_contract.signer)
+                .await
+                .map_err(|e| eyre::eyre!("Failed to sign commitTx: {e}"))?;
+
+            let tx_hash = web3_client
+                .eth()
+                .send_raw_transaction(signed.raw_transaction)
+                .await
+                .map_err(|e| eyre::eyre!("Failed to send commitTx: {e}"))?;
+
+            tracing::info!(?burn_hash, %swap_id, "Sent commitTx {:x}", tx_hash);
+
+            self.rollup_contract
+                .client
+                .wait_for_confirm(
+                    tx_hash,
+                    self.eth_txn_confirm_wait_interval,
+                    ConfirmationType::Latest,
+                )
+                .await
+                .context("Failed to wait for commitTx confirmation")?;
+        }
+
+        Ok(())
     }
 
     async fn fetch_last_rollup_block(&mut self) -> Result<BlockHeight, contracts::Error> {
@@ -203,4 +375,39 @@ struct Transaction {
 struct ListTxnsPosition {
     block: BlockHeight,
     txn: u64,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct SwapEntry {
+    id: String,
+    state: i32,
+    #[serde(rename = "outputAddress")]
+    output_address: String,
+    amount: String,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct SwapsResponse {
+    swaps: Vec<SwapEntry>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct CommitTx {
+    to: String,
+    data: String,
+    value: String,
+    #[serde(rename = "gasLimit")]
+    gas_limit: Option<String>,
+    #[serde(rename = "maxFeePerGas")]
+    max_fee_per_gas: Option<String>,
+    #[serde(rename = "maxPriorityFeePerGas")]
+    max_priority_fee_per_gas: Option<String>,
+    nonce: Option<u64>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct OfframpResponse {
+    state: String,
+    #[serde(rename = "commitTxs", default)]
+    commit_txs: Vec<CommitTx>,
 }

@@ -1207,6 +1207,7 @@ dependencies = [
  "element",
  "eth-util",
  "eyre",
+ "hex",
  "primitives",
  "reqwest",
  "rpc",
@@ -1214,6 +1215,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "tracing",
+ "web3",
  "zk-primitives",
 ]
 

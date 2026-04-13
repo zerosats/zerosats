@@ -51,6 +51,9 @@ pub struct Config {
 
     #[arg(long, env = "MINIMUM_GAS_PRICE_GWEI")]
     minimum_gas_price_gwei: Option<u64>,
+
+    #[arg(long, env = "OFFRAMP_URL", default_value = "http://localhost:3000")]
+    offramp_url: String,
 }
 
 #[tokio::main]
@@ -119,6 +122,8 @@ async fn main() -> Result<(), eyre::Error> {
         erc20_contract,
         config.host,
         Duration::from_secs(1),
+        config.offramp_url,
+        wallet_address,
     );
 
     tracing::info!("Starting burn substitutor with wallet {:#x}", wallet_address);

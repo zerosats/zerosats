@@ -720,6 +720,16 @@ async fn handle_withdraw_ln(
     address: &str,
     offramp_uri: &str,
 ) -> Result<()> {
+/*    let client = NodeClient::builder()
+        .name(name)
+        .host(host)
+        .port(port)
+        .timeout_secs(timeout_secs)
+        .build(chain, false)?;
+
+    let b = client.get_wallet().balance;
+    TODO: balance check before everything even starts
+*/
     // Step 1 — GET /offramp/{lnInvoice}/{substitutorAddress}
     // Returns the swap quote: swap ID and the cBTC amount the user must burn.
     let http = reqwest::Client::new();
@@ -977,8 +987,6 @@ async fn handle_burn(
     let (wallet_after_burn, burner_utxo) = client
         .get_wallet()
         .prepare_burn(&burner_note, &evm_address, natively_substitute)?;
-
-    println!("{:?}", burner_utxo);
 
     let snark = burner_utxo.prove().unwrap();
 
