@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Zerosats LN Control</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="app">
+      <header class="card">
+        <h1>Zerosats LN Control</h1>
+        <p>
+          Local-only dashboard for your own LND node. Settings and action
+          history are persisted.
+        </p>
+        <p class="muted" id="serverMeta">Loading…</p>
+      </header>
+
+      <section class="card">
+        <h2>Connection Settings</h2>
+        <form id="settingsForm" class="grid">
+          <label>
+            lncli binary
+            <input id="lncliBin" name="lncliBin" placeholder="lncli" />
+          </label>
+          <label>
+            Network
+            <input id="network" name="network" placeholder="testnet" />
+          </label>
+          <label>
+            RPC server
+            <input id="rpcServer" name="rpcServer" placeholder="127.0.0.1:10009" />
+          </label>
+          <label>
+            Macaroon path
+            <input
+              id="macaroonPath"
+              name="macaroonPath"
+              placeholder="/path/to/admin.macaroon"
+            />
+          </label>
+          <label>
+            TLS cert path
+            <input id="tlsCertPath" name="tlsCertPath" placeholder="/path/to/tls.cert" />
+          </label>
+          <label>
+            Default fee limit (sat)
+            <input id="defaultFeeLimitSat" name="defaultFeeLimitSat" placeholder="200" />
+          </label>
+          <label>
+            Default pay timeout (sec)
+            <input id="defaultTimeoutSeconds" name="defaultTimeoutSeconds" placeholder="120" />
+          </label>
+          <label>
+            Default invoice memo
+            <input id="defaultMemo" name="defaultMemo" placeholder="zerosats-ln-web" />
+          </label>
+        </form>
+        <div class="actions">
+          <button id="saveSettingsBtn">Save Settings</button>
+          <button id="doctorBtn" class="secondary">Doctor</button>
+          <button id="getInfoBtn" class="secondary">Get Info</button>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Quick Actions</h2>
+        <div class="actions">
+          <button data-action="wallet-balance" class="secondary">Wallet Balance</button>
+          <button data-action="channel-balance" class="secondary">Channel Balance</button>
+          <button data-action="channels" class="secondary">Channels</button>
+          <button data-action="peers" class="secondary">Peers</button>
+          <button data-action="list-payments" class="secondary">List Payments</button>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Create Invoice</h2>
+        <div class="grid">
+          <label>
+            Amount (sat)
+            <input id="invoiceAmount" placeholder="10000" />
+          </label>
+          <label>
+            Memo (optional)
+            <input id="invoiceMemo" placeholder="testnet4 invoice" />
+          </label>
+        </div>
+        <div class="actions">
+          <button id="createInvoiceBtn">Create Invoice</button>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Pay / Decode / Track</h2>
+        <div class="grid">
+          <label>
+            Invoice
+            <textarea
+              id="invoiceInput"
+              placeholder="lntb..."
+              rows="3"
+            ></textarea>
+          </label>
+          <label>
+            Fee limit (sat)
+            <input id="payFeeLimit" placeholder="200" />
+          </label>
+          <label>
+            Timeout (sec)
+            <input id="payTimeout" placeholder="120" />
+          </label>
+          <label>
+            Payment hash (for track)
+            <input id="paymentHashInput" placeholder="hex payment hash" />
+          </label>
+        </div>
+        <div class="actions">
+          <button id="decodeBtn" class="secondary">Decode Invoice</button>
+          <button id="payBtn">Pay Invoice</button>
+          <button id="trackBtn" class="secondary">Track Payment</button>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Peer / Channel</h2>
+        <div class="grid">
+          <label>
+            Add peer (pubkey@host:port)
+            <input id="addPeerTarget" placeholder="02...@host:9735" />
+          </label>
+          <label>
+            Open channel node pubkey
+            <input id="openNodePubkey" placeholder="02..." />
+          </label>
+          <label>
+            Local amount (sat)
+            <input id="openLocalAmt" placeholder="100000" />
+          </label>
+          <label>
+            Push amount (sat, optional)
+            <input id="openPushAmt" placeholder="0" />
+          </label>
+          <label>
+            sat/vbyte (optional)
+            <input id="openSatPerVbyte" placeholder="1" />
+          </label>
+        </div>
+        <div class="actions">
+          <button id="addPeerBtn" class="secondary">Add Peer</button>
+          <button id="openChannelBtn">Open Channel</button>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Latest Result</h2>
+        <pre id="resultBox"></pre>
+      </section>
+
+      <section class="card">
+        <div class="space-between">
+          <h2>History</h2>
+          <button id="clearHistoryBtn" class="danger">Clear History</button>
+        </div>
+        <ul id="historyList" class="history"></ul>
+      </section>
+    </main>
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>

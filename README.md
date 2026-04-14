@@ -56,6 +56,31 @@ Note: these are not lightweight tests. Even the non-ignored e2e suite is slow an
 
 The runner already executes tests in the required single-threaded mode, so prefer it over ad hoc `cargo test` invocations for the Citrea-backed e2e flows.
 
+## LN Web Control Panel (Own LND Node)
+
+For a button-based local dashboard with persistent settings/history, run:
+
+```bash
+node scripts/ln-web-server.mjs
+```
+
+Then open:
+
+```text
+http://127.0.0.1:8788
+```
+
+Data persistence:
+
+- settings + history are stored at `~/.zerosats-ln-web/state.json`
+- default bind is `127.0.0.1` (local-only)
+
+Optional env overrides:
+
+- `LN_WEB_HOST` (default `127.0.0.1`)
+- `LN_WEB_PORT` (default `8788`)
+- `LN_WEB_DATA_DIR` (default `~/.zerosats-ln-web`)
+
 ### AWS Network Deployment Notes
 
 #### Citrea Tests
