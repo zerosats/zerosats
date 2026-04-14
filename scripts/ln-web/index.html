@@ -76,6 +76,38 @@
       </section>
 
       <section class="card">
+        <div class="space-between">
+          <h2>Live Monitor</h2>
+          <div class="actions">
+            <label class="checkbox-row">
+              <input type="checkbox" id="autoRefreshEnabled" />
+              Auto refresh
+            </label>
+            <label>
+              Every (sec)
+              <input id="autoRefreshSec" value="20" />
+            </label>
+            <button id="refreshNowBtn" class="secondary">Refresh Now</button>
+          </div>
+        </div>
+        <div class="grid monitor-grid">
+          <label>
+            Node info
+            <pre id="monitorInfo"></pre>
+          </label>
+          <label>
+            Wallet balance
+            <pre id="monitorWallet"></pre>
+          </label>
+          <label>
+            Channel balance
+            <pre id="monitorChannel"></pre>
+          </label>
+        </div>
+        <p class="muted" id="monitorMeta">Auto refresh is off.</p>
+      </section>
+
+      <section class="card">
         <h2>Create Invoice</h2>
         <div class="grid">
           <label>
@@ -115,27 +147,43 @@
             Payment hash (for track)
             <input id="paymentHashInput" placeholder="hex payment hash" />
           </label>
+          <label>
+            Poll interval (sec)
+            <input id="pollIntervalSec" value="8" />
+          </label>
         </div>
         <div class="actions">
           <button id="decodeBtn" class="secondary">Decode Invoice</button>
           <button id="payBtn">Pay Invoice</button>
           <button id="trackBtn" class="secondary">Track Payment</button>
+          <button id="startPayPollBtn" class="secondary">Start Outgoing Poll</button>
+          <button id="startInvoicePollBtn" class="secondary">Start Incoming Poll</button>
+          <button id="stopPollBtn" class="danger">Stop Poll</button>
         </div>
+        <p class="muted" id="pollMeta">Polling stopped.</p>
       </section>
 
       <section class="card">
-        <h2>Peer / Channel</h2>
+        <h2>Guided Setup (Own Node)</h2>
         <div class="grid">
           <label>
-            Add peer (pubkey@host:port)
+            Step 1: Funding address
+            <input id="fundingAddressOut" readonly placeholder="click Generate Address" />
+          </label>
+          <label>
+            Step 2: Minimum wallet sats expected
+            <input id="fundingTargetSat" value="100000" />
+          </label>
+          <label>
+            Step 3: Add peer (pubkey@host:port)
             <input id="addPeerTarget" placeholder="02...@host:9735" />
           </label>
           <label>
-            Open channel node pubkey
+            Step 4: Open channel node pubkey
             <input id="openNodePubkey" placeholder="02..." />
           </label>
           <label>
-            Local amount (sat)
+            Step 4: Local amount (sat)
             <input id="openLocalAmt" placeholder="100000" />
           </label>
           <label>
@@ -148,9 +196,13 @@
           </label>
         </div>
         <div class="actions">
+          <button id="generateAddressBtn">Generate Address</button>
+          <button id="copyAddressBtn" class="secondary">Copy Address</button>
+          <button id="checkFundedBtn" class="secondary">Check Funded</button>
           <button id="addPeerBtn" class="secondary">Add Peer</button>
           <button id="openChannelBtn">Open Channel</button>
         </div>
+        <p class="muted" id="fundingMeta">No funding check yet.</p>
       </section>
 
       <section class="card">

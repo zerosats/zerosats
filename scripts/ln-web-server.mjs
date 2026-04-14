@@ -202,12 +202,52 @@ function summaryForAction(action, result) {
   if (action === "open-channel") {
     return "channel open requested";
   }
+  if (action === "new-address") {
+    return "new on-chain address created";
+  }
+  if (action === "lookup-invoice") {
+    return "invoice lookup success";
+  }
   return `${action} success`;
 }
 
-async function runAction(action, payload = {}) {
+function parseJsonSafe(text) {
+  if (!text) return null;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+}
+
+async function runLookupInvoice(settings, paymentHash) {
+  const attempts = [
+    ["lookupinvoice", `--rhash=${paymentHash}`, "--output", "json"],
+    ["lookupinvoice", `--r_hash=${paymentHash}`, "--output", "json"],
+    ["lookupinvoice", paymentHash, "--output", "json"],
+  ];
+  let last = null;
+  for (const args of attempts) {
+    const result = await runLncli(settings, args);
+    if (result.ok) {
+      return result;
+    }
+    last = result;
+  }
+  return (
+    last || {
+      ok: false,
+      stdout: "",
+      stderr: "lookupinvoice failed",
+      exitCode: -1,
+    }
+  );
+}
+
+async function runAction(action, payload = {}, options = {}) {
   const s = state.settings;
   let commandArgs;
+  let result = null;
 
   switch (action) {
     case "doctor":
@@ -229,12 +269,35 @@ async function runAction(action, payload = {}) {
     case "list-payments":
       commandArgs = ["listpayments", "--output", "json"];
       break;
+    case "new-address":
+      commandArgs = ["newaddress", "p2wkh", "--output", "json"];
+      break;
     case "decode": {
       const invoice = String(payload.invoice || "").trim();
       if (!invoice) {
         throw new Error("invoice is required");
       }
       commandArgs = ["decodepayreq", invoice, "--output", "json"];
+      break;
+    }
+    case "lookup-invoice": {
+      let paymentHash = String(payload.paymentHash || "").trim();
+      if (!paymentHash) {
+        const invoice = String(payload.invoice || "").trim();
+        if (!invoice) {
+          throw new Error("paymentHash or invoice is required");
+        }
+        const decoded = await runLncli(s, ["decodepayreq", invoice, "--output", "json"]);
+        if (!decoded.ok) {
+          throw new Error(decoded.stderr || "decodepayreq failed");
+        }
+        const decodedJson = parseJsonSafe(decoded.stdout);
+        paymentHash = String(decodedJson?.payment_hash || "").trim();
+        if (!paymentHash) {
+          throw new Error("could not derive payment_hash from invoice");
+        }
+      }
+      result = await runLookupInvoice(s, paymentHash);
       break;
     }
     case "pay": {
@@ -318,7 +381,9 @@ async function runAction(action, payload = {}) {
       throw new Error(`unknown action: ${action}`);
   }
 
-  const result = await runLncli(s, commandArgs);
+  if (!result) {
+    result = await runLncli(s, commandArgs);
+  }
   const entry = sanitizeHistoryEntry({
     id: `${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
     createdAt: nowIso(),
@@ -330,10 +395,12 @@ async function runAction(action, payload = {}) {
     stderr: result.stderr,
     exitCode: result.exitCode,
   });
-  await addHistory(entry);
+  if (!options.noHistory) {
+    await addHistory(entry);
+  }
   return {
     ...result,
-    entry,
+    entry: options.noHistory ? undefined : entry,
   };
 }
 
@@ -366,7 +433,9 @@ async function handleApi(req, res) {
       if (!action) {
         throw new Error("action is required");
       }
-      const result = await runAction(action, body.payload || {});
+      const result = await runAction(action, body.payload || {}, {
+        noHistory: Boolean(body.noHistory),
+      });
       return jsonResponse(res, 200, { ok: true, result });
     } catch (error) {
       return jsonResponse(res, 400, {

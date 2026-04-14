@@ -75,6 +75,16 @@ Data persistence:
 - settings + history are stored at `~/.zerosats-ln-web/state.json`
 - default bind is `127.0.0.1` (local-only)
 
+Included flows:
+
+- Live monitor with optional auto-refresh (`getinfo`, wallet/channel balances)
+- Outgoing payment polling (`trackpayment`) and incoming invoice polling (`lookupinvoice`)
+- Guided setup:
+  - generate funding address
+  - check funded threshold
+  - connect peer
+  - open channel
+
 Optional env overrides:
 
 - `LN_WEB_HOST` (default `127.0.0.1`)
