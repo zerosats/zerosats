@@ -187,8 +187,6 @@ impl BurnSubstitutor {
             .await
             .context("Failed to parse /swaps response")?;
 
-        println!("{:?}", swaps_resp);
-
         // Step B — Find a matching swap in CREATED (0) or ONGOING (-1) state
         let swap = swaps_resp.swaps.into_iter().find(|s| {
             let addr_match = s.input_address.eq_ignore_ascii_case(&address_hex);

@@ -6,7 +6,7 @@ set -euo pipefail
 NARGO=${NARGO:-nargo}
 $NARGO compile --workspace
 
-REPO_ROOT=$(git rev-parse --show-toplevel)
+REPO_ROOT=/workspace/ciphera
 BACKEND=${BACKEND:-bb}
 
 # Clean target

@@ -645,6 +645,8 @@ async fn substitute_burn_to_address() {
     let rollup = rollup_contract(server.rollup_contract_addr, &eth_node).await;
     let erc20 = erc20_contract(&rollup, &eth_node).await;
 
+    let wallet_address = rollup.signer_address;
+
     let mut burn_substitutor = BurnSubstitutor::new(
         rollup.clone(),
         erc20.clone(),
@@ -654,6 +656,8 @@ async fn substitute_burn_to_address() {
             .trim_end_matches('/')
             .to_owned(),
         Duration::from_millis(50),
+        "http://localhost:3000".to_string(),
+        wallet_address,
     );
 
     let alice_pk = Element::new(0xA11CE);

@@ -37,8 +37,8 @@ fn main(
 
         let utxo_kind = proof.utxo_kind;
         let is_padding = utxo_kind == 0;
-        let is_proof_kind_mint_or_burn = is_one_of(utxo_kind, [2, 3]);
-        let is_burn = utxo_kind == 3;
+        let is_proof_kind_mint_or_burn = is_one_of(utxo_kind, [2, 3, 4]);
+        let is_burn = is_one_of(utxo_kind, [3, 4]);
 
         let mut msg_note_kind = 0;
         let mut msg_value = 0;
