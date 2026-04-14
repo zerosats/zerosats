@@ -22,7 +22,7 @@ import IERC20Artifact from "../openzeppelin-contracts/token/ERC20/IERC20.json";
 
 // Auto-updated by generate_fixtures.sh - do not modify manually
 const AGG_AGG_VERIFICATION_KEY_HASH =
-  "0x16888919915c54c1d513365165aa81070bdca6f305fe527c954bd58e94710540";
+  "0x28873eac8c102ff3db67350dae45078df5e6c7ef434ae256290fc166ca404782";
 
 async function main() {
   console.log("Initialization...");

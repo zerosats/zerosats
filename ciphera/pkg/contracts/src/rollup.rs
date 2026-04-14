@@ -455,7 +455,7 @@ impl RollupContract {
                 "verifyRollup",
                 (
                     U256::from(height),
-                    "0x16888919915c54c1d513365165aa81070bdca6f305fe527c954bd58e94710540"
+                    "0x28873eac8c102ff3db67350dae45078df5e6c7ef434ae256290fc166ca404782"
                         .parse::<H256>()
                         .expect("verification key is parsable"),
                     web3::types::Bytes::from(proof),

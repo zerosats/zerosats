@@ -106,12 +106,21 @@ for NAME in "${PROGRAMS[@]}"; do
     cp $REPO_ROOT/noir/target/agg_agg.json $REPO_ROOT/fixtures/programs/
   fi
 
-  # Generate Solidity verifier
-  sol_target_args=()
+  # Generate Solidity verifier.
+  # write_solidity_verifier requires an EVM-format key (keccak). The primary key for
+  # recursive programs uses noir-recursive format (poseidon2), and the default target
+  # for non-recursive programs is also not EVM. So always generate a fresh EVM key
+  # here, except for agg_agg whose primary key is already EVM-format.
+  sol_target_args=("--verifier_target" "evm")
   if [[ "$NAME" == "agg_agg" ]]; then
-    sol_target_args=("--verifier_target" "evm")
+    KEY_FOR_SOL="$REPO_ROOT/fixtures/keys/${NAME}_key"
+  else
+    $BACKEND write_vk --verifier_target evm -b "$REPO_ROOT/fixtures/programs/${NAME}.json" -o "$REPO_ROOT/fixtures/keys/"
+    mv "$REPO_ROOT/fixtures/keys/vk" "$REPO_ROOT/fixtures/keys/${NAME}_key_evm"
+    rm -f "$REPO_ROOT/fixtures/keys/vk_hash"
+    KEY_FOR_SOL="$REPO_ROOT/fixtures/keys/${NAME}_key_evm"
   fi
-  $BACKEND write_solidity_verifier ${sol_target_args[@]+"${sol_target_args[@]}"} -k $REPO_ROOT/fixtures/keys/${NAME}_key -o $REPO_ROOT/citrea/noir/${NAME}.sol
+  $BACKEND write_solidity_verifier ${sol_target_args[@]+"${sol_target_args[@]}"} -k "$KEY_FOR_SOL" -o $REPO_ROOT/citrea/noir/${NAME}.sol
   sed -i.bak 's/external pure/internal pure/g' $REPO_ROOT/citrea/noir/${NAME}.sol
   rm $REPO_ROOT/citrea/noir/${NAME}.sol.bak
   if [[ "$(uname)" == "Darwin" ]]; then

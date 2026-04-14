@@ -16,7 +16,7 @@ import { join } from "path";
 
 // Auto-updated by generate_fixtures.sh - do not modify manually
 const AGG_AGG_VERIFICATION_KEY_HASH =
-  "0x16888919915c54c1d513365165aa81070bdca6f305fe527c954bd58e94710540";
+  "0x28873eac8c102ff3db67350dae45078df5e6c7ef434ae256290fc166ca404782";
 
 const usdcAddress = "0x5fbdb2315678afecb367f032d93f642f64180aa3";
 const aggregateVerifierAddr = "0xcf7ed3acca5a467e9e704c703e8d87f634fb0fc9";
