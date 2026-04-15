@@ -297,7 +297,19 @@ contract RollupV1 is Initializable, OwnableUpgradeable {
         uint256 burnFeeFloor_,
         uint256 burnFeeBps_,
         address feeSink_
-    ) external reinitializer(2) {
+    ) external onlyOwner reinitializer(2) {
+        // Review fix (Finding 1): reinitializer(2) only guarantees
+        // the function runs at most once per V2. It does NOT restrict
+        // WHO calls it. Without onlyOwner, a non-atomic upgrade flow
+        // (deploy impl, then call upgradeTo, then separately call
+        // initializeV2) would let anyone in the mempool front-run
+        // the initialization and seize guardian / feeSink / caps.
+        //
+        // onlyOwner makes the contract self-defend: only the V1 owner
+        // (which at upgrade time is still the pre-upgrade EOA or
+        // existing timelock) can perform the one-shot V2 init.
+        // Combined with the isProvingOpen pre-init guard (Finding 2),
+        // the uninitialized window is both shortened and defanged.
         require(guardian_ != address(0), "RollupV1: invalid guardian");
         require(feeSink_ != address(0), "RollupV1: invalid fee sink");
         require(openProvingDelay_ >= 1 days, "RollupV1: open proving delay too short");
@@ -347,6 +359,20 @@ contract RollupV1 is Initializable, OwnableUpgradeable {
     // `isProvingOpen` never returns true.
 
     function isProvingOpen() public view returns (bool) {
+        // Review fix (Finding 2): pre-init guard.
+        //
+        // Before initializeV2 runs, both lastVerifiedAt and
+        // openProvingDelay default to zero, so the comparison
+        // `block.timestamp >= 0 + 0` is trivially true — the gate
+        // would falsely report "escape mode is open" during the
+        // upgrade window, before any V2 parameters are set.
+        //
+        // Returning false when openProvingDelay is unset restores
+        // V1-equivalent behavior until initializeV2 sets a real
+        // delay. Once set, initializeV2 also writes lastVerifiedAt
+        // to block.timestamp, so the first in-window check after
+        // init evaluates correctly.
+        if (openProvingDelay == 0) return false;
         return block.timestamp >= lastVerifiedAt + openProvingDelay;
     }
 
@@ -498,13 +524,31 @@ contract RollupV1 is Initializable, OwnableUpgradeable {
         return rootHash;
     }
 
-    function addToken(bytes32 noteKind, address tokenAddress) public onlyOwner {
-        require(
-            tokens[noteKind] == address(0),
-            "RollupV1: Token already exists"
-        );
-
-        tokens[noteKind] = tokenAddress;
+    // Review fix (Finding 4): addToken disabled in V2.
+    //
+    // The V2 deposit caps (perMintCap / globalTvlCap / currentTvl)
+    // are single global counters, not per-token. In a multi-token
+    // deployment those counters are unit-inconsistent: 1 wei of
+    // cBTC is not fungible with 1 wei of USDC, and summing them
+    // into a single cap is economically meaningless.
+    //
+    // The currently deployed contract has exactly one token
+    // registered (wrappedCBTC via initialize()), and nothing has
+    // ever called addToken in production. Disabling it freezes
+    // that single-token invariant on chain so the caps remain
+    // well-defined. If and when multi-token support is actually
+    // needed, a dedicated V3 upgrade should reintroduce addToken
+    // together with per-note-kind caps (and likely per-token
+    // fee rates), as one cohesive change rather than a bolt-on.
+    //
+    // Kept in the ABI as `pure revert` so any off-chain tooling
+    // that still calls it fails loudly instead of silently
+    // succeeding against a fallback.
+    function addToken(bytes32 /* noteKind */, address /* tokenAddress */)
+        public
+        pure
+    {
+        revert("RollupV1: addToken disabled in V2");
     }
 
     // =====================================================================
@@ -818,40 +862,57 @@ contract RollupV1 is Initializable, OwnableUpgradeable {
         uint256 fee = computeBurnFee(value);
         uint256 payout = value - fee;
 
+        // Review fix (Finding 3): capture executeBurn's return value.
+        //
+        // executeBurn can silently return false on a failed ERC20
+        // transfer (non-reverting tokens, blacklisted recipients,
+        // etc.). Previously we decremented currentTvl unconditionally
+        // and forwarded the fee regardless — both wrong when the
+        // tokens never actually left the contract. That would let
+        // future mints sneak past the global cap while balances
+        // stayed the same, undermining the whole point of the cap.
+        //
+        // We now only route fee AND decrement TVL when the payout
+        // actually succeeded. On a failed burn, the contract's token
+        // balance is unchanged, so TVL must also stay unchanged.
+        // The Burned event is still emitted with success=false by
+        // executeBurn, so observers can detect and investigate.
+        bool success;
         if (substitutor != address(0)) {
-            executeBurn(_token, substitutor, hash, payout, false);
+            success = executeBurn(_token, substitutor, hash, payout, false);
         } else {
-            executeBurn(_token, burn_addr, hash, payout, false);
+            success = executeBurn(_token, burn_addr, hash, payout, false);
         }
 
-        // V2 (Idea 9): route fee to sink.
-        //
-        // Using safeTransfer inside an unverified call would be
-        // risky, but `_token` came from our own `tokens[]` allowlist
-        // (set only by onlyOwner -> timelock), so it's trusted.
-        //
-        // Zero-value transfers are skipped both to save gas and to
-        // avoid tokens that revert on zero-value transfer. If the
-        // sink was accidentally unset, we fall through without
-        // reverting — the fee is just "held" in the contract and
-        // can be swept later once the sink is set. This keeps
-        // verifyRollup live even under misconfiguration.
-        if (fee > 0 && feeSink != address(0)) {
-            IERC20(_token).safeTransfer(feeSink, fee);
-            emit FeePaid(_token, feeSink, fee);
-        }
+        if (success) {
+            // V2 (Idea 9): route fee to sink.
+            //
+            // Using safeTransfer inside an unverified call would be
+            // risky, but `_token` came from our own `tokens[]`
+            // allowlist, so it's trusted. Zero-value transfers are
+            // skipped both to save gas and to avoid tokens that
+            // revert on zero-value. If the sink was accidentally
+            // unset, we fall through without reverting — the fee
+            // is just held in the contract and can be swept later
+            // once the sink is set. This keeps verifyRollup live
+            // even under misconfiguration.
+            if (fee > 0 && feeSink != address(0)) {
+                IERC20(_token).safeTransfer(feeSink, fee);
+                emit FeePaid(_token, feeSink, fee);
+            }
 
-        // V2 (Idea 2): TVL accounting. Decrement by `value`, not
-        // `payout`, because the contract's token balance actually
-        // drops by `value` total (payout to user + fee to sink).
-        //
-        // Clamped to zero to handle the corner case where a legacy
-        // (pre-V2) mint was never counted into currentTvl but is
-        // now being burned. Strict subtraction would underflow.
-        if (currentTvl >= value) {
-            currentTvl -= value;
-        } else {
-            currentTvl = 0;
+            // V2 (Idea 2): TVL accounting.
+            //
+            // Decrement by `value`, not `payout`: the contract's
+            // token balance drops by `value` total (payout to user
+            // + fee to sink). Clamped to zero to handle legacy
+            // pre-V2 mints that were never counted into currentTvl
+            // — strict subtraction would underflow.
+            if (currentTvl >= value) {
+                currentTvl -= value;
+            } else {
+                currentTvl = 0;
+            }
         }
 
         return i + 5;

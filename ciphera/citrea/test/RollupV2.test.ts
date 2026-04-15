@@ -13,9 +13,18 @@
 //   Ideas 5-8: guardian + pause flow
 //   Idea 9: computeBurnFee math
 //
-// Full end-to-end verifyRollup is not exercised here because it
-// requires a real ZK proof and validator signatures; unit behavior
-// of the V2 gates is what's new and tested.
+//   Review fix 1: non-owner cannot call initializeV2
+//   Review fix 2: isProvingOpen is false pre-init
+//   Review fix 3: failed burn does not decrement currentTvl
+//   Review fix 4: addToken reverts
+//
+// Full end-to-end verifyRollup is not exercised for the V2-gate
+// tests because it requires a real ZK proof and validator signatures;
+// unit behavior of the V2 gates is what's new. The Finding 3 test
+// DOES go end-to-end through verifyRollup using MockVerifier (which
+// always returns true) and the Idea 3 escape mode to bypass the
+// signature check — this is the only way to drive verifyBurn from
+// a test without reimplementing the ZK proving stack.
 
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
@@ -280,6 +289,306 @@ describe("RollupV1 V2 upgrade", () => {
       // value=10000, bps=10 → bps fee = 10, floor = 1000 → fee = 1000
       const fee = await rollup.read.computeBurnFee([10_000n]);
       assert.equal(fee, 1000n);
+    });
+  });
+
+  // =================================================================
+  // Review fixes
+  //
+  // These cover the four findings from the post-V2 review:
+  //   Finding 1: initializeV2 must be owner-restricted
+  //   Finding 2: isProvingOpen must not be true before V2 init
+  //   Finding 3: TVL must not decrement on a failed burn
+  //   Finding 4: addToken must revert in V2
+  // =================================================================
+  describe("Review fixes", () => {
+    // ---------------------------------------------------------------
+    // Finding 1 — non-owner cannot call initializeV2.
+    //
+    // Deploys impl behind a proxy with initialize() encoded in the
+    // constructor data (so V1 state is set). Then attempts to call
+    // initializeV2 from a non-owner account. Must revert. Without
+    // the onlyOwner modifier, this call would succeed and the
+    // attacker would own guardian/feeSink/caps.
+    // ---------------------------------------------------------------
+    it("Finding 1: non-owner cannot call initializeV2", async () => {
+      const { viem } = await network.connect();
+      const [owner, prover, validator, guardian, sink, attacker] =
+        await viem.getWalletClients();
+
+      const mockToken = await viem.deployContract("MockERC20");
+      const mockVerifier = await viem.deployContract("MockVerifier");
+      const impl = await viem.deployContract("RollupV1");
+
+      const initData = encodeFunctionData({
+        abi: impl.abi,
+        functionName: "initialize",
+        args: [
+          owner.account.address,
+          owner.account.address,
+          mockToken.address,
+          mockVerifier.address,
+          prover.account.address,
+          [validator.account.address],
+          VK_HASH,
+        ],
+      });
+      const proxy = await viem.deployContract("RollupV2TestProxy", [
+        impl.address,
+        initData,
+      ]);
+      const rollup = await viem.getContractAt("RollupV1", proxy.address);
+
+      // Attacker races to initializeV2 with their own addresses.
+      // Must revert due to onlyOwner.
+      await assert.rejects(
+        rollup.write.initializeV2(
+          [
+            parseEther("1"),
+            parseEther("10"),
+            86400n,
+            100n,
+            attacker.account.address, // attacker tries to seize guardian
+            1000n,
+            10n,
+            attacker.account.address, // attacker tries to seize fee sink
+          ],
+          { account: attacker.account },
+        ),
+      );
+
+      // Owner should still be able to initialize.
+      await rollup.write.initializeV2(
+        [
+          parseEther("1"),
+          parseEther("10"),
+          86400n,
+          100n,
+          guardian.account.address,
+          1000n,
+          10n,
+          sink.account.address,
+        ],
+        { account: owner.account },
+      );
+
+      // Verify real guardian is in place (not attacker).
+      const g = await rollup.read.guardian();
+      assert.equal(g.toLowerCase(), guardian.account.address.toLowerCase());
+    });
+
+    // ---------------------------------------------------------------
+    // Finding 2 — isProvingOpen must be false before initializeV2.
+    //
+    // Pre-V2-init storage defaults: lastVerifiedAt=0, openProvingDelay=0.
+    // Without the guard, block.timestamp >= 0 + 0 is trivially true,
+    // which would flip the contract into escape mode during the
+    // upgrade window. The guard (`openProvingDelay == 0 ? false`)
+    // restores V1-equivalent behavior until V2 is initialized.
+    // ---------------------------------------------------------------
+    it("Finding 2: isProvingOpen is false before initializeV2", async () => {
+      const { viem } = await network.connect();
+      const [owner, prover, validator] = await viem.getWalletClients();
+
+      const mockToken = await viem.deployContract("MockERC20");
+      const mockVerifier = await viem.deployContract("MockVerifier");
+      const impl = await viem.deployContract("RollupV1");
+
+      const initData = encodeFunctionData({
+        abi: impl.abi,
+        functionName: "initialize",
+        args: [
+          owner.account.address,
+          owner.account.address,
+          mockToken.address,
+          mockVerifier.address,
+          prover.account.address,
+          [validator.account.address],
+          VK_HASH,
+        ],
+      });
+      const proxy = await viem.deployContract("RollupV2TestProxy", [
+        impl.address,
+        initData,
+      ]);
+      const rollup = await viem.getContractAt("RollupV1", proxy.address);
+
+      // V1 initialized, V2 NOT yet initialized. openProvingDelay is 0.
+      // Guard should keep isProvingOpen false.
+      const open = await rollup.read.isProvingOpen();
+      assert.equal(open, false);
+
+      // Sanity: openProvingDelay really is 0 at this point.
+      const delay = await rollup.read.openProvingDelay();
+      assert.equal(delay, 0n);
+    });
+
+    // ---------------------------------------------------------------
+    // Finding 3 — failed burn must not decrement currentTvl.
+    //
+    // Uses FailingERC20 (a non-reverting ERC20 that returns false
+    // from transfer when a flag is set). Seeds the contract with a
+    // mint, flips the token to fail-mode, then drives a burn through
+    // verifyRollup in escape mode (so we don't need real validator
+    // signatures).
+    //
+    // Pre-fix: currentTvl dropped to 0 despite the tokens staying
+    // in the contract. Post-fix: currentTvl is preserved.
+    // ---------------------------------------------------------------
+    it("Finding 3: failed burn does not decrement currentTvl", async () => {
+      const { viem, networkHelpers } = await network.connect();
+      const [owner, prover, validator, guardian, sink, userAcct] =
+        await viem.getWalletClients();
+
+      const failingToken = await viem.deployContract("FailingERC20");
+      const mockVerifier = await viem.deployContract("MockVerifier");
+      const impl = await viem.deployContract("RollupV1");
+
+      const initData = encodeFunctionData({
+        abi: impl.abi,
+        functionName: "initialize",
+        args: [
+          owner.account.address,
+          owner.account.address,
+          failingToken.address,
+          mockVerifier.address,
+          prover.account.address,
+          [validator.account.address],
+          VK_HASH,
+        ],
+      });
+      const proxy = await viem.deployContract("RollupV2TestProxy", [
+        impl.address,
+        initData,
+      ]);
+      const rollup = await viem.getContractAt("RollupV1", proxy.address);
+
+      await rollup.write.initializeV2(
+        [
+          parseEther("1"),
+          parseEther("10"),
+          86400n,
+          100n,
+          guardian.account.address,
+          1000n,
+          10n,
+          sink.account.address,
+        ],
+        { account: owner.account },
+      );
+
+      // Deposit: user mints 0.5 ether of FailingERC20 into the rollup.
+      // This both gives the contract balance AND bumps currentTvl.
+      const mintValue = parseEther("0.5");
+      const mintValueBytes32 =
+        "0x00000000000000000000000000000000000000000000000006f05b59d3b20000" as const; // 5e17
+
+      await failingToken.write.mint([userAcct.account.address, mintValue]);
+      await failingToken.write.approve([rollup.address, mintValue], {
+        account: userAcct.account,
+      });
+      await rollup.write.mint(
+        [
+          "0x0000000000000000000000000000000000000000000000000000000000001111",
+          mintValueBytes32,
+          NOTE_KIND,
+        ],
+        { account: userAcct.account },
+      );
+
+      const tvlBefore = await rollup.read.currentTvl();
+      assert.equal(tvlBefore, mintValue);
+
+      // Trigger escape mode so we can bypass validator signatures.
+      await networkHelpers.time.increase(86401);
+      await networkHelpers.mine(1);
+
+      // Flip the token to fail-mode so the burn payout silently fails.
+      await failingToken.write.setTransfersFail([true]);
+
+      // Craft publicInputs for verifyRollup:
+      //   [0]  oldRoot
+      //   [1]  newRoot (any)
+      //   [2]  commitHash (any)
+      //   [3]  kind = 3 (burn)
+      //   [4]  note_kind
+      //   [5]  value as bytes32
+      //   [6]  burn hash (any)
+      //   [7]  burn_addr as bytes32
+      //   [8..32] kind = 0 padding (25 slots)
+      // Total: 3 + 5 + 25 = 33 = messages_length(30) + 3 ✓
+      const oldRoot = await rollup.read.rootHash();
+      const zero =
+        "0x0000000000000000000000000000000000000000000000000000000000000000" as const;
+      const three =
+        "0x0000000000000000000000000000000000000000000000000000000000000003" as const;
+      const burnHash =
+        "0x0000000000000000000000000000000000000000000000000000000000002222" as const;
+      const userAddrAsBytes32 = (("0x000000000000000000000000" +
+        userAcct.account.address.slice(2).toLowerCase()) as `0x${string}`);
+
+      const padding: `0x${string}`[] = Array(25).fill(zero);
+      const publicInputs: `0x${string}`[] = [
+        oldRoot,
+        "0x0000000000000000000000000000000000000000000000000000000000000001" as const,
+        "0x0000000000000000000000000000000000000000000000000000000000000002" as const,
+        three,
+        NOTE_KIND,
+        mintValueBytes32,
+        burnHash,
+        userAddrAsBytes32,
+        ...padding,
+      ];
+
+      // Empty signatures — allowed in escape mode.
+      await rollup.write.verifyRollup(
+        [
+          1n, // height > blockHeight(0)
+          VK_HASH,
+          "0x" as const, // empty aggrProof; MockVerifier ignores it
+          publicInputs,
+          zero, // otherHashFromBlockHash (unused in escape mode)
+          [], // no signatures
+        ],
+        { account: prover.account },
+      );
+
+      // TVL must be preserved because the transfer failed silently.
+      // The rollup contract still holds the tokens; currentTvl must
+      // reflect that, otherwise future mints could push real balance
+      // past globalTvlCap.
+      const tvlAfter = await rollup.read.currentTvl();
+      assert.equal(
+        tvlAfter,
+        tvlBefore,
+        "TVL should be unchanged when burn transfer failed",
+      );
+
+      // And the tokens really are still in the contract:
+      const bal = await failingToken.read.balanceOf([rollup.address]);
+      assert.equal(bal, mintValue);
+    });
+
+    // ---------------------------------------------------------------
+    // Finding 4 — addToken must revert in V2.
+    //
+    // The V2 caps are single global counters and only make sense
+    // under a single-token assumption. Disabling addToken freezes
+    // that invariant on chain. A future V3 can reintroduce it
+    // together with per-note-kind caps if multi-token is ever
+    // actually needed.
+    // ---------------------------------------------------------------
+    it("Finding 4: addToken reverts even from owner", async () => {
+      const { rollup, owner } = await deployRollupV2();
+      await assert.rejects(
+        rollup.write.addToken(
+          [
+            "0x0001000000000000000000000000000000000000000000000000000000000000",
+            owner.account.address, // any non-zero address
+          ],
+          { account: owner.account },
+        ),
+      );
     });
   });
 });
