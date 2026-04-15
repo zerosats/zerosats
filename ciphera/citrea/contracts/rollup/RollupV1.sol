@@ -5,7 +5,6 @@ import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol";
-import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/governance/TimelockController.sol";
@@ -101,7 +100,9 @@ contract RollupV1 is
     // Composite key (hash + burnAddress + noteKind + amount) => substitute address
     mapping(bytes32 => address) public substitutedBurns;
 
-    // Allowed Tokens
+    // Legacy note-kind -> token registry.
+    // V2 policy is effectively single-token: this map is seeded in initialize()
+    // and intentionally immutable afterward (addToken is disabled).
     mapping(bytes32 => address) tokens;
 
     // Actors
@@ -454,13 +455,8 @@ contract RollupV1 is
         return rootHash;
     }
 
-    function addToken(bytes32 noteKind, address tokenAddress) public onlyOwner {
-        require(
-            tokens[noteKind] == address(0),
-            "RollupV1: Token already exists"
-        );
-
-        tokens[noteKind] = tokenAddress;
+    function addToken(bytes32, address) public pure {
+        revert("RollupV1: addToken disabled");
     }
 
     // =====================================================================
