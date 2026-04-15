@@ -1,5 +1,16 @@
 # Citrea local toolchain (downloaded binaries, configs, caches)
 .citrea/
+.local/
+.tmp/
+bin/
+
+# Local tooling caches / metadata
+.playwright-mcp/
+.wrangler/
+
+# Local secrets
+.env
+.env.*
 
 # OS
 .DS_Store

@@ -222,9 +222,9 @@ function parseJsonSafe(text) {
 
 async function runLookupInvoice(settings, paymentHash) {
   const attempts = [
-    ["lookupinvoice", `--rhash=${paymentHash}`, "--output", "json"],
-    ["lookupinvoice", `--r_hash=${paymentHash}`, "--output", "json"],
-    ["lookupinvoice", paymentHash, "--output", "json"],
+    ["lookupinvoice", `--rhash=${paymentHash}`],
+    ["lookupinvoice", `--r_hash=${paymentHash}`],
+    ["lookupinvoice", paymentHash],
   ];
   let last = null;
   for (const args of attempts) {
@@ -252,32 +252,32 @@ async function runAction(action, payload = {}, options = {}) {
   switch (action) {
     case "doctor":
     case "getinfo":
-      commandArgs = ["getinfo", "--output", "json"];
+      commandArgs = ["getinfo"];
       break;
     case "wallet-balance":
-      commandArgs = ["walletbalance", "--output", "json"];
+      commandArgs = ["walletbalance"];
       break;
     case "channel-balance":
-      commandArgs = ["channelbalance", "--output", "json"];
+      commandArgs = ["channelbalance"];
       break;
     case "channels":
-      commandArgs = ["listchannels", "--output", "json"];
+      commandArgs = ["listchannels"];
       break;
     case "peers":
-      commandArgs = ["listpeers", "--output", "json"];
+      commandArgs = ["listpeers"];
       break;
     case "list-payments":
-      commandArgs = ["listpayments", "--output", "json"];
+      commandArgs = ["listpayments"];
       break;
     case "new-address":
-      commandArgs = ["newaddress", "p2wkh", "--output", "json"];
+      commandArgs = ["newaddress", "p2wkh"];
       break;
     case "decode": {
       const invoice = String(payload.invoice || "").trim();
       if (!invoice) {
         throw new Error("invoice is required");
       }
-      commandArgs = ["decodepayreq", invoice, "--output", "json"];
+      commandArgs = ["decodepayreq", invoice];
       break;
     }
     case "lookup-invoice": {
@@ -287,7 +287,7 @@ async function runAction(action, payload = {}, options = {}) {
         if (!invoice) {
           throw new Error("paymentHash or invoice is required");
         }
-        const decoded = await runLncli(s, ["decodepayreq", invoice, "--output", "json"]);
+        const decoded = await runLncli(s, ["decodepayreq", invoice]);
         if (!decoded.ok) {
           throw new Error(decoded.stderr || "decodepayreq failed");
         }
@@ -319,8 +319,6 @@ async function runAction(action, payload = {}, options = {}) {
         `--fee_limit_sat=${feeLimitSat}`,
         `--timeout_seconds=${timeoutSeconds}`,
         "--force",
-        "--output",
-        "json",
       ];
       break;
     }
@@ -329,7 +327,7 @@ async function runAction(action, payload = {}, options = {}) {
       if (!paymentHash) {
         throw new Error("paymentHash is required");
       }
-      commandArgs = ["trackpayment", paymentHash, "--output", "json"];
+      commandArgs = ["trackpayment", paymentHash];
       break;
     }
     case "add-invoice": {
@@ -342,8 +340,6 @@ async function runAction(action, payload = {}, options = {}) {
         "addinvoice",
         `--amt=${amountSat}`,
         ...(memo ? [`--memo=${memo}`] : []),
-        "--output",
-        "json",
       ];
       break;
     }
@@ -352,7 +348,7 @@ async function runAction(action, payload = {}, options = {}) {
       if (!target) {
         throw new Error("target (pubkey@host:port) is required");
       }
-      commandArgs = ["connect", target, "--output", "json"];
+      commandArgs = ["connect", target];
       break;
     }
     case "open-channel": {
@@ -372,8 +368,6 @@ async function runAction(action, payload = {}, options = {}) {
         `--local_amt=${localAmt}`,
         ...(pushAmt ? [`--push_amt=${pushAmt}`] : []),
         ...(satPerVbyte ? [`--sat_per_vbyte=${satPerVbyte}`] : []),
-        "--output",
-        "json",
       ];
       break;
     }

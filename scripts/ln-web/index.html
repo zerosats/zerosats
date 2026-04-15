@@ -18,74 +18,16 @@
       </header>
 
       <section class="card">
-        <h2>Connection Settings</h2>
-        <form id="settingsForm" class="grid">
-          <label>
-            lncli binary
-            <input id="lncliBin" name="lncliBin" placeholder="lncli" />
-          </label>
-          <label>
-            Network
-            <input id="network" name="network" placeholder="testnet" />
-          </label>
-          <label>
-            RPC server
-            <input id="rpcServer" name="rpcServer" placeholder="127.0.0.1:10009" />
-          </label>
-          <label>
-            Macaroon path
-            <input
-              id="macaroonPath"
-              name="macaroonPath"
-              placeholder="/path/to/admin.macaroon"
-            />
-          </label>
-          <label>
-            TLS cert path
-            <input id="tlsCertPath" name="tlsCertPath" placeholder="/path/to/tls.cert" />
-          </label>
-          <label>
-            Default fee limit (sat)
-            <input id="defaultFeeLimitSat" name="defaultFeeLimitSat" placeholder="200" />
-          </label>
-          <label>
-            Default pay timeout (sec)
-            <input id="defaultTimeoutSeconds" name="defaultTimeoutSeconds" placeholder="120" />
-          </label>
-          <label>
-            Default invoice memo
-            <input id="defaultMemo" name="defaultMemo" placeholder="zerosats-ln-web" />
-          </label>
-        </form>
-        <div class="actions">
-          <button id="saveSettingsBtn">Save Settings</button>
-          <button id="doctorBtn" class="secondary">Doctor</button>
-          <button id="getInfoBtn" class="secondary">Get Info</button>
-        </div>
-      </section>
-
-      <section class="card">
-        <h2>Quick Actions</h2>
-        <div class="actions">
-          <button data-action="wallet-balance" class="secondary">Wallet Balance</button>
-          <button data-action="channel-balance" class="secondary">Channel Balance</button>
-          <button data-action="channels" class="secondary">Channels</button>
-          <button data-action="peers" class="secondary">Peers</button>
-          <button data-action="list-payments" class="secondary">List Payments</button>
-        </div>
-      </section>
-
-      <section class="card">
-        <div class="space-between">
-          <h2>Live Monitor</h2>
-          <div class="actions">
+        <h2>Live Monitor</h2>
+        <div class="space-between monitor-header">
+          <div class="actions" style="margin:0">
             <label class="checkbox-row">
               <input type="checkbox" id="autoRefreshEnabled" />
               Auto refresh
             </label>
-            <label>
-              Every (sec)
-              <input id="autoRefreshSec" value="20" />
+            <label class="inline-label">
+              <input id="autoRefreshSec" value="20" class="compact-input" />
+              sec
             </label>
             <button id="refreshNowBtn" class="secondary">Refresh Now</button>
           </div>
@@ -108,6 +50,17 @@
       </section>
 
       <section class="card">
+        <h2>Quick Actions</h2>
+        <div class="actions">
+          <button data-action="wallet-balance" class="secondary">Wallet Balance</button>
+          <button data-action="channel-balance" class="secondary">Channel Balance</button>
+          <button data-action="channels" class="secondary">Channels</button>
+          <button data-action="peers" class="secondary">Peers</button>
+          <button data-action="list-payments" class="secondary">List Payments</button>
+        </div>
+      </section>
+
+      <section class="card">
         <h2>Create Invoice</h2>
         <div class="grid">
           <label>
@@ -127,7 +80,7 @@
       <section class="card">
         <h2>Pay / Decode / Track</h2>
         <div class="grid">
-          <label>
+          <label class="span-full">
             Invoice
             <textarea
               id="invoiceInput"
@@ -164,51 +117,102 @@
       </section>
 
       <section class="card">
-        <h2>Guided Setup (Own Node)</h2>
-        <div class="grid">
-          <label>
-            Step 1: Funding address
-            <input id="fundingAddressOut" readonly placeholder="click Generate Address" />
-          </label>
-          <label>
-            Step 2: Minimum wallet sats expected
-            <input id="fundingTargetSat" value="100000" />
-          </label>
-          <label>
-            Step 3: Add peer (pubkey@host:port)
-            <input id="addPeerTarget" placeholder="02...@host:9735" />
-          </label>
-          <label>
-            Step 4: Open channel node pubkey
-            <input id="openNodePubkey" placeholder="02..." />
-          </label>
-          <label>
-            Step 4: Local amount (sat)
-            <input id="openLocalAmt" placeholder="100000" />
-          </label>
-          <label>
-            Push amount (sat, optional)
-            <input id="openPushAmt" placeholder="0" />
-          </label>
-          <label>
-            sat/vbyte (optional)
-            <input id="openSatPerVbyte" placeholder="1" />
-          </label>
-        </div>
-        <div class="actions">
-          <button id="generateAddressBtn">Generate Address</button>
-          <button id="copyAddressBtn" class="secondary">Copy Address</button>
-          <button id="checkFundedBtn" class="secondary">Check Funded</button>
-          <button id="addPeerBtn" class="secondary">Add Peer</button>
-          <button id="openChannelBtn">Open Channel</button>
-        </div>
-        <p class="muted" id="fundingMeta">No funding check yet.</p>
-      </section>
-
-      <section class="card">
         <h2>Latest Result</h2>
         <pre id="resultBox"></pre>
       </section>
+
+      <details class="card collapsible">
+        <summary><h2>Guided Setup (Own Node)</h2></summary>
+        <div class="details-body">
+          <div class="grid">
+            <label>
+              Step 1: Funding address
+              <input id="fundingAddressOut" readonly placeholder="click Generate Address" />
+            </label>
+            <label>
+              Step 2: Minimum wallet sats expected
+              <input id="fundingTargetSat" value="100000" />
+            </label>
+            <label>
+              Step 3: Add peer (pubkey@host:port)
+              <input id="addPeerTarget" placeholder="02...@host:9735" />
+            </label>
+            <label>
+              Step 4: Open channel node pubkey
+              <input id="openNodePubkey" placeholder="02..." />
+            </label>
+            <label>
+              Step 4: Local amount (sat)
+              <input id="openLocalAmt" placeholder="100000" />
+            </label>
+            <label>
+              Push amount (sat, optional)
+              <input id="openPushAmt" placeholder="0" />
+            </label>
+            <label>
+              sat/vbyte (optional)
+              <input id="openSatPerVbyte" placeholder="1" />
+            </label>
+          </div>
+          <div class="actions">
+            <button id="generateAddressBtn">Generate Address</button>
+            <button id="copyAddressBtn" class="secondary">Copy Address</button>
+            <button id="checkFundedBtn" class="secondary">Check Funded</button>
+            <button id="addPeerBtn" class="secondary">Add Peer</button>
+            <button id="openChannelBtn">Open Channel</button>
+          </div>
+          <p class="muted" id="fundingMeta">No funding check yet.</p>
+        </div>
+      </details>
+
+      <details class="card collapsible">
+        <summary><h2>Connection Settings</h2></summary>
+        <div class="details-body">
+          <form id="settingsForm" class="grid">
+            <label>
+              lncli binary
+              <input id="lncliBin" name="lncliBin" placeholder="lncli" />
+            </label>
+            <label>
+              Network
+              <input id="network" name="network" placeholder="testnet" />
+            </label>
+            <label>
+              RPC server
+              <input id="rpcServer" name="rpcServer" placeholder="127.0.0.1:10009" />
+            </label>
+            <label>
+              Macaroon path
+              <input
+                id="macaroonPath"
+                name="macaroonPath"
+                placeholder="/path/to/admin.macaroon"
+              />
+            </label>
+            <label>
+              TLS cert path
+              <input id="tlsCertPath" name="tlsCertPath" placeholder="/path/to/tls.cert" />
+            </label>
+            <label>
+              Default fee limit (sat)
+              <input id="defaultFeeLimitSat" name="defaultFeeLimitSat" placeholder="200" />
+            </label>
+            <label>
+              Default pay timeout (sec)
+              <input id="defaultTimeoutSeconds" name="defaultTimeoutSeconds" placeholder="120" />
+            </label>
+            <label>
+              Default invoice memo
+              <input id="defaultMemo" name="defaultMemo" placeholder="zerosats-ln-web" />
+            </label>
+          </form>
+          <div class="actions">
+            <button id="saveSettingsBtn">Save Settings</button>
+            <button id="doctorBtn" class="secondary">Doctor</button>
+            <button id="getInfoBtn" class="secondary">Get Info</button>
+          </div>
+        </div>
+      </details>
 
       <section class="card">
         <div class="space-between">
