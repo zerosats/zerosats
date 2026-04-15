@@ -115,6 +115,110 @@ contract RollupV1 is Initializable, OwnableUpgradeable {
 
     address public escrowManager;
 
+    // =====================================================================
+    // V2 STORAGE (APPENDED — DO NOT REORDER OR INSERT ABOVE THIS LINE)
+    //
+    // This contract has no `__gap`, so any storage added or reordered
+    // above this block would shift slot assignments and corrupt state
+    // in the proxy. All V2 additions must be appended *here*, in
+    // append-only order. If you need to add more state in V3, append
+    // it below this block — again, never above.
+    // =====================================================================
+
+    // --- Idea 2: Deposit caps -------------------------------------------
+    // Per-mint cap bounds the worst-case loss from any single malicious
+    // or buggy deposit. Global TVL cap bounds the total value at risk
+    // across the protocol during bootstrap. `currentTvl` is a running
+    // counter — incremented on deposit in mint()/mintClaimed() and
+    // decremented on burn in verifyBurn() — so the cap check has
+    // something to compare against. It is seeded from the live token
+    // balance during initializeV2 so an already-populated contract
+    // doesn't start from zero and let deposits balloon past the cap.
+    uint256 public perMintCap;
+    uint256 public globalTvlCap;
+    uint256 public currentTvl;
+
+    // --- Idea 3: Open proving (liveness escape hatch) -------------------
+    // `lastVerifiedAt` is the block.timestamp of the last successful
+    // verifyRollup. If `openProvingDelay` elapses without a proof
+    // landing — i.e. the whitelisted provers have gone silent — then
+    // `isProvingOpen()` flips to true, which (a) unlocks verifyRollup
+    // for any caller via onlyProverOrOpen and (b) short-circuits
+    // verifyValidatorSignatures so a dead validator set can no longer
+    // brick the chain. Both gates must open together; opening just
+    // one is security theater because the other would still revert.
+    //
+    // The ZK verifier remains the ONLY safety gate in escape mode.
+    // That is intentional and sufficient: the ZK proof is the only
+    // thing that ever actually protected funds. Validator signatures
+    // provide consensus coordination, not state-transition safety.
+    uint256 public lastVerifiedAt;
+    uint256 public openProvingDelay;
+
+    // --- Idea 4: Validator activation floor -----------------------------
+    // Even with the owner moved to a timelock, we want the contract
+    // itself to enforce a minimum notice window before a newly
+    // scheduled validator set activates. This gives users a guaranteed
+    // reaction time independent of whatever delay the governance
+    // layer happens to be configured with. Measured in blocks because
+    // that is the unit `validFrom` already uses.
+    uint256 public validatorActivationMinDelayBlocks;
+
+    // --- Ideas 5-8: Guardian + withdrawal pause -------------------------
+    // Governance (ownership) sits behind a timelock. But a pause that
+    // is also delayed is useless in an active incident — by the time
+    // it lands on-chain, funds are already gone. The guardian role is
+    // therefore an instant-acting authority with exactly one power:
+    // setting `withdrawalsPaused`. It cannot rotate anything else,
+    // cannot upgrade, cannot mint. Its single power is intentionally
+    // narrow so handing it to a fast-acting multisig is low-risk.
+    //
+    // The pause is deliberately a *soft* pause: it blocks new burn
+    // substitutions (substituteBurn) but NOT the settlement path
+    // (verifyBurn). This way, already-substituted burns still pay
+    // substitutors back when the rollup lands — we avoid stranding
+    // operators who are mid-loan. If a truly adversarial scenario
+    // requires a hard pause, verifyBurn can be extended later.
+    address public guardian;
+    bool public withdrawalsPaused;
+
+    // --- Idea 9: Burn fee -----------------------------------------------
+    // Fee = max(burnFeeFloor, value * burnFeeBps / 10000), clamped to
+    // `value` so we never overcharge. Floor protects against dust
+    // spam (where bps fees would round to zero); bps scales revenue
+    // with large burns. The fee is shaved out of the user's payout
+    // in verifyBurn and forwarded to `feeSink` as a separate transfer.
+    //
+    // `feeSink` is a dedicated address — NOT the protocol owner —
+    // so fee ownership can be governed independently of protocol
+    // upgrades. This matters for any future handover to a DAO or
+    // treasury, where we don't want a single address to both
+    // upgrade the contract AND drain the fee balance.
+    //
+    // To keep token flow balanced when a burn is substituted, the
+    // substitutor pays the *post-fee* amount upfront and receives
+    // the post-fee amount back when the rollup lands. The fee stays
+    // in the contract and is routed to feeSink during verifyBurn.
+    // This keeps the substitutor whole on the loan principal.
+    uint256 public burnFeeFloor;
+    uint256 public burnFeeBps;
+    address public feeSink;
+
+    // =====================================================================
+    // END V2 STORAGE
+    // =====================================================================
+
+    // --- Events added in V2 ---------------------------------------------
+    event PerMintCapUpdated(uint256 newCap);
+    event GlobalTvlCapUpdated(uint256 newCap);
+    event OpenProvingDelayUpdated(uint256 oldDelay, uint256 newDelay);
+    event ValidatorActivationDelayUpdated(uint256 oldDelay, uint256 newDelay);
+    event GuardianUpdated(address indexed oldGuardian, address indexed newGuardian);
+    event WithdrawalsPausedSet(bool paused);
+    event BurnFeeUpdated(uint256 oldFloor, uint256 oldBps, uint256 newFloor, uint256 newBps);
+    event FeeSinkUpdated(address indexed oldSink, address indexed newSink);
+    event FeePaid(address indexed token, address indexed sink, uint256 amount);
+
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
         _disableInitializers();
@@ -155,8 +259,108 @@ contract RollupV1 is Initializable, OwnableUpgradeable {
         escrowManager = _escrowManager;
     }
 
+    /**
+     * @notice V2 initializer — called once via proxy upgrade.
+     *
+     * Uses OZ's reinitializer(2) modifier so it can only be invoked once
+     * per proxy instance, and only after the original initialize() has
+     * run (it advances the Initializable version from 1 -> 2).
+     *
+     * All V2 state is set here in one shot. We also seed `currentTvl`
+     * from the live token balance of the contract, which is critical:
+     * if an upgrade happens on a populated contract and currentTvl
+     * starts at 0, the deposit cap would be trivially bypassable by
+     * whoever deposits first until enough burns catch the counter up.
+     * Seeding from balance avoids that window entirely.
+     *
+     * @param perMintCap_ Maximum single deposit (wei). e.g. 0.001 cBTC.
+     * @param globalTvlCap_ Maximum total value held by contract (wei).
+     * @param openProvingDelay_ Seconds of prover inactivity before escape.
+     *        Must be >= 1 day to prevent governance from accidentally
+     *        opening the chain to anyone with a short delay.
+     * @param validatorActivationMinDelayBlocks_ Minimum blocks of notice
+     *        before a new validator set can activate. ~604800 = 1 week
+     *        at 1s blocks.
+     * @param guardian_ Instant-pause multisig. Must be non-zero.
+     * @param burnFeeFloor_ Minimum fee per burn (wei of token).
+     * @param burnFeeBps_ Basis-points fee rate (10000 = 100%). Capped
+     *        at 500 (5%) to prevent governance from imposing predatory
+     *        fees silently.
+     * @param feeSink_ Destination for collected fees. Must be non-zero.
+     */
+    function initializeV2(
+        uint256 perMintCap_,
+        uint256 globalTvlCap_,
+        uint256 openProvingDelay_,
+        uint256 validatorActivationMinDelayBlocks_,
+        address guardian_,
+        uint256 burnFeeFloor_,
+        uint256 burnFeeBps_,
+        address feeSink_
+    ) external reinitializer(2) {
+        require(guardian_ != address(0), "RollupV1: invalid guardian");
+        require(feeSink_ != address(0), "RollupV1: invalid fee sink");
+        require(openProvingDelay_ >= 1 days, "RollupV1: open proving delay too short");
+        require(burnFeeBps_ <= 500, "RollupV1: burn fee bps too high");
+        require(perMintCap_ > 0, "RollupV1: per-mint cap must be nonzero");
+        require(globalTvlCap_ >= perMintCap_, "RollupV1: TVL cap < per-mint cap");
+
+        perMintCap = perMintCap_;
+        globalTvlCap = globalTvlCap_;
+
+        // Seed currentTvl from the live token balance so upgrades on
+        // populated contracts don't start with an empty counter. If the
+        // current balance already exceeds the new global cap, we still
+        // set it — the cap check blocks *new* deposits, which is the
+        // correct behavior (freeze growth, allow burns to drain).
+        currentTvl = token.balanceOf(address(this));
+
+        lastVerifiedAt = block.timestamp;
+        openProvingDelay = openProvingDelay_;
+
+        validatorActivationMinDelayBlocks = validatorActivationMinDelayBlocks_;
+
+        guardian = guardian_;
+        withdrawalsPaused = false;
+
+        burnFeeFloor = burnFeeFloor_;
+        burnFeeBps = burnFeeBps_;
+        feeSink = feeSink_;
+
+        version = 2;
+    }
+
     modifier onlyProver() {
         require(provers[msg.sender] == 1, "You are not a prover");
+        _;
+    }
+
+    // --- V2: Open proving escape hatch (Idea 3) -------------------------
+    //
+    // `isProvingOpen` returns true once the whitelisted provers have
+    // been silent for longer than `openProvingDelay`. In that state:
+    //  (1) `onlyProverOrOpen` admits anyone as a caller of verifyRollup,
+    //  (2) `verifyValidatorSignatures` short-circuits its require checks.
+    //
+    // Normal mode is unchanged: a whitelisted prover submits within
+    // the delay window, `lastVerifiedAt` resets on each success, and
+    // `isProvingOpen` never returns true.
+
+    function isProvingOpen() public view returns (bool) {
+        return block.timestamp >= lastVerifiedAt + openProvingDelay;
+    }
+
+    modifier onlyProverOrOpen() {
+        require(
+            provers[msg.sender] == 1 || isProvingOpen(),
+            "RollupV1: not prover and proving not open"
+        );
+        _;
+    }
+
+    // --- V2: Guardian (Ideas 5-8) ---------------------------------------
+    modifier onlyGuardian() {
+        require(msg.sender == guardian, "RollupV1: not guardian");
         _;
     }
 
@@ -272,8 +476,22 @@ contract RollupV1 is Initializable, OwnableUpgradeable {
         emit RootHashUpdated(oldRoot, newRoot);
     }
 
-    function setRoot(bytes32 newRoot) public onlyOwner {
-        _setRootHash(newRoot);
+    // --- V2: setRoot disabled (Idea 1) ----------------------------------
+    //
+    // `setRoot` previously allowed the owner to overwrite the merkle
+    // root to any value instantly. That made the owner a single point
+    // of failure: a compromised or coerced owner could pre-commit a
+    // hand-crafted root whose pre-image contained notes they owned,
+    // then drain all TVL through normal burns.
+    //
+    // The function is kept in the ABI (with its original selector)
+    // but is now `pure` and always reverts. Any off-chain tooling or
+    // script that still calls it will fail loudly rather than hit a
+    // fallback or silently no-op. If emergency root surgery is ever
+    // truly needed, it should require a dedicated upgrade — not a
+    // hot function anyone with the owner key can call.
+    function setRoot(bytes32 /* newRoot */) public pure {
+        revert("RollupV1: setRoot disabled in V2");
     }
 
     function currentRootHash() public view returns (bytes32) {
@@ -287,6 +505,113 @@ contract RollupV1 is Initializable, OwnableUpgradeable {
         );
 
         tokens[noteKind] = tokenAddress;
+    }
+
+    // =====================================================================
+    // V2 setters — all `onlyOwner`, which means timelocked once ownership
+    // has been transferred to a TimelockController. The guardian has its
+    // own instant-acting setter (setWithdrawalsPaused) below; everything
+    // else here requires going through the governance delay.
+    // =====================================================================
+
+    // --- Idea 2: Deposit caps -------------------------------------------
+    function setPerMintCap(uint256 newCap) external onlyOwner {
+        require(newCap > 0, "RollupV1: per-mint cap must be nonzero");
+        require(newCap <= globalTvlCap, "RollupV1: per-mint cap > TVL cap");
+        perMintCap = newCap;
+        emit PerMintCapUpdated(newCap);
+    }
+
+    function setGlobalTvlCap(uint256 newCap) external onlyOwner {
+        require(newCap >= perMintCap, "RollupV1: TVL cap < per-mint cap");
+        globalTvlCap = newCap;
+        emit GlobalTvlCapUpdated(newCap);
+    }
+
+    // --- Idea 3: Open proving delay -------------------------------------
+    function setOpenProvingDelay(uint256 newDelay) external onlyOwner {
+        // 1 day floor matches the floor in initializeV2; prevents
+        // governance from setting a near-zero delay that would make
+        // escape mode trigger after a single missed block.
+        require(newDelay >= 1 days, "RollupV1: open proving delay too short");
+        emit OpenProvingDelayUpdated(openProvingDelay, newDelay);
+        openProvingDelay = newDelay;
+    }
+
+    // --- Idea 4: Validator activation floor -----------------------------
+    function setValidatorActivationMinDelayBlocks(uint256 newDelayBlocks)
+        external
+        onlyOwner
+    {
+        emit ValidatorActivationDelayUpdated(
+            validatorActivationMinDelayBlocks,
+            newDelayBlocks
+        );
+        validatorActivationMinDelayBlocks = newDelayBlocks;
+    }
+
+    // --- Ideas 5-8: Guardian + withdrawal pause -------------------------
+    function setGuardian(address newGuardian) external onlyOwner {
+        require(newGuardian != address(0), "RollupV1: invalid guardian");
+        emit GuardianUpdated(guardian, newGuardian);
+        guardian = newGuardian;
+    }
+
+    /**
+     * @notice Pause or unpause new withdrawals. Instant, guardian-only.
+     *
+     * Soft pause semantics: this blocks new calls to substituteBurn()
+     * but does NOT block verifyBurn(). In-flight substituted burns
+     * continue to settle so substitutors don't get stranded mid-loan.
+     *
+     * If a hard pause is ever needed (an active exploit, not a
+     * precaution), add the same check to verifyBurn in a follow-up
+     * upgrade — intentionally not included here because the soft
+     * pause is almost always what you want and the hard pause has
+     * more failure modes for honest users and substitutors.
+     */
+    function setWithdrawalsPaused(bool paused_) external onlyGuardian {
+        withdrawalsPaused = paused_;
+        emit WithdrawalsPausedSet(paused_);
+    }
+
+    // --- Idea 9: Burn fee -----------------------------------------------
+    function setBurnFee(uint256 newFloor, uint256 newBps) external onlyOwner {
+        // 500 bps (5%) hard cap prevents governance from silently
+        // imposing predatory withdrawal fees. If the protocol ever
+        // wants a fee above 5%, that requires a contract upgrade,
+        // which users can observe and react to.
+        require(newBps <= 500, "RollupV1: burn fee bps too high");
+        emit BurnFeeUpdated(burnFeeFloor, burnFeeBps, newFloor, newBps);
+        burnFeeFloor = newFloor;
+        burnFeeBps = newBps;
+    }
+
+    function setFeeSink(address newSink) external onlyOwner {
+        require(newSink != address(0), "RollupV1: invalid fee sink");
+        emit FeeSinkUpdated(feeSink, newSink);
+        feeSink = newSink;
+    }
+
+    // --- Idea 9: Internal fee helper ------------------------------------
+    /**
+     * @dev Computes the fee charged on a burn of `value` wei.
+     *
+     * fee = max(burnFeeFloor, value * burnFeeBps / 10000),
+     * clamped to `value` so we never try to charge more than the
+     * burn itself is worth (which would underflow the payout).
+     *
+     * Edge cases:
+     *  - If the fee would consume the entire burn, the payout is 0.
+     *    The user gets nothing but the fee is still routed to the
+     *    sink. We could revert instead, but that would let a fee
+     *    misconfiguration brick verifyRollup; returning 0 keeps the
+     *    protocol live and lets governance fix the fee afterwards.
+     */
+    function computeBurnFee(uint256 value) public view returns (uint256) {
+        uint256 bpsFee = (value * burnFeeBps) / 10000;
+        uint256 fee = bpsFee >= burnFeeFloor ? bpsFee : burnFeeFloor;
+        return fee > value ? value : fee;
     }
 
     function noteKindTokenAddress(
@@ -317,6 +642,12 @@ contract RollupV1 is Initializable, OwnableUpgradeable {
     ///////////
 
     // Verify rollup
+    //
+    // V2: Access was `onlyProver`. Now `onlyProverOrOpen`: whitelisted
+    // provers can always submit; anyone can submit if
+    // `isProvingOpen()` returns true (i.e. provers have been silent
+    // longer than `openProvingDelay`). This is the liveness escape
+    // so users can exit via ZK proof even if operators disappear.
     function verifyRollup(
         uint256 height,
         bytes32 verificationKeyHash,
@@ -325,7 +656,7 @@ contract RollupV1 is Initializable, OwnableUpgradeable {
         bytes32[] calldata publicInputs,
         bytes32 otherHashFromBlockHash,
         Signature[] calldata signatures
-    ) public onlyProver {
+    ) public onlyProverOrOpen {
         require(
             zkVerifiers[verificationKeyHash].enabled,
             "RollupV1: ZK verifier not allowed"
@@ -374,6 +705,12 @@ contract RollupV1 is Initializable, OwnableUpgradeable {
             "RollupV1: New block height must be greater than current"
         );
         blockHeight = height;
+
+        // V2: reset the "last activity" timer so `isProvingOpen()`
+        // returns false again. This is what keeps escape mode from
+        // staying open during normal operation — every successful
+        // proof closes the window for another `openProvingDelay`.
+        lastVerifiedAt = block.timestamp;
 
         emit RollupVerified(height, newRoot);
     }
@@ -458,7 +795,7 @@ contract RollupV1 is Initializable, OwnableUpgradeable {
         bytes32 hash = messages[i + 3];
         address burn_addr = bytes32ToAddress(messages[i + 4]);
 
-        address token = tokens[note_kind];
+        address _token = tokens[note_kind];
 
         bytes32 substituteBurnKey = getSubstituteBurnKey(
             hash,
@@ -468,10 +805,53 @@ contract RollupV1 is Initializable, OwnableUpgradeable {
             height
         );
         address substitutor = substitutedBurns[substituteBurnKey];
+
+        // V2 (Idea 9): apply burn fee. Same fee schedule regardless
+        // of path so users can't arbitrage substituted vs direct.
+        // See substituteBurnTo for the symmetric pre-pay in the
+        // substitutor flow; the math balances because:
+        //  - Substituted: sub pre-paid (value - fee), gets back
+        //    (value - fee), fee stays in contract and is forwarded
+        //    to feeSink below. Contract ends flat.
+        //  - Direct: user receives (value - fee), fee stays and is
+        //    forwarded to feeSink below. Contract ends flat.
+        uint256 fee = computeBurnFee(value);
+        uint256 payout = value - fee;
+
         if (substitutor != address(0)) {
-            executeBurn(token, substitutor, hash, value, false);
+            executeBurn(_token, substitutor, hash, payout, false);
         } else {
-            executeBurn(token, burn_addr, hash, value, false);
+            executeBurn(_token, burn_addr, hash, payout, false);
+        }
+
+        // V2 (Idea 9): route fee to sink.
+        //
+        // Using safeTransfer inside an unverified call would be
+        // risky, but `_token` came from our own `tokens[]` allowlist
+        // (set only by onlyOwner -> timelock), so it's trusted.
+        //
+        // Zero-value transfers are skipped both to save gas and to
+        // avoid tokens that revert on zero-value transfer. If the
+        // sink was accidentally unset, we fall through without
+        // reverting — the fee is just "held" in the contract and
+        // can be swept later once the sink is set. This keeps
+        // verifyRollup live even under misconfiguration.
+        if (fee > 0 && feeSink != address(0)) {
+            IERC20(_token).safeTransfer(feeSink, fee);
+            emit FeePaid(_token, feeSink, fee);
+        }
+
+        // V2 (Idea 2): TVL accounting. Decrement by `value`, not
+        // `payout`, because the contract's token balance actually
+        // drops by `value` total (payout to user + fee to sink).
+        //
+        // Clamped to zero to handle the corner case where a legacy
+        // (pre-V2) mint was never counted into currentTvl but is
+        // now being burned. Strict subtraction would underflow.
+        if (currentTvl >= value) {
+            currentTvl -= value;
+        } else {
+            currentTvl = 0;
         }
 
         return i + 5;
@@ -567,6 +947,12 @@ contract RollupV1 is Initializable, OwnableUpgradeable {
         uint256 amount,
         uint256 burnBlockHeight
     ) public onlyBurnSubstitutor {
+        // V2 (Ideas 5-8): guardian-triggered soft pause.
+        // We only block *new* substitutions. Already-substituted
+        // burns continue to settle via verifyBurn so operators
+        // who have money in flight don't get stranded.
+        require(!withdrawalsPaused, "RollupV1: withdrawals paused");
+
         substituteBurnTo(
             burnAddress,
             msg.sender,
@@ -601,16 +987,37 @@ contract RollupV1 is Initializable, OwnableUpgradeable {
             "RollupV1: Block height already rolled up"
         );
 
-        address token = tokens[note_kind];
-        require(token != address(0), "RollupV1: Token not found for note kind");
+        address _token = tokens[note_kind];
+        require(_token != address(0), "RollupV1: Token not found for note kind");
 
-        IERC20(token).safeTransferFrom(
+        // V2 (Idea 9): burn-fee accounting for substituted burns.
+        //
+        // Keeping token balance math balanced while a burn is
+        // substituted requires the substitutor to pre-pay only the
+        // post-fee amount — otherwise the substitutor would end up
+        // eating the fee on top of their own spread.
+        //
+        // Flow:
+        //  1. Substitutor transfers `amount - fee` into this contract.
+        //  2. Contract pays user `amount - fee`.
+        //  3. On rollup proof, substitutor gets `amount - fee` back.
+        //  4. The `fee` portion comes from the original mint's
+        //     balance already held by this contract, and is routed
+        //     to feeSink inside verifyBurn.
+        //
+        // The substitutedBurns key still uses the gross `amount` so
+        // it matches the prover-side circuit output (which proves
+        // the unadjusted burn value).
+        uint256 fee = computeBurnFee(amount);
+        uint256 payout = amount - fee;
+
+        IERC20(_token).safeTransferFrom(
             substituteAddress,
             address(this),
-            amount
+            payout
         );
 
-        bool success = executeBurn(token, burnAddress, hash, amount, true);
+        bool success = executeBurn(_token, burnAddress, hash, payout, true);
         require(success, "RollupV1: Burn failed");
 
         // This will be returned to the msg.sender when the rollup block for it is submitted
@@ -636,6 +1043,20 @@ contract RollupV1 is Initializable, OwnableUpgradeable {
         if (mints[mint_hash].amount != 0) {
             revert("RollupV1: Mint already exists");
         }
+
+        // V2 (Idea 2): deposit caps. Applied here AS WELL AS in mint()
+        // because `mintClaimed` is the escrow-manager path that does
+        // not go through safeTransferFrom — the funds were already
+        // collected off-chain by the EscrowManager. Without a cap
+        // here, a compromised (or buggy) EscrowManager could mint
+        // arbitrarily large amounts onto L2 regardless of how the
+        // user-facing `mint()` is gated.
+        require(value <= perMintCap, "RollupV1: exceeds per-mint cap");
+        require(
+            currentTvl + value <= globalTvlCap,
+            "RollupV1: TVL cap reached"
+        );
+        currentTvl += value;
 
         address tokenAddress = tokens[note_kind];
         require(
@@ -667,6 +1088,14 @@ contract RollupV1 is Initializable, OwnableUpgradeable {
             revert("RollupV1: Mint already exists");
         }
 
+        // V2 (Idea 2): deposit caps.
+        // Check BEFORE the safeTransferFrom so a capped-out deposit
+        // doesn't cost the caller any token transfers or approvals.
+        uint256 v = uint256(value);
+        require(v <= perMintCap, "RollupV1: exceeds per-mint cap");
+        require(currentTvl + v <= globalTvlCap, "RollupV1: TVL cap reached");
+        currentTvl += v;
+
         address tokenAddress = tokens[note_kind];
         require(
             tokenAddress != address(0),
@@ -678,7 +1107,7 @@ contract RollupV1 is Initializable, OwnableUpgradeable {
         IERC20(tokenAddress).safeTransferFrom(
             msg.sender,
             address(this),
-            uint256(value)
+            v
         );
 
         // Add mint to pending mints, this still needs to be verifier with the verifyBlock,
@@ -686,11 +1115,11 @@ contract RollupV1 is Initializable, OwnableUpgradeable {
         // accepting the mint txn into a block
         mints[mint_hash] = Mint({
             note_kind: note_kind,
-            amount: uint256(value),
+            amount: v,
             spent: false
         });
 
-        emit MintAdded(mint_hash, uint256(value), note_kind);
+        emit MintAdded(mint_hash, v, note_kind);
     }
 
     /////////////////
@@ -704,6 +1133,23 @@ contract RollupV1 is Initializable, OwnableUpgradeable {
         bytes32 otherHashFromBlockHash,
         Signature[] calldata signatures
     ) internal {
+        // V2 (Idea 3): escape mode short-circuit.
+        //
+        // If the prover-inactivity timer has expired, we skip the
+        // signature requirement entirely. Rationale: opening the
+        // modifier `onlyProverOrOpen` without also skipping the sig
+        // check would be security theater, because a user without
+        // access to the (presumed-dead) validator set could never
+        // collect enough signatures to pass the (2/3)+1 threshold.
+        //
+        // This is safe because validator signatures provide
+        // *coordination*, not *safety*. The ZK verifier below this
+        // function is what actually proves the state transition is
+        // valid. As long as that succeeds, the new root is correct.
+        if (isProvingOpen()) {
+            return;
+        }
+
         updateValidatorSetIndex(height);
         ValidatorSet storage validatorSet = getValidators();
 
@@ -790,6 +1236,26 @@ contract RollupV1 is Initializable, OwnableUpgradeable {
             validFrom == 0 || validFrom <= block.number + MAX_FUTURE_BLOCKS,
             "RollupV1: validFrom cannot be more than 30 days in the future"
         );
+
+        // V2 (Idea 4): enforce a minimum activation notice window for
+        // every non-initial validator set.
+        //
+        // The initial validator set (when validatorSets.length == 0)
+        // skips this check — deployment naturally establishes it with
+        // validFrom=0, and there are no users yet to protect.
+        //
+        // For every subsequent rotation, the floor guarantees users
+        // get `validatorActivationMinDelayBlocks` of notice regardless
+        // of what delay the governance layer (timelock) is using.
+        // This is defense-in-depth: even if governance is subverted
+        // or its delay is shortened, the contract itself still
+        // enforces a minimum reaction time.
+        if (validatorSets.length > 0) {
+            require(
+                validFrom >= block.number + validatorActivationMinDelayBlocks,
+                "RollupV1: validator activation too early"
+            );
+        }
 
         // Create a new ValidatorSet and push it to the array
         validatorSets.push();
