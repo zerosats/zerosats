@@ -50,41 +50,39 @@ async function main() {
     console.log("\n=== Current State ===");
     const currentBlockHeight = await rollupV1.read.blockHeight();
     const currentRoot = await rollupV1.read.currentRootHash();
+    const version = await rollupV1.read.version();
+    console.log("Contract Version:", version.toString());
     console.log("Current Block Height:", currentBlockHeight.toString());
     console.log("Current Root Hash:", currentRoot);
 
-    // Empty merkle tree root hash constant from the contract initialization
-    const emptyMerkleRoot =
-        "0x0577b5b4aa3eaba75b2a919d5d7c63b7258aa507d38e346bf2ff1d48790379ff";
-
-    console.log("\n=== Resetting State ===");
-    console.log("Resetting root hash to empty merkle tree root...");
-
-    const hash = await rollupV1.write.setRoot([emptyMerkleRoot]);
-    const receipt = await publicClient.waitForTransactionReceipt({ hash });
-
-    if (receipt.status !== "success") {
-        throw new Error("setRoot transaction reverted");
-    }
-    console.log("✓ Root hash reset");
-
-    // Note: blockHeight cannot be directly reset by owner. If you need to reset it,
-    // you would need to modify the contract to add an owner function, or use a proxy upgrade.
+    // Note: as of V2, setRoot is intentionally disabled — it was a
+    // direct owner-writable attack surface over the merkle root and
+    // its removal is one of the core V2 safety upgrades (Idea 1).
+    //
+    // This script used to call setRoot to reset the root to the empty
+    // merkle tree root. That capability no longer exists on-chain
+    // and will not be restored in V2. If you need to reset state on
+    // a devnet, redeploy the proxy fresh instead.
+    console.log("\n=== Reset Notice ===");
     console.log(
-        "\nNote: blockHeight cannot be directly reset via owner functions."
+        "setRoot() is disabled in RollupV1 V2 (see Idea 1 in bump-contract)."
     );
-    console.log("   If you need to reset blockHeight, consider:");
-    console.log("   1. Adding an owner function to RollupV1");
-    console.log("   2. Using a proxy upgrade pattern");
-    console.log("   3. Deploying a fresh instance of RollupV1");
+    console.log("This script no longer performs any state mutation.");
+    console.log("");
+    console.log("To reset state on a devnet:");
+    console.log("  1. Redeploy the proxy (scripts/deploy.ts) fresh.");
+    console.log(
+        "  2. Or use the node/test-runner's built-in state reset (hardhat_reset)."
+    );
+    console.log(
+        "  3. Or deploy a brand-new RollupV1 instance side-by-side."
+    );
+    console.log(
+        "\nblockHeight was never resettable via an owner function — that is"
+    );
+    console.log("unchanged in V2. Redeployment is the only clean reset.");
 
-    console.log("\n=== Final State ===");
-    const finalBlockHeight = await rollupV1.read.blockHeight();
-    const finalRoot = await rollupV1.read.currentRootHash();
-    console.log("Final Block Height:", finalBlockHeight.toString());
-    console.log("Final Root Hash:", finalRoot);
-
-    console.log("\n✓ RollupV1 state reset complete!");
+    console.log("\n✓ Status report complete (no state written).");
 }
 
 main()

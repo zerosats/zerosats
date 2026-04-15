@@ -524,7 +524,7 @@ contract RollupV1 is Initializable, OwnableUpgradeable {
         return rootHash;
     }
 
-    // Review fix (Finding 4): addToken disabled in V2.
+    // Review fix (Finding 4): addToken is gated on the pre-V2 window.
     //
     // The V2 deposit caps (perMintCap / globalTvlCap / currentTvl)
     // are single global counters, not per-token. In a multi-token
@@ -532,23 +532,30 @@ contract RollupV1 is Initializable, OwnableUpgradeable {
     // cBTC is not fungible with 1 wei of USDC, and summing them
     // into a single cap is economically meaningless.
     //
-    // The currently deployed contract has exactly one token
-    // registered (wrappedCBTC via initialize()), and nothing has
-    // ever called addToken in production. Disabling it freezes
-    // that single-token invariant on chain so the caps remain
-    // well-defined. If and when multi-token support is actually
-    // needed, a dedicated V3 upgrade should reintroduce addToken
-    // together with per-note-kind caps (and likely per-token
-    // fee rates), as one cohesive change rather than a bolt-on.
+    // However, we cannot fully disable addToken because the
+    // pre-upgrade bootstrap flow legitimately needs it — the
+    // devnet deploy path in scripts/deploy.ts registers a mock
+    // BTC note kind after initialize() and before initializeV2().
     //
-    // Kept in the ABI as `pure revert` so any off-chain tooling
-    // that still calls it fails loudly instead of silently
-    // succeeding against a fallback.
-    function addToken(bytes32 /* noteKind */, address /* tokenAddress */)
-        public
-        pure
-    {
-        revert("RollupV1: addToken disabled in V2");
+    // The clean resolution: allow addToken ONLY while version < 2.
+    // During the V1 bootstrap window there are no caps yet, so
+    // multi-token registration does not violate any invariant.
+    // Once initializeV2() runs and bumps version to 2, caps become
+    // active and the single-token invariant must hold — so addToken
+    // locks.
+    //
+    // If multi-token support is ever actually needed post-V2, a
+    // dedicated V3 upgrade should reintroduce it together with
+    // per-note-kind caps (and likely per-token fee rates), as one
+    // cohesive change rather than a bolt-on.
+    function addToken(bytes32 noteKind, address tokenAddress) public onlyOwner {
+        require(version < 2, "RollupV1: addToken disabled in V2");
+        require(
+            tokens[noteKind] == address(0),
+            "RollupV1: Token already exists"
+        );
+
+        tokens[noteKind] = tokenAddress;
     }
 
     // =====================================================================
