@@ -1,34 +1,23 @@
 // V2 upgrade tests for RollupV1 (bump-contract branch).
 //
-// Uses the project's installed toolchain: hardhat 3 + viem + node:test.
-// The existing ethers-based test files in this directory are broken
-// against this toolchain (see git log on burn-substitutor) — this
-// file deliberately uses the currently-working stack.
+// Uses hardhat 3 + viem + node:test (the project's actual toolchain;
+// the pre-existing ethers-based tests are broken against it and
+// untouched by this branch).
 //
 // Coverage:
-//   Idea 1: setRoot reverts
-//   Idea 2: per-mint cap + TVL cap enforced
-//   Idea 3: open-proving timer + isProvingOpen view
-//   Idea 4: validator activation floor
-//   Ideas 5-8: guardian + pause flow
-//   Idea 9: computeBurnFee math
+//   Idea 2: per-mint cap + TVL cap enforced on mint()
+//   Idea 3: open-proving timer + isProvingOpen view (7-day floor)
+//   Idea 9: computeBurnFee is a flat fee clamped to value
 //
 //   Review fix 1: non-owner cannot call initializeV2
 //   Review fix 2: isProvingOpen is false pre-init
 //   Review fix 3: failed burn does not decrement currentTvl
-//   Review fix 4: addToken reverts
 //
 //   Self-review fix H1: nonReentrant blocks reentrant verifyRollup
 //   Self-review fix H2: blacklisted feeSink leaves fee stuck, burn still settles
-//   Self-review fix M1: setValidatorActivationMinDelayBlocks rejects too-large values
 //
-// Full end-to-end verifyRollup is not exercised for the V2-gate
-// tests because it requires a real ZK proof and validator signatures;
-// unit behavior of the V2 gates is what's new. The Finding 3 test
-// DOES go end-to-end through verifyRollup using MockVerifier (which
-// always returns true) and the Idea 3 escape mode to bypass the
-// signature check — this is the only way to drive verifyBurn from
-// a test without reimplementing the ZK proving stack.
+//   Plan-alignment: addToken stays V1-shape (onlyOwner, existing check)
+//   Plan-alignment: initializeV2 deploys timelock + transfers ownership
 
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
@@ -40,30 +29,36 @@ const NOTE_KIND =
 const VK_HASH =
   "0x0000000000000000000000000000000000000000000000000000000000000001" as const;
 
-// Helper: deploy a RollupV1 implementation behind an ERC1967 proxy,
-// run initialize(), then run initializeV2(). Returns the rollup typed
-// as the implementation so `.write.initializeV2(...)` works on it.
+// Seven days in seconds — the contract's enforced floor for openProvingDelay.
+const SEVEN_DAYS = 604800n;
+// One day in seconds — the contract's floor for the timelock minDelay.
+const ONE_DAY = 86400n;
+
+// Helper: deploy RollupV1 behind an ERC1967 proxy, run initialize(),
+// then run initializeV2(). Returns the rollup handle typed as
+// RollupV1, plus peripheral addresses.
 //
-// Why a proxy: RollupV1's constructor calls _disableInitializers() on
-// the implementation, which is correct for production (prevents the
-// implementation from being initialized directly, a known OZ footgun)
-// but means we must wrap it in a proxy for any init-using test.
+// After initializeV2 runs, ownership has been transferred to a
+// freshly-deployed TimelockController. The `owner` returned by this
+// helper is the DEPLOYER — the pre-upgrade owner, which is only
+// useful for driving pre-V2 test paths. For post-V2 onlyOwner actions,
+// the caller has to go through the deployed timelock (not exercised
+// in these tests because none of them need post-V2 governance calls).
 async function deployRollupV2() {
   const { viem, networkHelpers } = await network.connect();
-  const [owner, prover, validator, guardian, sink, user] =
+  const [deployer, prover, validator, sink, user, spare] =
     await viem.getWalletClients();
 
   const mockToken = await viem.deployContract("MockERC20");
   const mockVerifier = await viem.deployContract("MockVerifier");
   const impl = await viem.deployContract("RollupV1");
 
-  // Encode initialize(...) call data for proxy constructor.
   const initData = encodeFunctionData({
     abi: impl.abi,
     functionName: "initialize",
     args: [
-      owner.account.address,
-      owner.account.address, // escrow manager (placeholder — owner for tests)
+      deployer.account.address,
+      deployer.account.address, // escrow manager placeholder
       mockToken.address,
       mockVerifier.address,
       prover.account.address,
@@ -76,75 +71,58 @@ async function deployRollupV2() {
     impl.address,
     initData,
   ]);
-
-  // Get a RollupV1-typed handle pointed at the proxy.
   const rollup = await viem.getContractAt("RollupV1", proxy.address);
 
-  // initializeV2 — test-tuned values (not production):
-  //   perMintCap         = 1 ether      (easy round number)
-  //   globalTvlCap       = 10 ether
-  //   openProvingDelay   = 1 day        (minimum allowed by contract)
-  //   validatorMinDelay  = 100 blocks   (small so tests are fast)
-  //   burnFeeFloor       = 1000         (arbitrary wei)
-  //   burnFeeBps         = 10           (0.1%)
+  // initializeV2 params (test-tuned):
+  //   perMintCap       = 1 ether         (headroom for a single deposit)
+  //   globalTvlCap     = 10 ether        (roughly 10k users at 0.001 each)
+  //   openProvingDelay = 7 days          (contract floor, matches plan)
+  //   burnFee          = 2000            (≈ $0.20 at $100k BTC)
+  //   feeSink          = sink
+  //   timelockMinDelay = 1 day           (contract floor)
+  //   proposers        = [deployer]      (so the test can still schedule
+  //                                       through the timelock if needed)
+  //   executors        = [deployer]
   await rollup.write.initializeV2([
     parseEther("1"),
     parseEther("10"),
-    86400n,
-    100n,
-    guardian.account.address,
-    1000n,
-    10n,
+    SEVEN_DAYS,
+    2000n,
     sink.account.address,
+    ONE_DAY,
+    [deployer.account.address] as readonly `0x${string}`[],
+    [deployer.account.address] as readonly `0x${string}`[],
   ]);
 
   return {
     rollup,
     mockToken,
     mockVerifier,
-    owner,
+    deployer,
     prover,
     validator,
-    guardian,
     sink,
     user,
+    spare,
     networkHelpers,
   };
 }
 
 describe("RollupV1 V2 upgrade", () => {
   // -----------------------------------------------------------------
-  // Idea 1 — setRoot is disabled
-  // -----------------------------------------------------------------
-  describe("Idea 1: setRoot disabled", () => {
-    it("setRoot always reverts, even from owner", async () => {
-      const { rollup, owner } = await deployRollupV2();
-      await assert.rejects(
-        rollup.write.setRoot(
-          [
-            "0x1111111111111111111111111111111111111111111111111111111111111111",
-          ],
-          { account: owner.account },
-        ),
-      );
-    });
-  });
-
-  // -----------------------------------------------------------------
-  // Idea 2 — deposit caps
+  // Idea 2 — deposit caps on mint()
   // -----------------------------------------------------------------
   describe("Idea 2: deposit caps", () => {
     it("mint() rejects amount > perMintCap", async () => {
       const { rollup, mockToken, user } = await deployRollupV2();
-      // Fund and approve user
       await mockToken.write.mint([user.account.address, parseEther("100")]);
       await mockToken.write.approve([rollup.address, parseEther("100")], {
         account: user.account,
       });
 
-      // perMintCap = 1 ether; try 2 ether
+      // perMintCap = 1 ether; 2 ether must revert.
       const bigValue =
-        "0x0000000000000000000000000000000000000000000000001bc16d674ec80000" as const; // 2e18
+        "0x0000000000000000000000000000000000000000000000001bc16d674ec80000" as const;
       await assert.rejects(
         rollup.write.mint(
           [
@@ -164,19 +142,20 @@ describe("RollupV1 V2 upgrade", () => {
         account: user.account,
       });
 
-      const v = "0x00000000000000000000000000000000000000000000000000038d7ea4c68000" as const; // 1e15
-      const hashA = "0x0000000000000000000000000000000000000000000000000000000000000aaa" as const;
+      const v =
+        "0x00000000000000000000000000000000000000000000000000038d7ea4c68000" as const;
+      const hashA =
+        "0x0000000000000000000000000000000000000000000000000000000000000aaa" as const;
       await rollup.write.mint([hashA, v, NOTE_KIND], {
         account: user.account,
       });
-
       const tvl = await rollup.read.currentTvl();
       assert.equal(tvl, 1_000_000_000_000_000n);
     });
   });
 
   // -----------------------------------------------------------------
-  // Idea 3 — open proving view
+  // Idea 3 — open proving view (7-day floor)
   // -----------------------------------------------------------------
   describe("Idea 3: open proving", () => {
     it("isProvingOpen is false right after V2 init", async () => {
@@ -185,151 +164,28 @@ describe("RollupV1 V2 upgrade", () => {
       assert.equal(open, false);
     });
 
-    it("isProvingOpen flips to true once openProvingDelay elapses", async () => {
+    it("isProvingOpen flips to true once 7 days elapse", async () => {
       const { rollup, networkHelpers } = await deployRollupV2();
-      // openProvingDelay = 86400s; jump 86401s and mine a block
-      // so the new timestamp is reflected when the view call is
-      // evaluated against the current chain state.
-      await networkHelpers.time.increase(86401);
+      // Jump 7 days + 1 second.
+      await networkHelpers.time.increase(Number(SEVEN_DAYS) + 1);
       await networkHelpers.mine(1);
       const open = await rollup.read.isProvingOpen();
       assert.equal(open, true);
     });
-  });
 
-  // -----------------------------------------------------------------
-  // Idea 4 — validator activation floor
-  // -----------------------------------------------------------------
-  describe("Idea 4: validator activation floor", () => {
-    it("setValidators rejects validFrom below the floor", async () => {
-      const { rollup, owner, validator, networkHelpers } =
-        await deployRollupV2();
-      const currentBlock = await networkHelpers.time.latestBlock();
-
-      // floor is 100 blocks; try 50 blocks ahead
-      await assert.rejects(
-        rollup.write.setValidators(
-          [BigInt(currentBlock + 50), [validator.account.address]],
-          { account: owner.account },
-        ),
-      );
-    });
-
-    it("setValidators accepts validFrom past the floor", async () => {
-      const { rollup, owner, validator, networkHelpers } =
-        await deployRollupV2();
-      const currentBlock = await networkHelpers.time.latestBlock();
-
-      await rollup.write.setValidators(
-        [BigInt(currentBlock + 200), [validator.account.address]],
-        { account: owner.account },
-      );
-    });
-  });
-
-  // -----------------------------------------------------------------
-  // Ideas 5-8 — guardian + pause
-  // -----------------------------------------------------------------
-  describe("Ideas 5-8: guardian + pause", () => {
-    it("guardian can pause, non-guardian cannot", async () => {
-      const { rollup, guardian, user } = await deployRollupV2();
-      // Non-guardian attempt should revert.
-      await assert.rejects(
-        rollup.write.setWithdrawalsPaused([true], { account: user.account }),
-      );
-      // Guardian attempt should succeed.
-      await rollup.write.setWithdrawalsPaused([true], {
-        account: guardian.account,
-      });
-      const paused = await rollup.read.withdrawalsPaused();
-      assert.equal(paused, true);
-    });
-
-    it("substituteBurn reverts while paused", async () => {
-      const { rollup, owner, guardian } = await deployRollupV2();
-      await rollup.write.setWithdrawalsPaused([true], {
-        account: guardian.account,
-      });
-
-      // owner was set as a burn substitutor in initialize().
-      // Note: this tx reverts on the pause check before touching
-      // any of the substitute-burn bookkeeping, so bogus hash/amount
-      // values are fine here — the pause check runs first.
-      await assert.rejects(
-        rollup.write.substituteBurn(
-          [
-            owner.account.address,
-            NOTE_KIND,
-            "0x000000000000000000000000000000000000000000000000000000000000beef",
-            1_000_000_000_000_000n,
-            9_999_999n,
-          ],
-          { account: owner.account },
-        ),
-      );
-    });
-  });
-
-  // -----------------------------------------------------------------
-  // Idea 9 — fee math
-  // -----------------------------------------------------------------
-  describe("Idea 9: burn fee math", () => {
-    it("computeBurnFee returns floor for small values", async () => {
-      const { rollup } = await deployRollupV2();
-      // value=500, bps=10 → bps fee = 0, floor = 1000 → fee = 500 (clamped)
-      const fee = await rollup.read.computeBurnFee([500n]);
-      assert.equal(fee, 500n);
-    });
-
-    it("computeBurnFee returns bps portion for large values", async () => {
-      const { rollup } = await deployRollupV2();
-      // value=1e18, bps=10 → bps fee = 1e15 (0.1%) >> floor (1000)
-      const fee = await rollup.read.computeBurnFee([parseEther("1")]);
-      assert.equal(fee, 1_000_000_000_000_000n);
-    });
-
-    it("computeBurnFee applies floor when bps portion < floor", async () => {
-      const { rollup } = await deployRollupV2();
-      // value=10000, bps=10 → bps fee = 10, floor = 1000 → fee = 1000
-      const fee = await rollup.read.computeBurnFee([10_000n]);
-      assert.equal(fee, 1000n);
-    });
-  });
-
-  // =================================================================
-  // Review fixes
-  //
-  // These cover the four findings from the post-V2 review:
-  //   Finding 1: initializeV2 must be owner-restricted
-  //   Finding 2: isProvingOpen must not be true before V2 init
-  //   Finding 3: TVL must not decrement on a failed burn
-  //   Finding 4: addToken must revert in V2
-  // =================================================================
-  describe("Review fixes", () => {
-    // ---------------------------------------------------------------
-    // Finding 1 — non-owner cannot call initializeV2.
-    //
-    // Deploys impl behind a proxy with initialize() encoded in the
-    // constructor data (so V1 state is set). Then attempts to call
-    // initializeV2 from a non-owner account. Must revert. Without
-    // the onlyOwner modifier, this call would succeed and the
-    // attacker would own guardian/feeSink/caps.
-    // ---------------------------------------------------------------
-    it("Finding 1: non-owner cannot call initializeV2", async () => {
+    it("initializeV2 rejects openProvingDelay < 7 days", async () => {
       const { viem } = await network.connect();
-      const [owner, prover, validator, guardian, sink, attacker] =
+      const [deployer, prover, validator, sink] =
         await viem.getWalletClients();
-
       const mockToken = await viem.deployContract("MockERC20");
       const mockVerifier = await viem.deployContract("MockVerifier");
       const impl = await viem.deployContract("RollupV1");
-
       const initData = encodeFunctionData({
         abi: impl.abi,
         functionName: "initialize",
         args: [
-          owner.account.address,
-          owner.account.address,
+          deployer.account.address,
+          deployer.account.address,
           mockToken.address,
           mockVerifier.address,
           prover.account.address,
@@ -343,67 +199,119 @@ describe("RollupV1 V2 upgrade", () => {
       ]);
       const rollup = await viem.getContractAt("RollupV1", proxy.address);
 
-      // Attacker races to initializeV2 with their own addresses.
-      // Must revert due to onlyOwner.
+      // 6 days — below the 7-day floor.
+      await assert.rejects(
+        rollup.write.initializeV2([
+          parseEther("1"),
+          parseEther("10"),
+          6n * 86400n,
+          2000n,
+          sink.account.address,
+          ONE_DAY,
+          [deployer.account.address] as readonly `0x${string}`[],
+          [deployer.account.address] as readonly `0x${string}`[],
+        ]),
+      );
+    });
+  });
+
+  // -----------------------------------------------------------------
+  // Idea 9 — flat burn fee
+  // -----------------------------------------------------------------
+  describe("Idea 9: flat burn fee", () => {
+    it("computeBurnFee returns the flat fee for large values", async () => {
+      const { rollup } = await deployRollupV2();
+      // burnFee = 2000; any value >= 2000 returns 2000.
+      const fee = await rollup.read.computeBurnFee([parseEther("1")]);
+      assert.equal(fee, 2000n);
+    });
+
+    it("computeBurnFee clamps to value when value < fee", async () => {
+      const { rollup } = await deployRollupV2();
+      // value=500 < fee=2000 → fee clamped to 500.
+      const fee = await rollup.read.computeBurnFee([500n]);
+      assert.equal(fee, 500n);
+    });
+  });
+
+  // =================================================================
+  // Review fixes (carried forward unchanged where still applicable)
+  // =================================================================
+  describe("Review fixes", () => {
+    // Finding 1: non-owner cannot call initializeV2.
+    it("Finding 1: non-owner cannot call initializeV2", async () => {
+      const { viem } = await network.connect();
+      const [deployer, prover, validator, sink, attacker] =
+        await viem.getWalletClients();
+      const mockToken = await viem.deployContract("MockERC20");
+      const mockVerifier = await viem.deployContract("MockVerifier");
+      const impl = await viem.deployContract("RollupV1");
+      const initData = encodeFunctionData({
+        abi: impl.abi,
+        functionName: "initialize",
+        args: [
+          deployer.account.address,
+          deployer.account.address,
+          mockToken.address,
+          mockVerifier.address,
+          prover.account.address,
+          [validator.account.address],
+          VK_HASH,
+        ],
+      });
+      const proxy = await viem.deployContract("RollupV2TestProxy", [
+        impl.address,
+        initData,
+      ]);
+      const rollup = await viem.getContractAt("RollupV1", proxy.address);
+
       await assert.rejects(
         rollup.write.initializeV2(
           [
             parseEther("1"),
             parseEther("10"),
-            86400n,
-            100n,
-            attacker.account.address, // attacker tries to seize guardian
-            1000n,
-            10n,
+            SEVEN_DAYS,
+            2000n,
             attacker.account.address, // attacker tries to seize fee sink
+            ONE_DAY,
+            [attacker.account.address] as readonly `0x${string}`[],
+            [attacker.account.address] as readonly `0x${string}`[],
           ],
           { account: attacker.account },
         ),
       );
 
-      // Owner should still be able to initialize.
+      // Deployer still can.
       await rollup.write.initializeV2(
         [
           parseEther("1"),
           parseEther("10"),
-          86400n,
-          100n,
-          guardian.account.address,
-          1000n,
-          10n,
+          SEVEN_DAYS,
+          2000n,
           sink.account.address,
+          ONE_DAY,
+          [deployer.account.address] as readonly `0x${string}`[],
+          [deployer.account.address] as readonly `0x${string}`[],
         ],
-        { account: owner.account },
+        { account: deployer.account },
       );
-
-      // Verify real guardian is in place (not attacker).
-      const g = await rollup.read.guardian();
-      assert.equal(g.toLowerCase(), guardian.account.address.toLowerCase());
     });
 
-    // ---------------------------------------------------------------
-    // Finding 2 — isProvingOpen must be false before initializeV2.
-    //
-    // Pre-V2-init storage defaults: lastVerifiedAt=0, openProvingDelay=0.
-    // Without the guard, block.timestamp >= 0 + 0 is trivially true,
-    // which would flip the contract into escape mode during the
-    // upgrade window. The guard (`openProvingDelay == 0 ? false`)
-    // restores V1-equivalent behavior until V2 is initialized.
-    // ---------------------------------------------------------------
+    // Finding 2: pre-init isProvingOpen is false (the openProvingDelay
+    // default-zero state would otherwise make the comparison trivially
+    // true).
     it("Finding 2: isProvingOpen is false before initializeV2", async () => {
       const { viem } = await network.connect();
-      const [owner, prover, validator] = await viem.getWalletClients();
-
+      const [deployer, prover, validator] = await viem.getWalletClients();
       const mockToken = await viem.deployContract("MockERC20");
       const mockVerifier = await viem.deployContract("MockVerifier");
       const impl = await viem.deployContract("RollupV1");
-
       const initData = encodeFunctionData({
         abi: impl.abi,
         functionName: "initialize",
         args: [
-          owner.account.address,
-          owner.account.address,
+          deployer.account.address,
+          deployer.account.address,
           mockToken.address,
           mockVerifier.address,
           prover.account.address,
@@ -417,43 +325,29 @@ describe("RollupV1 V2 upgrade", () => {
       ]);
       const rollup = await viem.getContractAt("RollupV1", proxy.address);
 
-      // V1 initialized, V2 NOT yet initialized. openProvingDelay is 0.
-      // Guard should keep isProvingOpen false.
       const open = await rollup.read.isProvingOpen();
       assert.equal(open, false);
 
-      // Sanity: openProvingDelay really is 0 at this point.
       const delay = await rollup.read.openProvingDelay();
       assert.equal(delay, 0n);
     });
 
-    // ---------------------------------------------------------------
-    // Finding 3 — failed burn must not decrement currentTvl.
-    //
-    // Uses FailingERC20 (a non-reverting ERC20 that returns false
-    // from transfer when a flag is set). Seeds the contract with a
-    // mint, flips the token to fail-mode, then drives a burn through
-    // verifyRollup in escape mode (so we don't need real validator
-    // signatures).
-    //
-    // Pre-fix: currentTvl dropped to 0 despite the tokens staying
-    // in the contract. Post-fix: currentTvl is preserved.
-    // ---------------------------------------------------------------
+    // Finding 3: failed burn (silent ERC20 transfer failure) must
+    // not decrement currentTvl.
     it("Finding 3: failed burn does not decrement currentTvl", async () => {
       const { viem, networkHelpers } = await network.connect();
-      const [owner, prover, validator, guardian, sink, userAcct] =
+      const [deployer, prover, validator, sink, userAcct] =
         await viem.getWalletClients();
 
       const failingToken = await viem.deployContract("FailingERC20");
       const mockVerifier = await viem.deployContract("MockVerifier");
       const impl = await viem.deployContract("RollupV1");
-
       const initData = encodeFunctionData({
         abi: impl.abi,
         functionName: "initialize",
         args: [
-          owner.account.address,
-          owner.account.address,
+          deployer.account.address,
+          deployer.account.address,
           failingToken.address,
           mockVerifier.address,
           prover.account.address,
@@ -471,22 +365,19 @@ describe("RollupV1 V2 upgrade", () => {
         [
           parseEther("1"),
           parseEther("10"),
-          86400n,
-          100n,
-          guardian.account.address,
-          1000n,
-          10n,
+          SEVEN_DAYS,
+          0n, // zero fee so no fee-path interference
           sink.account.address,
+          ONE_DAY,
+          [deployer.account.address] as readonly `0x${string}`[],
+          [deployer.account.address] as readonly `0x${string}`[],
         ],
-        { account: owner.account },
+        { account: deployer.account },
       );
 
-      // Deposit: user mints 0.5 ether of FailingERC20 into the rollup.
-      // This both gives the contract balance AND bumps currentTvl.
       const mintValue = parseEther("0.5");
       const mintValueBytes32 =
-        "0x00000000000000000000000000000000000000000000000006f05b59d3b20000" as const; // 5e17
-
+        "0x00000000000000000000000000000000000000000000000006f05b59d3b20000" as const;
       await failingToken.write.mint([userAcct.account.address, mintValue]);
       await failingToken.write.approve([rollup.address, mintValue], {
         account: userAcct.account,
@@ -503,24 +394,14 @@ describe("RollupV1 V2 upgrade", () => {
       const tvlBefore = await rollup.read.currentTvl();
       assert.equal(tvlBefore, mintValue);
 
-      // Trigger escape mode so we can bypass validator signatures.
-      await networkHelpers.time.increase(86401);
+      // Trigger escape mode to bypass signature check (7 days + 1).
+      await networkHelpers.time.increase(Number(SEVEN_DAYS) + 1);
       await networkHelpers.mine(1);
 
-      // Flip the token to fail-mode so the burn payout silently fails.
+      // Make all transfers fail silently.
       await failingToken.write.setTransfersFail([true]);
 
-      // Craft publicInputs for verifyRollup:
-      //   [0]  oldRoot
-      //   [1]  newRoot (any)
-      //   [2]  commitHash (any)
-      //   [3]  kind = 3 (burn)
-      //   [4]  note_kind
-      //   [5]  value as bytes32
-      //   [6]  burn hash (any)
-      //   [7]  burn_addr as bytes32
-      //   [8..32] kind = 0 padding (25 slots)
-      // Total: 3 + 5 + 25 = 33 = messages_length(30) + 3 ✓
+      // Craft a burn public-inputs array.
       const oldRoot = await rollup.read.rootHash();
       const zero =
         "0x0000000000000000000000000000000000000000000000000000000000000000" as const;
@@ -530,7 +411,6 @@ describe("RollupV1 V2 upgrade", () => {
         "0x0000000000000000000000000000000000000000000000000000000000002222" as const;
       const userAddrAsBytes32 = (("0x000000000000000000000000" +
         userAcct.account.address.slice(2).toLowerCase()) as `0x${string}`);
-
       const padding: `0x${string}`[] = Array(25).fill(zero);
       const publicInputs: `0x${string}`[] = [
         oldRoot,
@@ -544,206 +424,41 @@ describe("RollupV1 V2 upgrade", () => {
         ...padding,
       ];
 
-      // Empty signatures — allowed in escape mode.
       await rollup.write.verifyRollup(
-        [
-          1n, // height > blockHeight(0)
-          VK_HASH,
-          "0x" as const, // empty aggrProof; MockVerifier ignores it
-          publicInputs,
-          zero, // otherHashFromBlockHash (unused in escape mode)
-          [], // no signatures
-        ],
+        [1n, VK_HASH, "0x" as const, publicInputs, zero, []],
         { account: prover.account },
       );
 
-      // TVL must be preserved because the transfer failed silently.
-      // The rollup contract still holds the tokens; currentTvl must
-      // reflect that, otherwise future mints could push real balance
-      // past globalTvlCap.
       const tvlAfter = await rollup.read.currentTvl();
       assert.equal(
         tvlAfter,
         tvlBefore,
         "TVL should be unchanged when burn transfer failed",
       );
-
-      // And the tokens really are still in the contract:
       const bal = await failingToken.read.balanceOf([rollup.address]);
       assert.equal(bal, mintValue);
-    });
-
-    // ---------------------------------------------------------------
-    // Finding 4 — addToken is alias-only and pre-V2-only.
-    //
-    // Two gates work together here:
-    //   (1) version < 2 — addToken only runs during V1 bootstrap.
-    //   (2) tokenAddress == address(token) — even pre-V2, only
-    //       alias registrations for the primary ERC20 are allowed.
-    //
-    // Together these preserve two invariants simultaneously:
-    //   - The devnet deploy.ts flow still works (registers a second
-    //     note kind that aliases the primary ERC20).
-    //   - V2's TVL seeding (which reads balance of the primary
-    //     token only) covers all value ever held by the contract,
-    //     because every registered note kind resolves to that
-    //     same ERC20.
-    //
-    // This test covers all four corners of the 2x2 matrix:
-    //   (version, tokenAddress)   expected
-    //   pre-V2, primary           succeed   (devnet deploy case)
-    //   pre-V2, non-primary       revert    (alias constraint)
-    //   post-V2, primary          revert    (version gate)
-    //   post-V2, non-primary      revert    (either gate)
-    // ---------------------------------------------------------------
-    it("Finding 4: addToken is alias-only pre-V2 and locked post-V2", async () => {
-      const { viem } = await network.connect();
-      const [owner, prover, validator, guardian, sink] =
-        await viem.getWalletClients();
-
-      const primaryToken = await viem.deployContract("MockERC20");
-      const otherToken = await viem.deployContract("MockERC20");
-      const mockVerifier = await viem.deployContract("MockVerifier");
-      const impl = await viem.deployContract("RollupV1");
-
-      const initData = encodeFunctionData({
-        abi: impl.abi,
-        functionName: "initialize",
-        args: [
-          owner.account.address,
-          owner.account.address,
-          primaryToken.address,
-          mockVerifier.address,
-          prover.account.address,
-          [validator.account.address],
-          VK_HASH,
-        ],
-      });
-      const proxy = await viem.deployContract("RollupV2TestProxy", [
-        impl.address,
-        initData,
-      ]);
-      const rollup = await viem.getContractAt("RollupV1", proxy.address);
-
-      // --- Corner 1: pre-V2, primary — succeed -------------------
-      // This mirrors scripts/deploy.ts on devnet: register a second
-      // note kind (`Note::new_with_psi()` bytes) that resolves to
-      // the SAME primary ERC20 that initialize() set up.
-      const mockBtcNoteKind =
-        "0x000200000000000000893c499c542cef5e3811e1192ce70d8cc03d5c33590000" as const;
-      await rollup.write.addToken(
-        [mockBtcNoteKind, primaryToken.address],
-        { account: owner.account },
-      );
-
-      // Verify the alias was actually registered.
-      const registered = await rollup.read.noteKindTokenAddress([
-        mockBtcNoteKind,
-      ]);
-      assert.equal(
-        registered.toLowerCase(),
-        primaryToken.address.toLowerCase(),
-        "Pre-V2 alias registration should have stored the primary token",
-      );
-
-      // --- Corner 2: pre-V2, non-primary — revert ----------------
-      // This is the V1→V2 TVL seeding hole that the alias constraint
-      // closes. Registering a DIFFERENT ERC20 pre-V2 would let value
-      // accumulate outside what initializeV2's balance-of seed can see.
-      const aliasAttemptKind =
-        "0x0002000000000000000000000000000000000000000000000000000000000001" as const;
-      await assert.rejects(
-        rollup.write.addToken(
-          [aliasAttemptKind, otherToken.address],
-          { account: owner.account },
-        ),
-        "Pre-V2 addToken with non-primary ERC20 must revert",
-      );
-
-      // --- Cross the V2 boundary ---------------------------------
-      await rollup.write.initializeV2(
-        [
-          parseEther("1"),
-          parseEther("10"),
-          86400n,
-          100n,
-          guardian.account.address,
-          1000n,
-          10n,
-          sink.account.address,
-        ],
-        { account: owner.account },
-      );
-
-      // --- Corner 3: post-V2, primary — revert (version gate) ----
-      // Even with the correct primary token address, post-V2
-      // addToken is locked entirely.
-      const postV2NoteKind =
-        "0x0003000000000000000000000000000000000000000000000000000000000000" as const;
-      await assert.rejects(
-        rollup.write.addToken([postV2NoteKind, primaryToken.address], {
-          account: owner.account,
-        }),
-        "Post-V2 addToken must revert even for the primary token",
-      );
-
-      // --- Corner 4: post-V2, non-primary — revert ----------------
-      await assert.rejects(
-        rollup.write.addToken([postV2NoteKind, otherToken.address], {
-          account: owner.account,
-        }),
-        "Post-V2 addToken must revert for non-primary tokens",
-      );
-
-      // --- Non-owner control: always reverts (unchanged) ---------
-      await assert.rejects(
-        rollup.write.addToken([postV2NoteKind, primaryToken.address], {
-          account: prover.account,
-        }),
-      );
     });
   });
 
   // =================================================================
-  // Self-review fixes
-  //
-  // These cover the three findings I raised against my own work:
-  //   H1: reentrancy via verifyRollup in escape mode
-  //   H2: fee-sink DoS bricks burn settlement
-  //   M1: setValidatorActivationMinDelayBlocks has no upper bound
+  // Self-review fixes (H1, H2 still applicable; M1 removed with the
+  // validator floor it was guarding)
   // =================================================================
   describe("Self-review fixes", () => {
-    // ---------------------------------------------------------------
-    // H1 — reentrant verifyRollup must revert via nonReentrant.
-    //
-    // Uses ReentrantERC20, a test token whose _update hook triggers
-    // a configured callback after the transfer settles. We arm it to
-    // call verifyRollup back on the rollup proxy. Because nonReentrant
-    // is the first thing in verifyRollup's modifier chain that uses
-    // storage (via the ReentrancyGuard _status slot), the reentrant
-    // call reverts, the token's low-level call records that failure,
-    // and the outer verifyRollup proceeds cleanly.
-    //
-    // What we assert:
-    //   1. outer verifyRollup succeeded (rootHash advanced)
-    //   2. the reentrant call was observed to fail
-    //      (reentrantCallSucceeded stays false)
-    // ---------------------------------------------------------------
     it("H1: nonReentrant blocks reentrant verifyRollup", async () => {
       const { viem, networkHelpers } = await network.connect();
-      const [owner, prover, validator, guardian, sink, userAcct] =
+      const [deployer, prover, validator, sink, userAcct] =
         await viem.getWalletClients();
 
       const reentrantToken = await viem.deployContract("ReentrantERC20");
       const mockVerifier = await viem.deployContract("MockVerifier");
       const impl = await viem.deployContract("RollupV1");
-
       const initData = encodeFunctionData({
         abi: impl.abi,
         functionName: "initialize",
         args: [
-          owner.account.address,
-          owner.account.address,
+          deployer.account.address,
+          deployer.account.address,
           reentrantToken.address,
           mockVerifier.address,
           prover.account.address,
@@ -761,18 +476,16 @@ describe("RollupV1 V2 upgrade", () => {
         [
           parseEther("1"),
           parseEther("10"),
-          86400n,
-          100n,
-          guardian.account.address,
-          0n, // zero fee floor — this test is about reentrancy, not fees
+          SEVEN_DAYS,
           0n,
           sink.account.address,
+          ONE_DAY,
+          [deployer.account.address] as readonly `0x${string}`[],
+          [deployer.account.address] as readonly `0x${string}`[],
         ],
-        { account: owner.account },
+        { account: deployer.account },
       );
 
-      // Seed the contract with a mint so a burn has something to
-      // pay out.
       const mintValue = parseEther("0.5");
       const mintValueBytes32 =
         "0x00000000000000000000000000000000000000000000000006f05b59d3b20000" as const;
@@ -789,10 +502,6 @@ describe("RollupV1 V2 upgrade", () => {
         { account: userAcct.account },
       );
 
-      // Arm the token to reenter verifyRollup on its next transfer.
-      // We pass arbitrary but well-formed calldata — what matters is
-      // that the reentrant *attempt* is made; the nonReentrant
-      // modifier fires before any arg parsing matters.
       const reentrantPayload = encodeFunctionData({
         abi: impl.abi,
         functionName: "verifyRollup",
@@ -800,8 +509,6 @@ describe("RollupV1 V2 upgrade", () => {
           2n,
           VK_HASH,
           "0x" as const,
-          // any 33-entry publicInputs; the reentrant call reverts
-          // on the guard before reading them
           Array(33).fill(
             "0x0000000000000000000000000000000000000000000000000000000000000000",
           ) as readonly `0x${string}`[],
@@ -811,11 +518,9 @@ describe("RollupV1 V2 upgrade", () => {
       });
       await reentrantToken.write.setAttack([rollup.address, reentrantPayload]);
 
-      // Open escape mode so we don't need sigs.
-      await networkHelpers.time.increase(86401);
+      await networkHelpers.time.increase(Number(SEVEN_DAYS) + 1);
       await networkHelpers.mine(1);
 
-      // Craft the outer verifyRollup's publicInputs with one burn.
       const oldRoot = await rollup.read.rootHash();
       const zero =
         "0x0000000000000000000000000000000000000000000000000000000000000000" as const;
@@ -838,15 +543,11 @@ describe("RollupV1 V2 upgrade", () => {
         ...padding,
       ];
 
-      // Outer verifyRollup. During the burn payout to the user, the
-      // token's _update hook attempts the reentrant call. That call
-      // must fail (nonReentrant reverts). Outer completes normally.
       await rollup.write.verifyRollup(
         [1n, VK_HASH, "0x" as const, publicInputs, zero, []],
         { account: prover.account },
       );
 
-      // Assertion 1: the reentrant attempt was observed to fail.
       const reentrantSucceeded =
         await reentrantToken.read.reentrantCallSucceeded();
       assert.equal(
@@ -855,40 +556,24 @@ describe("RollupV1 V2 upgrade", () => {
         "ReentrancyGuard did not block the reentrant verifyRollup",
       );
 
-      // Assertion 2: outer verifyRollup advanced the chain.
       const newHeight = await rollup.read.blockHeight();
       assert.equal(newHeight, 1n);
     });
 
-    // ---------------------------------------------------------------
-    // H2 — blacklisted feeSink must not brick burn settlement.
-    //
-    // Uses FailingERC20's recipient blacklist. Set feeSink as the
-    // blacklisted address so the fee transfer reverts while the
-    // primary payout to the user succeeds.
-    //
-    // Pre-fix: safeTransfer reverts -> whole verifyRollup reverts ->
-    // chain bricks until governance rotates feeSink (timelocked).
-    //
-    // Post-fix: the fee transfer fails gracefully, FeeStuck event
-    // is emitted, fee remains in contract, burn settles normally,
-    // currentTvl decrements by payout (not value).
-    // ---------------------------------------------------------------
     it("H2: blacklisted feeSink leaves fee stuck but burn still settles", async () => {
       const { viem, networkHelpers } = await network.connect();
-      const [owner, prover, validator, guardian, sink, userAcct] =
+      const [deployer, prover, validator, sink, userAcct] =
         await viem.getWalletClients();
 
       const token = await viem.deployContract("FailingERC20");
       const mockVerifier = await viem.deployContract("MockVerifier");
       const impl = await viem.deployContract("RollupV1");
-
       const initData = encodeFunctionData({
         abi: impl.abi,
         functionName: "initialize",
         args: [
-          owner.account.address,
-          owner.account.address,
+          deployer.account.address,
+          deployer.account.address,
           token.address,
           mockVerifier.address,
           prover.account.address,
@@ -902,28 +587,24 @@ describe("RollupV1 V2 upgrade", () => {
       ]);
       const rollup = await viem.getContractAt("RollupV1", proxy.address);
 
-      // Non-zero fee so we actually exercise the fee-routing branch.
-      const FLOOR = 1000n;
-      const BPS = 10n; // 0.1%
+      const FEE = 2000n;
       await rollup.write.initializeV2(
         [
           parseEther("1"),
           parseEther("10"),
-          86400n,
-          100n,
-          guardian.account.address,
-          FLOOR,
-          BPS,
+          SEVEN_DAYS,
+          FEE,
           sink.account.address,
+          ONE_DAY,
+          [deployer.account.address] as readonly `0x${string}`[],
+          [deployer.account.address] as readonly `0x${string}`[],
         ],
-        { account: owner.account },
+        { account: deployer.account },
       );
 
-      // Blacklist the feeSink. Fee transfers to this address will
-      // revert inside the token contract.
+      // Blacklist sink so fee transfer reverts; main payout still ok.
       await token.write.setBlacklisted([sink.account.address, true]);
 
-      // Seed contract with a mint.
       const mintValue = parseEther("0.5");
       const mintValueBytes32 =
         "0x00000000000000000000000000000000000000000000000006f05b59d3b20000" as const;
@@ -946,11 +627,9 @@ describe("RollupV1 V2 upgrade", () => {
         userAcct.account.address,
       ]);
 
-      // Open escape mode.
-      await networkHelpers.time.increase(86401);
+      await networkHelpers.time.increase(Number(SEVEN_DAYS) + 1);
       await networkHelpers.mine(1);
 
-      // Craft burn.
       const oldRoot = await rollup.read.rootHash();
       const zero =
         "0x0000000000000000000000000000000000000000000000000000000000000000" as const;
@@ -973,92 +652,128 @@ describe("RollupV1 V2 upgrade", () => {
         ...padding,
       ];
 
-      // This must NOT revert — the fee failure is swallowed.
       await rollup.write.verifyRollup(
         [1n, VK_HASH, "0x" as const, publicInputs, zero, []],
         { account: prover.account },
       );
 
-      // Compute expected fee = max(FLOOR, mintValue * BPS / 10000)
-      const bpsFee = (mintValue * BPS) / 10000n;
-      const fee = bpsFee > FLOOR ? bpsFee : FLOOR;
-      const payout = mintValue - fee;
+      const payout = mintValue - FEE;
 
-      // User received payout (not mintValue).
+      // User received payout, not mintValue.
       const userBalAfter = await token.read.balanceOf([
         userAcct.account.address,
       ]);
-      assert.equal(
-        userBalAfter - userBalBefore,
-        payout,
-        "user should have received payout",
-      );
+      assert.equal(userBalAfter - userBalBefore, payout);
 
-      // Sink received nothing (blacklisted).
+      // Sink got nothing (blacklisted).
       const sinkBalAfter = await token.read.balanceOf([sink.account.address]);
-      assert.equal(
-        sinkBalAfter - sinkBalBefore,
-        0n,
-        "blacklisted sink should have received nothing",
-      );
+      assert.equal(sinkBalAfter - sinkBalBefore, 0n);
 
-      // Fee stayed in the contract.
+      // Fee stuck in contract.
       const rollupBal = await token.read.balanceOf([rollup.address]);
+      assert.equal(rollupBal, FEE);
+
+      // TVL decremented by payout only.
+      const tvlAfter = await rollup.read.currentTvl();
+      assert.equal(tvlBefore - tvlAfter, payout);
+    });
+  });
+
+  // =================================================================
+  // Plan-alignment tests
+  // =================================================================
+  describe("Plan alignment", () => {
+    // addToken is back to its V1 shape: onlyOwner, existing-check,
+    // store. No version gate, no alias constraint. The existing
+    // devnet deploy.ts flow works unchanged because it calls addToken
+    // pre-V2 from the deployer (who IS the owner at that point).
+    it("addToken works from owner pre-V2 (V1 behavior restored)", async () => {
+      const { viem } = await network.connect();
+      const [deployer, prover, validator] = await viem.getWalletClients();
+      const mockToken = await viem.deployContract("MockERC20");
+      const otherToken = await viem.deployContract("MockERC20");
+      const mockVerifier = await viem.deployContract("MockVerifier");
+      const impl = await viem.deployContract("RollupV1");
+
+      const initData = encodeFunctionData({
+        abi: impl.abi,
+        functionName: "initialize",
+        args: [
+          deployer.account.address,
+          deployer.account.address,
+          mockToken.address,
+          mockVerifier.address,
+          prover.account.address,
+          [validator.account.address],
+          VK_HASH,
+        ],
+      });
+      const proxy = await viem.deployContract("RollupV2TestProxy", [
+        impl.address,
+        initData,
+      ]);
+      const rollup = await viem.getContractAt("RollupV1", proxy.address);
+
+      // Deployer can register any token (V1 semantics).
+      const kindA =
+        "0x0001000000000000000000000000000000000000000000000000000000000000" as const;
+      await rollup.write.addToken([kindA, otherToken.address], {
+        account: deployer.account,
+      });
+
+      const registered = await rollup.read.noteKindTokenAddress([kindA]);
       assert.equal(
-        rollupBal,
-        fee,
-        "stuck fee should remain in rollup balance",
+        registered.toLowerCase(),
+        otherToken.address.toLowerCase(),
       );
 
-      // currentTvl decremented by payout only, not value, so the
-      // counter still reflects the real "usable" contract balance.
-      const tvlAfter = await rollup.read.currentTvl();
-      assert.equal(
-        tvlBefore - tvlAfter,
-        payout,
-        "TVL should decrement only by payout when fee is stuck",
+      // Existing check still fires.
+      await assert.rejects(
+        rollup.write.addToken([kindA, otherToken.address], {
+          account: deployer.account,
+        }),
+      );
+
+      // Non-owner rejected (unchanged).
+      const kindB =
+        "0x0001000000000000000000000000000000000000000000000000000000000001" as const;
+      await assert.rejects(
+        rollup.write.addToken([kindB, otherToken.address], {
+          account: validator.account,
+        }),
       );
     });
 
-    // ---------------------------------------------------------------
-    // M1 — setValidatorActivationMinDelayBlocks must reject values
-    //      that would soft-brick _setValidators.
-    //
-    // _setValidators requires:
-    //   floor:   validFrom >= block.number + validatorActivationMinDelayBlocks
-    //   ceiling: validFrom <= block.number + MAX_FUTURE_BLOCKS
-    //
-    // If the delay is >= MAX_FUTURE_BLOCKS, the two constraints have
-    // no overlap and setValidators always reverts.
-    // ---------------------------------------------------------------
-    it("M1: setValidatorActivationMinDelayBlocks rejects values >= MAX_FUTURE_BLOCKS", async () => {
-      const { rollup, owner } = await deployRollupV2();
-      const MAX_FUTURE_BLOCKS = 2_592_000n;
+    // After initializeV2, owner() is the newly-deployed timelock.
+    // Direct onlyOwner calls from the pre-upgrade EOA must fail.
+    it("initializeV2 transfers ownership to the deployed timelock", async () => {
+      const { rollup, deployer } = await deployRollupV2();
 
-      // At the boundary: must revert.
+      const ownerAfter = await rollup.read.owner();
+      const tl = await rollup.read.timelock();
+
+      assert.notEqual(
+        ownerAfter.toLowerCase(),
+        deployer.account.address.toLowerCase(),
+        "owner should no longer be the deployer EOA",
+      );
+      assert.equal(
+        ownerAfter.toLowerCase(),
+        tl.toLowerCase(),
+        "owner should be the newly-deployed timelock",
+      );
+
+      // EOA calls to onlyOwner functions fail.
       await assert.rejects(
-        rollup.write.setValidatorActivationMinDelayBlocks(
-          [MAX_FUTURE_BLOCKS],
-          { account: owner.account },
+        rollup.write.addToken(
+          [
+            "0x0001000000000000000000000000000000000000000000000000000000000099" as const,
+            deployer.account.address,
+          ],
+          { account: deployer.account },
         ),
+        "deployer should no longer be able to call onlyOwner functions",
       );
-
-      // Far above: must revert.
-      await assert.rejects(
-        rollup.write.setValidatorActivationMinDelayBlocks(
-          [MAX_FUTURE_BLOCKS * 2n],
-          { account: owner.account },
-        ),
-      );
-
-      // Just under the boundary: should succeed (value still
-      // impractically large, but within the bound).
-      await rollup.write.setValidatorActivationMinDelayBlocks(
-        [MAX_FUTURE_BLOCKS - 1n],
-        { account: owner.account },
-      );
-      const delay = await rollup.read.validatorActivationMinDelayBlocks();
-      assert.equal(delay, MAX_FUTURE_BLOCKS - 1n);
     });
   });
 });
