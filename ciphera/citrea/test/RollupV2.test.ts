@@ -570,27 +570,35 @@ describe("RollupV1 V2 upgrade", () => {
     });
 
     // ---------------------------------------------------------------
-    // Finding 4 — addToken is gated on the pre-V2 window.
+    // Finding 4 — addToken is alias-only and pre-V2-only.
     //
-    // The V2 caps are single global counters and only make sense
-    // under a single-token assumption. But the pre-upgrade bootstrap
-    // flow (scripts/deploy.ts on devnet) legitimately needs to
-    // register a second mock note kind between initialize() and
-    // initializeV2() — during that window there are no caps yet,
-    // so multi-token registration is safe.
+    // Two gates work together here:
+    //   (1) version < 2 — addToken only runs during V1 bootstrap.
+    //   (2) tokenAddress == address(token) — even pre-V2, only
+    //       alias registrations for the primary ERC20 are allowed.
     //
-    // The fix: gate addToken on version < 2. Pre-V2 (during bootstrap)
-    // it works normally. Post-V2 (once caps are active) it reverts.
+    // Together these preserve two invariants simultaneously:
+    //   - The devnet deploy.ts flow still works (registers a second
+    //     note kind that aliases the primary ERC20).
+    //   - V2's TVL seeding (which reads balance of the primary
+    //     token only) covers all value ever held by the contract,
+    //     because every registered note kind resolves to that
+    //     same ERC20.
     //
-    // This test covers both sides of the boundary.
+    // This test covers all four corners of the 2x2 matrix:
+    //   (version, tokenAddress)   expected
+    //   pre-V2, primary           succeed   (devnet deploy case)
+    //   pre-V2, non-primary       revert    (alias constraint)
+    //   post-V2, primary          revert    (version gate)
+    //   post-V2, non-primary      revert    (either gate)
     // ---------------------------------------------------------------
-    it("Finding 4: addToken works pre-V2 but reverts post-V2", async () => {
+    it("Finding 4: addToken is alias-only pre-V2 and locked post-V2", async () => {
       const { viem } = await network.connect();
       const [owner, prover, validator, guardian, sink] =
         await viem.getWalletClients();
 
-      const mockToken = await viem.deployContract("MockERC20");
-      const mockToken2 = await viem.deployContract("MockERC20");
+      const primaryToken = await viem.deployContract("MockERC20");
+      const otherToken = await viem.deployContract("MockERC20");
       const mockVerifier = await viem.deployContract("MockVerifier");
       const impl = await viem.deployContract("RollupV1");
 
@@ -600,7 +608,7 @@ describe("RollupV1 V2 upgrade", () => {
         args: [
           owner.account.address,
           owner.account.address,
-          mockToken.address,
+          primaryToken.address,
           mockVerifier.address,
           prover.account.address,
           [validator.account.address],
@@ -613,27 +621,42 @@ describe("RollupV1 V2 upgrade", () => {
       ]);
       const rollup = await viem.getContractAt("RollupV1", proxy.address);
 
-      // Pre-V2 window (version == 1): addToken should succeed.
-      // This mirrors what scripts/deploy.ts does on devnet — it
-      // registers a second mock BTC note kind before calling V2 init.
+      // --- Corner 1: pre-V2, primary — succeed -------------------
+      // This mirrors scripts/deploy.ts on devnet: register a second
+      // note kind (`Note::new_with_psi()` bytes) that resolves to
+      // the SAME primary ERC20 that initialize() set up.
       const mockBtcNoteKind =
         "0x000200000000000000893c499c542cef5e3811e1192ce70d8cc03d5c33590000" as const;
       await rollup.write.addToken(
-        [mockBtcNoteKind, mockToken2.address],
+        [mockBtcNoteKind, primaryToken.address],
         { account: owner.account },
       );
 
-      // Verify the token was actually registered.
+      // Verify the alias was actually registered.
       const registered = await rollup.read.noteKindTokenAddress([
         mockBtcNoteKind,
       ]);
       assert.equal(
         registered.toLowerCase(),
-        mockToken2.address.toLowerCase(),
-        "Pre-V2 addToken should have registered the token",
+        primaryToken.address.toLowerCase(),
+        "Pre-V2 alias registration should have stored the primary token",
       );
 
-      // Cross the V2 boundary.
+      // --- Corner 2: pre-V2, non-primary — revert ----------------
+      // This is the V1→V2 TVL seeding hole that the alias constraint
+      // closes. Registering a DIFFERENT ERC20 pre-V2 would let value
+      // accumulate outside what initializeV2's balance-of seed can see.
+      const aliasAttemptKind =
+        "0x0002000000000000000000000000000000000000000000000000000000000001" as const;
+      await assert.rejects(
+        rollup.write.addToken(
+          [aliasAttemptKind, otherToken.address],
+          { account: owner.account },
+        ),
+        "Pre-V2 addToken with non-primary ERC20 must revert",
+      );
+
+      // --- Cross the V2 boundary ---------------------------------
       await rollup.write.initializeV2(
         [
           parseEther("1"),
@@ -648,20 +671,29 @@ describe("RollupV1 V2 upgrade", () => {
         { account: owner.account },
       );
 
-      // Post-V2 window (version == 2): addToken must revert.
-      // A different note kind to avoid hitting the "Token already
-      // exists" check first — we want to confirm the V2 gate fires.
-      const anotherNoteKind =
+      // --- Corner 3: post-V2, primary — revert (version gate) ----
+      // Even with the correct primary token address, post-V2
+      // addToken is locked entirely.
+      const postV2NoteKind =
         "0x0003000000000000000000000000000000000000000000000000000000000000" as const;
       await assert.rejects(
-        rollup.write.addToken([anotherNoteKind, mockToken2.address], {
+        rollup.write.addToken([postV2NoteKind, primaryToken.address], {
           account: owner.account,
         }),
+        "Post-V2 addToken must revert even for the primary token",
       );
 
-      // Non-owners also can't call it (unchanged behavior).
+      // --- Corner 4: post-V2, non-primary — revert ----------------
       await assert.rejects(
-        rollup.write.addToken([anotherNoteKind, mockToken2.address], {
+        rollup.write.addToken([postV2NoteKind, otherToken.address], {
+          account: owner.account,
+        }),
+        "Post-V2 addToken must revert for non-primary tokens",
+      );
+
+      // --- Non-owner control: always reverts (unchanged) ---------
+      await assert.rejects(
+        rollup.write.addToken([postV2NoteKind, primaryToken.address], {
           account: prover.account,
         }),
       );
