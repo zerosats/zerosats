@@ -22,6 +22,28 @@ Detailed security and operational rationale for the V2 rollup changes is in:
 Keep inline contract comments concise and treat that document as the source of
 truth for upgrade tradeoffs/invariants.
 
+### V2 Deploy / Upgrade Requirements
+
+The V2 safety model is only fully active when **both** of these happen:
+
+1. `initializeV2(...)` is called on the proxy.
+2. `ProxyAdmin` ownership is transferred to the same timelock as `RollupV1.owner()`.
+
+This repo’s expected path is a **fresh deploy**:
+
+- `npx hardhat run ./scripts/deploy.ts`
+
+Key env vars (optional; safe defaults are used if omitted):
+
+- `V2_PER_MINT_CAP_WEI` (default `1000000000000000` = `0.001`)
+- `V2_GLOBAL_TVL_CAP_WEI` (default `10000000000000000000` = `10`)
+- `V2_OPEN_PROVING_DELAY_SECONDS` (default `604800` = `7 days`)
+- `V2_BURN_FEE_WEI` (default `3000000000000`, 300 sats on 18-dec BTC wrappers)
+- `V2_FEE_SINK` (default deployer)
+- `V2_TIMELOCK_MIN_DELAY_SECONDS` (default `86400`)
+- `V2_TIMELOCK_PROPOSERS` (csv, default deployer)
+- `V2_TIMELOCK_EXECUTORS` (csv, default deployer)
+
 ## Testing
 
 The project uses Hardhat with Mocha/Chai testing framework and blockchain-specific matchers for comprehensive smart 

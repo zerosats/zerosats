@@ -71,6 +71,8 @@ Why:
 Operational requirement:
 - off-chain escrow/substitutor components must pay users net-of-fee and account
   for `computeBurnFee(value)`.
+- fee is hard-capped on-chain (`MAX_BURN_FEE`) so governance cannot set
+  confiscatory burn fees by mistake.
 
 ## Intentional Operational Semantics
 
