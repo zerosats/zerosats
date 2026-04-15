@@ -570,24 +570,100 @@ describe("RollupV1 V2 upgrade", () => {
     });
 
     // ---------------------------------------------------------------
-    // Finding 4 — addToken must revert in V2.
+    // Finding 4 — addToken is gated on the pre-V2 window.
     //
     // The V2 caps are single global counters and only make sense
-    // under a single-token assumption. Disabling addToken freezes
-    // that invariant on chain. A future V3 can reintroduce it
-    // together with per-note-kind caps if multi-token is ever
-    // actually needed.
+    // under a single-token assumption. But the pre-upgrade bootstrap
+    // flow (scripts/deploy.ts on devnet) legitimately needs to
+    // register a second mock note kind between initialize() and
+    // initializeV2() — during that window there are no caps yet,
+    // so multi-token registration is safe.
+    //
+    // The fix: gate addToken on version < 2. Pre-V2 (during bootstrap)
+    // it works normally. Post-V2 (once caps are active) it reverts.
+    //
+    // This test covers both sides of the boundary.
     // ---------------------------------------------------------------
-    it("Finding 4: addToken reverts even from owner", async () => {
-      const { rollup, owner } = await deployRollupV2();
+    it("Finding 4: addToken works pre-V2 but reverts post-V2", async () => {
+      const { viem } = await network.connect();
+      const [owner, prover, validator, guardian, sink] =
+        await viem.getWalletClients();
+
+      const mockToken = await viem.deployContract("MockERC20");
+      const mockToken2 = await viem.deployContract("MockERC20");
+      const mockVerifier = await viem.deployContract("MockVerifier");
+      const impl = await viem.deployContract("RollupV1");
+
+      const initData = encodeFunctionData({
+        abi: impl.abi,
+        functionName: "initialize",
+        args: [
+          owner.account.address,
+          owner.account.address,
+          mockToken.address,
+          mockVerifier.address,
+          prover.account.address,
+          [validator.account.address],
+          VK_HASH,
+        ],
+      });
+      const proxy = await viem.deployContract("RollupV2TestProxy", [
+        impl.address,
+        initData,
+      ]);
+      const rollup = await viem.getContractAt("RollupV1", proxy.address);
+
+      // Pre-V2 window (version == 1): addToken should succeed.
+      // This mirrors what scripts/deploy.ts does on devnet — it
+      // registers a second mock BTC note kind before calling V2 init.
+      const mockBtcNoteKind =
+        "0x000200000000000000893c499c542cef5e3811e1192ce70d8cc03d5c33590000" as const;
+      await rollup.write.addToken(
+        [mockBtcNoteKind, mockToken2.address],
+        { account: owner.account },
+      );
+
+      // Verify the token was actually registered.
+      const registered = await rollup.read.noteKindTokenAddress([
+        mockBtcNoteKind,
+      ]);
+      assert.equal(
+        registered.toLowerCase(),
+        mockToken2.address.toLowerCase(),
+        "Pre-V2 addToken should have registered the token",
+      );
+
+      // Cross the V2 boundary.
+      await rollup.write.initializeV2(
+        [
+          parseEther("1"),
+          parseEther("10"),
+          86400n,
+          100n,
+          guardian.account.address,
+          1000n,
+          10n,
+          sink.account.address,
+        ],
+        { account: owner.account },
+      );
+
+      // Post-V2 window (version == 2): addToken must revert.
+      // A different note kind to avoid hitting the "Token already
+      // exists" check first — we want to confirm the V2 gate fires.
+      const anotherNoteKind =
+        "0x0003000000000000000000000000000000000000000000000000000000000000" as const;
       await assert.rejects(
-        rollup.write.addToken(
-          [
-            "0x0001000000000000000000000000000000000000000000000000000000000000",
-            owner.account.address, // any non-zero address
-          ],
-          { account: owner.account },
-        ),
+        rollup.write.addToken([anotherNoteKind, mockToken2.address], {
+          account: owner.account,
+        }),
+      );
+
+      // Non-owners also can't call it (unchanged behavior).
+      await assert.rejects(
+        rollup.write.addToken([anotherNoteKind, mockToken2.address], {
+          account: prover.account,
+        }),
       );
     });
   });
