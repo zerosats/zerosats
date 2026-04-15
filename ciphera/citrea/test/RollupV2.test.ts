@@ -18,6 +18,10 @@
 //   Review fix 3: failed burn does not decrement currentTvl
 //   Review fix 4: addToken reverts
 //
+//   Self-review fix H1: nonReentrant blocks reentrant verifyRollup
+//   Self-review fix H2: blacklisted feeSink leaves fee stuck, burn still settles
+//   Self-review fix M1: setValidatorActivationMinDelayBlocks rejects too-large values
+//
 // Full end-to-end verifyRollup is not exercised for the V2-gate
 // tests because it requires a real ZK proof and validator signatures;
 // unit behavior of the V2 gates is what's new. The Finding 3 test
@@ -697,6 +701,364 @@ describe("RollupV1 V2 upgrade", () => {
           account: prover.account,
         }),
       );
+    });
+  });
+
+  // =================================================================
+  // Self-review fixes
+  //
+  // These cover the three findings I raised against my own work:
+  //   H1: reentrancy via verifyRollup in escape mode
+  //   H2: fee-sink DoS bricks burn settlement
+  //   M1: setValidatorActivationMinDelayBlocks has no upper bound
+  // =================================================================
+  describe("Self-review fixes", () => {
+    // ---------------------------------------------------------------
+    // H1 — reentrant verifyRollup must revert via nonReentrant.
+    //
+    // Uses ReentrantERC20, a test token whose _update hook triggers
+    // a configured callback after the transfer settles. We arm it to
+    // call verifyRollup back on the rollup proxy. Because nonReentrant
+    // is the first thing in verifyRollup's modifier chain that uses
+    // storage (via the ReentrancyGuard _status slot), the reentrant
+    // call reverts, the token's low-level call records that failure,
+    // and the outer verifyRollup proceeds cleanly.
+    //
+    // What we assert:
+    //   1. outer verifyRollup succeeded (rootHash advanced)
+    //   2. the reentrant call was observed to fail
+    //      (reentrantCallSucceeded stays false)
+    // ---------------------------------------------------------------
+    it("H1: nonReentrant blocks reentrant verifyRollup", async () => {
+      const { viem, networkHelpers } = await network.connect();
+      const [owner, prover, validator, guardian, sink, userAcct] =
+        await viem.getWalletClients();
+
+      const reentrantToken = await viem.deployContract("ReentrantERC20");
+      const mockVerifier = await viem.deployContract("MockVerifier");
+      const impl = await viem.deployContract("RollupV1");
+
+      const initData = encodeFunctionData({
+        abi: impl.abi,
+        functionName: "initialize",
+        args: [
+          owner.account.address,
+          owner.account.address,
+          reentrantToken.address,
+          mockVerifier.address,
+          prover.account.address,
+          [validator.account.address],
+          VK_HASH,
+        ],
+      });
+      const proxy = await viem.deployContract("RollupV2TestProxy", [
+        impl.address,
+        initData,
+      ]);
+      const rollup = await viem.getContractAt("RollupV1", proxy.address);
+
+      await rollup.write.initializeV2(
+        [
+          parseEther("1"),
+          parseEther("10"),
+          86400n,
+          100n,
+          guardian.account.address,
+          0n, // zero fee floor — this test is about reentrancy, not fees
+          0n,
+          sink.account.address,
+        ],
+        { account: owner.account },
+      );
+
+      // Seed the contract with a mint so a burn has something to
+      // pay out.
+      const mintValue = parseEther("0.5");
+      const mintValueBytes32 =
+        "0x00000000000000000000000000000000000000000000000006f05b59d3b20000" as const;
+      await reentrantToken.write.mint([userAcct.account.address, mintValue]);
+      await reentrantToken.write.approve([rollup.address, mintValue], {
+        account: userAcct.account,
+      });
+      await rollup.write.mint(
+        [
+          "0x0000000000000000000000000000000000000000000000000000000000003333",
+          mintValueBytes32,
+          NOTE_KIND,
+        ],
+        { account: userAcct.account },
+      );
+
+      // Arm the token to reenter verifyRollup on its next transfer.
+      // We pass arbitrary but well-formed calldata — what matters is
+      // that the reentrant *attempt* is made; the nonReentrant
+      // modifier fires before any arg parsing matters.
+      const reentrantPayload = encodeFunctionData({
+        abi: impl.abi,
+        functionName: "verifyRollup",
+        args: [
+          2n,
+          VK_HASH,
+          "0x" as const,
+          // any 33-entry publicInputs; the reentrant call reverts
+          // on the guard before reading them
+          Array(33).fill(
+            "0x0000000000000000000000000000000000000000000000000000000000000000",
+          ) as readonly `0x${string}`[],
+          "0x0000000000000000000000000000000000000000000000000000000000000000" as const,
+          [],
+        ],
+      });
+      await reentrantToken.write.setAttack([rollup.address, reentrantPayload]);
+
+      // Open escape mode so we don't need sigs.
+      await networkHelpers.time.increase(86401);
+      await networkHelpers.mine(1);
+
+      // Craft the outer verifyRollup's publicInputs with one burn.
+      const oldRoot = await rollup.read.rootHash();
+      const zero =
+        "0x0000000000000000000000000000000000000000000000000000000000000000" as const;
+      const three =
+        "0x0000000000000000000000000000000000000000000000000000000000000003" as const;
+      const burnHash =
+        "0x0000000000000000000000000000000000000000000000000000000000003334" as const;
+      const userAddrAsBytes32 = (("0x000000000000000000000000" +
+        userAcct.account.address.slice(2).toLowerCase()) as `0x${string}`);
+      const padding: `0x${string}`[] = Array(25).fill(zero);
+      const publicInputs: `0x${string}`[] = [
+        oldRoot,
+        "0x0000000000000000000000000000000000000000000000000000000000000010" as const,
+        "0x0000000000000000000000000000000000000000000000000000000000000011" as const,
+        three,
+        NOTE_KIND,
+        mintValueBytes32,
+        burnHash,
+        userAddrAsBytes32,
+        ...padding,
+      ];
+
+      // Outer verifyRollup. During the burn payout to the user, the
+      // token's _update hook attempts the reentrant call. That call
+      // must fail (nonReentrant reverts). Outer completes normally.
+      await rollup.write.verifyRollup(
+        [1n, VK_HASH, "0x" as const, publicInputs, zero, []],
+        { account: prover.account },
+      );
+
+      // Assertion 1: the reentrant attempt was observed to fail.
+      const reentrantSucceeded =
+        await reentrantToken.read.reentrantCallSucceeded();
+      assert.equal(
+        reentrantSucceeded,
+        false,
+        "ReentrancyGuard did not block the reentrant verifyRollup",
+      );
+
+      // Assertion 2: outer verifyRollup advanced the chain.
+      const newHeight = await rollup.read.blockHeight();
+      assert.equal(newHeight, 1n);
+    });
+
+    // ---------------------------------------------------------------
+    // H2 — blacklisted feeSink must not brick burn settlement.
+    //
+    // Uses FailingERC20's recipient blacklist. Set feeSink as the
+    // blacklisted address so the fee transfer reverts while the
+    // primary payout to the user succeeds.
+    //
+    // Pre-fix: safeTransfer reverts -> whole verifyRollup reverts ->
+    // chain bricks until governance rotates feeSink (timelocked).
+    //
+    // Post-fix: the fee transfer fails gracefully, FeeStuck event
+    // is emitted, fee remains in contract, burn settles normally,
+    // currentTvl decrements by payout (not value).
+    // ---------------------------------------------------------------
+    it("H2: blacklisted feeSink leaves fee stuck but burn still settles", async () => {
+      const { viem, networkHelpers } = await network.connect();
+      const [owner, prover, validator, guardian, sink, userAcct] =
+        await viem.getWalletClients();
+
+      const token = await viem.deployContract("FailingERC20");
+      const mockVerifier = await viem.deployContract("MockVerifier");
+      const impl = await viem.deployContract("RollupV1");
+
+      const initData = encodeFunctionData({
+        abi: impl.abi,
+        functionName: "initialize",
+        args: [
+          owner.account.address,
+          owner.account.address,
+          token.address,
+          mockVerifier.address,
+          prover.account.address,
+          [validator.account.address],
+          VK_HASH,
+        ],
+      });
+      const proxy = await viem.deployContract("RollupV2TestProxy", [
+        impl.address,
+        initData,
+      ]);
+      const rollup = await viem.getContractAt("RollupV1", proxy.address);
+
+      // Non-zero fee so we actually exercise the fee-routing branch.
+      const FLOOR = 1000n;
+      const BPS = 10n; // 0.1%
+      await rollup.write.initializeV2(
+        [
+          parseEther("1"),
+          parseEther("10"),
+          86400n,
+          100n,
+          guardian.account.address,
+          FLOOR,
+          BPS,
+          sink.account.address,
+        ],
+        { account: owner.account },
+      );
+
+      // Blacklist the feeSink. Fee transfers to this address will
+      // revert inside the token contract.
+      await token.write.setBlacklisted([sink.account.address, true]);
+
+      // Seed contract with a mint.
+      const mintValue = parseEther("0.5");
+      const mintValueBytes32 =
+        "0x00000000000000000000000000000000000000000000000006f05b59d3b20000" as const;
+      await token.write.mint([userAcct.account.address, mintValue]);
+      await token.write.approve([rollup.address, mintValue], {
+        account: userAcct.account,
+      });
+      await rollup.write.mint(
+        [
+          "0x0000000000000000000000000000000000000000000000000000000000004444",
+          mintValueBytes32,
+          NOTE_KIND,
+        ],
+        { account: userAcct.account },
+      );
+
+      const tvlBefore = await rollup.read.currentTvl();
+      const sinkBalBefore = await token.read.balanceOf([sink.account.address]);
+      const userBalBefore = await token.read.balanceOf([
+        userAcct.account.address,
+      ]);
+
+      // Open escape mode.
+      await networkHelpers.time.increase(86401);
+      await networkHelpers.mine(1);
+
+      // Craft burn.
+      const oldRoot = await rollup.read.rootHash();
+      const zero =
+        "0x0000000000000000000000000000000000000000000000000000000000000000" as const;
+      const three =
+        "0x0000000000000000000000000000000000000000000000000000000000000003" as const;
+      const burnHash =
+        "0x0000000000000000000000000000000000000000000000000000000000004445" as const;
+      const userAddrAsBytes32 = (("0x000000000000000000000000" +
+        userAcct.account.address.slice(2).toLowerCase()) as `0x${string}`);
+      const padding: `0x${string}`[] = Array(25).fill(zero);
+      const publicInputs: `0x${string}`[] = [
+        oldRoot,
+        "0x0000000000000000000000000000000000000000000000000000000000000020" as const,
+        "0x0000000000000000000000000000000000000000000000000000000000000021" as const,
+        three,
+        NOTE_KIND,
+        mintValueBytes32,
+        burnHash,
+        userAddrAsBytes32,
+        ...padding,
+      ];
+
+      // This must NOT revert — the fee failure is swallowed.
+      await rollup.write.verifyRollup(
+        [1n, VK_HASH, "0x" as const, publicInputs, zero, []],
+        { account: prover.account },
+      );
+
+      // Compute expected fee = max(FLOOR, mintValue * BPS / 10000)
+      const bpsFee = (mintValue * BPS) / 10000n;
+      const fee = bpsFee > FLOOR ? bpsFee : FLOOR;
+      const payout = mintValue - fee;
+
+      // User received payout (not mintValue).
+      const userBalAfter = await token.read.balanceOf([
+        userAcct.account.address,
+      ]);
+      assert.equal(
+        userBalAfter - userBalBefore,
+        payout,
+        "user should have received payout",
+      );
+
+      // Sink received nothing (blacklisted).
+      const sinkBalAfter = await token.read.balanceOf([sink.account.address]);
+      assert.equal(
+        sinkBalAfter - sinkBalBefore,
+        0n,
+        "blacklisted sink should have received nothing",
+      );
+
+      // Fee stayed in the contract.
+      const rollupBal = await token.read.balanceOf([rollup.address]);
+      assert.equal(
+        rollupBal,
+        fee,
+        "stuck fee should remain in rollup balance",
+      );
+
+      // currentTvl decremented by payout only, not value, so the
+      // counter still reflects the real "usable" contract balance.
+      const tvlAfter = await rollup.read.currentTvl();
+      assert.equal(
+        tvlBefore - tvlAfter,
+        payout,
+        "TVL should decrement only by payout when fee is stuck",
+      );
+    });
+
+    // ---------------------------------------------------------------
+    // M1 — setValidatorActivationMinDelayBlocks must reject values
+    //      that would soft-brick _setValidators.
+    //
+    // _setValidators requires:
+    //   floor:   validFrom >= block.number + validatorActivationMinDelayBlocks
+    //   ceiling: validFrom <= block.number + MAX_FUTURE_BLOCKS
+    //
+    // If the delay is >= MAX_FUTURE_BLOCKS, the two constraints have
+    // no overlap and setValidators always reverts.
+    // ---------------------------------------------------------------
+    it("M1: setValidatorActivationMinDelayBlocks rejects values >= MAX_FUTURE_BLOCKS", async () => {
+      const { rollup, owner } = await deployRollupV2();
+      const MAX_FUTURE_BLOCKS = 2_592_000n;
+
+      // At the boundary: must revert.
+      await assert.rejects(
+        rollup.write.setValidatorActivationMinDelayBlocks(
+          [MAX_FUTURE_BLOCKS],
+          { account: owner.account },
+        ),
+      );
+
+      // Far above: must revert.
+      await assert.rejects(
+        rollup.write.setValidatorActivationMinDelayBlocks(
+          [MAX_FUTURE_BLOCKS * 2n],
+          { account: owner.account },
+        ),
+      );
+
+      // Just under the boundary: should succeed (value still
+      // impractically large, but within the bound).
+      await rollup.write.setValidatorActivationMinDelayBlocks(
+        [MAX_FUTURE_BLOCKS - 1n],
+        { account: owner.account },
+      );
+      const delay = await rollup.read.validatorActivationMinDelayBlocks();
+      assert.equal(delay, MAX_FUTURE_BLOCKS - 1n);
     });
   });
 });

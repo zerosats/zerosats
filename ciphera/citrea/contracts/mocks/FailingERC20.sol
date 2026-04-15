@@ -16,6 +16,11 @@ import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 contract FailingERC20 is ERC20 {
     bool public transfersFail;
 
+    // Self-review fix (H2): per-recipient blacklist. Used to test the
+    // fee-sink DoS scenario where transfers to a specific address
+    // revert while everything else flows normally.
+    mapping(address => bool) public blacklisted;
+
     constructor() ERC20("Failing", "FAIL") {
         _mint(msg.sender, 1_000_000 ether);
     }
@@ -28,6 +33,10 @@ contract FailingERC20 is ERC20 {
         transfersFail = fail;
     }
 
+    function setBlacklisted(address who, bool flag) external {
+        blacklisted[who] = flag;
+    }
+
     function transfer(address to, uint256 amount)
         public
         override
@@ -38,6 +47,11 @@ contract FailingERC20 is ERC20 {
             // This is the non-reverting-but-unsuccessful path.
             return false;
         }
+        // Revert for blacklisted recipients — mirrors tokens that
+        // refuse transfers to OFAC-blocked / frozen addresses. The
+        // rollup's fee-routing path must survive this without
+        // bricking the whole burn settlement.
+        require(!blacklisted[to], "FailingERC20: recipient blacklisted");
         return super.transfer(to, amount);
     }
 }
