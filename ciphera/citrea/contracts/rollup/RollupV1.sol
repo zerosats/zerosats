@@ -4,6 +4,7 @@ pragma solidity ^0.8.28;
 import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol";
 import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -46,7 +47,11 @@ string constant NETWORK = "Ciphera";
 uint64 constant NETWORK_LEN = 7;
 uint256 constant MAX_FUTURE_BLOCKS = 2_592_000; // 30 days (~1 sec blocks)
 
-contract RollupV1 is Initializable, OwnableUpgradeable {
+contract RollupV1 is
+    Initializable,
+    OwnableUpgradeable,
+    ReentrancyGuardUpgradeable
+{
     using SafeERC20 for IERC20;
     event RollupVerified(uint256 indexed height, bytes32 root);
     event Minted(bytes32 indexed hash, bytes32 value, bytes32 note_kind);
@@ -209,8 +214,11 @@ contract RollupV1 is Initializable, OwnableUpgradeable {
     // =====================================================================
 
     // --- Events added in V2 ---------------------------------------------
-    event PerMintCapUpdated(uint256 newCap);
-    event GlobalTvlCapUpdated(uint256 newCap);
+    // Self-review fix (L1): emit both old and new values so subgraphs
+    // can derive deltas without a separate RPC read. Matches the
+    // pattern used by other V2 update events.
+    event PerMintCapUpdated(uint256 oldCap, uint256 newCap);
+    event GlobalTvlCapUpdated(uint256 oldCap, uint256 newCap);
     event OpenProvingDelayUpdated(uint256 oldDelay, uint256 newDelay);
     event ValidatorActivationDelayUpdated(uint256 oldDelay, uint256 newDelay);
     event GuardianUpdated(address indexed oldGuardian, address indexed newGuardian);
@@ -218,6 +226,11 @@ contract RollupV1 is Initializable, OwnableUpgradeable {
     event BurnFeeUpdated(uint256 oldFloor, uint256 oldBps, uint256 newFloor, uint256 newBps);
     event FeeSinkUpdated(address indexed oldSink, address indexed newSink);
     event FeePaid(address indexed token, address indexed sink, uint256 amount);
+    // Self-review fix (H2): emitted when fee routing to feeSink fails
+    // (e.g. sink address blacklisted by token, receiver reverts).
+    // The fee is left in the contract; governance can either fix the
+    // sink configuration or deploy a V3 sweep function.
+    event FeeStuck(address indexed token, uint256 amount);
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
@@ -316,6 +329,24 @@ contract RollupV1 is Initializable, OwnableUpgradeable {
         require(burnFeeBps_ <= 500, "RollupV1: burn fee bps too high");
         require(perMintCap_ > 0, "RollupV1: per-mint cap must be nonzero");
         require(globalTvlCap_ >= perMintCap_, "RollupV1: TVL cap < per-mint cap");
+        // Self-review fix (M1): enforce the activation-delay upper bound
+        // against _setValidators' max-future-blocks ceiling, so a too-large
+        // setting can't soft-brick validator rotations.
+        require(
+            validatorActivationMinDelayBlocks_ < MAX_FUTURE_BLOCKS,
+            "RollupV1: validator activation delay too large"
+        );
+
+        // Self-review fix (H1): initialize the ReentrancyGuardUpgradeable
+        // base so `nonReentrant` on verifyRollup works from the first V2
+        // call. The init sets the internal _status to NOT_ENTERED (1);
+        // without this the guard's first check would pass spuriously and
+        // subsequent calls could lock it into a wedged state.
+        //
+        // Must be called during an initializing phase — reinitializer(2)
+        // marks this as such, so the `onlyInitializing` check inside the
+        // OZ base passes.
+        __ReentrancyGuard_init();
 
         perMintCap = perMintCap_;
         globalTvlCap = globalTvlCap_;
@@ -583,14 +614,26 @@ contract RollupV1 is Initializable, OwnableUpgradeable {
     function setPerMintCap(uint256 newCap) external onlyOwner {
         require(newCap > 0, "RollupV1: per-mint cap must be nonzero");
         require(newCap <= globalTvlCap, "RollupV1: per-mint cap > TVL cap");
+        emit PerMintCapUpdated(perMintCap, newCap);
         perMintCap = newCap;
-        emit PerMintCapUpdated(newCap);
     }
 
+    /**
+     * @notice Update the global TVL cap.
+     *
+     * @dev Self-review note (M3): this setter does NOT require
+     * newCap >= currentTvl. Setting a value below currentTvl is
+     * intentional and useful — it acts as a "freeze growth"
+     * operational tool: new deposits (mint / mintClaimed) revert
+     * because `currentTvl + value <= globalTvlCap` fails, while
+     * existing burns continue to drain currentTvl back under the
+     * cap over time. Invariant `currentTvl <= globalTvlCap` can
+     * therefore be temporarily violated; this is by design.
+     */
     function setGlobalTvlCap(uint256 newCap) external onlyOwner {
         require(newCap >= perMintCap, "RollupV1: TVL cap < per-mint cap");
+        emit GlobalTvlCapUpdated(globalTvlCap, newCap);
         globalTvlCap = newCap;
-        emit GlobalTvlCapUpdated(newCap);
     }
 
     // --- Idea 3: Open proving delay -------------------------------------
@@ -608,6 +651,19 @@ contract RollupV1 is Initializable, OwnableUpgradeable {
         external
         onlyOwner
     {
+        // Self-review fix (M1): must be strictly less than
+        // MAX_FUTURE_BLOCKS. _setValidators enforces both a floor
+        // (>= block.number + delay) and a ceiling (<= block.number
+        // + MAX_FUTURE_BLOCKS). If the delay were ever set at or
+        // above the ceiling, the two requirements would have no
+        // overlap and setValidators would soft-brick until this
+        // setter is called again to lower the delay — which is
+        // itself a timelocked operation, so the soft-brick window
+        // could be days.
+        require(
+            newDelayBlocks < MAX_FUTURE_BLOCKS,
+            "RollupV1: validator activation delay too large"
+        );
         emit ValidatorActivationDelayUpdated(
             validatorActivationMinDelayBlocks,
             newDelayBlocks
@@ -713,6 +769,24 @@ contract RollupV1 is Initializable, OwnableUpgradeable {
     // `isProvingOpen()` returns true (i.e. provers have been silent
     // longer than `openProvingDelay`). This is the liveness escape
     // so users can exit via ZK proof even if operators disappear.
+    //
+    // Self-review fix (H1): nonReentrant. Burn payouts are ERC20
+    // transfers that can (with non-standard tokens or contract
+    // recipients with hooks) invoke callbacks. In V1 the onlyProver
+    // gate effectively prevented reentrancy by restricting callers
+    // to trusted operators. Escape mode removes that implicit
+    // protection — any attacker controlling a burn recipient address
+    // or the token contract itself could reenter verifyRollup with
+    // a second valid proof branched from the SAME rootHash (the
+    // state write `rootHash = newRoot` happens only at the tail of
+    // verifyRollup, so a reentrant call sees the unchanged root
+    // and can pass verifyRootHash). Two branches from one root
+    // double-spend the same notes; both payouts succeed; contract
+    // drains beyond the single correct branch's output.
+    //
+    // nonReentrant hard-closes that window. CEI-restructuring the
+    // inner loops would be fragile (many interacting transfers);
+    // the guard is the clean fix.
     function verifyRollup(
         uint256 height,
         bytes32 verificationKeyHash,
@@ -721,7 +795,7 @@ contract RollupV1 is Initializable, OwnableUpgradeable {
         bytes32[] calldata publicInputs,
         bytes32 otherHashFromBlockHash,
         Signature[] calldata signatures
-    ) public onlyProverOrOpen {
+    ) public onlyProverOrOpen nonReentrant {
         require(
             zkVerifiers[verificationKeyHash].enabled,
             "RollupV1: ZK verifier not allowed"
@@ -906,31 +980,52 @@ contract RollupV1 is Initializable, OwnableUpgradeable {
         }
 
         if (success) {
-            // V2 (Idea 9): route fee to sink.
+            // Self-review fix (H2): resilient fee routing.
             //
-            // Using safeTransfer inside an unverified call would be
-            // risky, but `_token` came from our own `tokens[]`
-            // allowlist, so it's trusted. Zero-value transfers are
-            // skipped both to save gas and to avoid tokens that
-            // revert on zero-value. If the sink was accidentally
-            // unset, we fall through without reverting — the fee
-            // is just held in the contract and can be swept later
-            // once the sink is set. This keeps verifyRollup live
-            // even under misconfiguration.
-            if (fee > 0 && feeSink != address(0)) {
-                IERC20(_token).safeTransfer(feeSink, fee);
-                emit FeePaid(_token, feeSink, fee);
+            // Previously used safeTransfer, which reverts on failure.
+            // If feeSink becomes a problematic recipient (token
+            // blacklist, recipient contract that reverts in a hook,
+            // etc.), safeTransfer would propagate the revert and
+            // the whole verifyRollup call would fail — blocking all
+            // burn settlements until governance rotates the sink
+            // (which is timelocked). That is a withdrawal-liveness
+            // DoS with fee routing as the trigger, which inverts
+            // the priority: settlement must never depend on revenue.
+            //
+            // We now use a low-level call, treat failure as
+            // "fee stuck," emit FeeStuck, and let the burn settle.
+            // A future sweep function or governance intervention
+            // can relocate stuck fees to a working sink.
+            //
+            // `tokensLeavingContract` drives the currentTvl
+            // decrement: when the fee successfully leaves, decrement
+            // by the full `value`; when it sticks, decrement only
+            // by `payout` so currentTvl continues to accurately
+            // reflect "value held by contract minus stuck fees."
+            uint256 tokensLeavingContract = payout;
+
+            if (fee > 0) {
+                if (feeSink != address(0)) {
+                    bool feeOk = _tryTransferFee(_token, feeSink, fee);
+                    if (feeOk) {
+                        tokensLeavingContract = value;
+                        emit FeePaid(_token, feeSink, fee);
+                    } else {
+                        emit FeeStuck(_token, fee);
+                    }
+                } else {
+                    // Sink unset; fee stays in contract.
+                    emit FeeStuck(_token, fee);
+                }
             }
 
             // V2 (Idea 2): TVL accounting.
             //
-            // Decrement by `value`, not `payout`: the contract's
-            // token balance drops by `value` total (payout to user
-            // + fee to sink). Clamped to zero to handle legacy
-            // pre-V2 mints that were never counted into currentTvl
-            // — strict subtraction would underflow.
-            if (currentTvl >= value) {
-                currentTvl -= value;
+            // Clamped to zero to handle legacy pre-V2 mints that
+            // were never counted into currentTvl — strict subtraction
+            // would underflow.
+            if (currentTvl >= tokensLeavingContract) {
+                currentTvl -= tokensLeavingContract;
             } else {
                 currentTvl = 0;
             }
@@ -1001,6 +1096,29 @@ contract RollupV1 is Initializable, OwnableUpgradeable {
             if (!func_return) {
                 return false;
             }
+        }
+        return true;
+    }
+
+    // Self-review fix (H2): non-reverting fee transfer.
+    //
+    // Same low-level-call + returndata-check pattern as
+    // executeBurnToAddress — returns false on any failure (reverting
+    // token, non-standard return-false, etc.) instead of propagating
+    // the revert. This is what keeps verifyRollup's settlement path
+    // alive even when the configured feeSink is misbehaving.
+    function _tryTransferFee(
+        address _token,
+        address to,
+        uint256 amount
+    ) internal returns (bool) {
+        (bool callOk, bytes memory returndata) = _token.call(
+            abi.encodeCall(IERC20.transfer, (to, amount))
+        );
+        if (!callOk) return false;
+        if (returndata.length != 0) {
+            bool funcReturn = abi.decode(returndata, (bool));
+            if (!funcReturn) return false;
         }
         return true;
     }
@@ -1154,6 +1272,36 @@ contract RollupV1 is Initializable, OwnableUpgradeable {
         emit MintAdded(mint_hash, value, note_kind);
     }
 
+    /**
+     * @notice Record an off-chain substitution from the escrow manager.
+     *
+     * @dev V2 BEHAVIORAL CHANGE (self-review M2): when the rollup
+     * proof for this burn lands, `verifyBurn` now pays the
+     * substitute address `value - fee`, NOT `value`. This is
+     * symmetric with the on-chain `substituteBurn` path — both
+     * paths charge the protocol burn fee.
+     *
+     * Off-chain operational consequence: any off-chain component
+     * calling `burnClaimed` (the escrow manager, the substitutor
+     * coordinator) must now pay the user `value - fee` rather than
+     * `value`. Running pre-V2 off-chain code against a V2 contract
+     * will silently underpay the substitutor by `fee` on every
+     * settlement.
+     *
+     * The fee schedule is visible on-chain via `burnFeeFloor`,
+     * `burnFeeBps`, and the `computeBurnFee(value)` view function.
+     * Off-chain code should call `computeBurnFee` (or mirror the
+     * math) before paying the user.
+     *
+     * This change is a deliberate policy decision: charging fees
+     * consistently across paths prevents users / substitutors from
+     * arbitraging one path against the other. If preserving the
+     * zero-fee behavior of the `burnClaimed` path were required,
+     * it would need a separate storage flag and a diverging
+     * branch in `verifyBurn`; we opted not to add that complexity
+     * because the off-chain flow is under the team's control and
+     * coordination is feasible.
+     */
     function burnClaimed(
         address substituteAddress,
         bytes32 substituteBurnKey
