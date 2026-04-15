@@ -290,35 +290,6 @@ async function main() {
   }
   console.log(`✅ Approved maxUint256 to ${rollupProxyAddr}: ${hash}`);
 
-  // Register the mock BTC note kind used by the Rust test suite.
-  // RollupV1.initialize() only registers the Citrea testnet note kind (chain 5115),
-  // but Note::new_with_psi() in the Rust code produces a different note kind.
-  if (!isTestnet) {
-    console.log("\n🔍 Registering mock BTC note kind for dev testing...");
-    const rollupProxy = getContract({
-      address: rollupProxyAddr,
-      abi: rollupV1Artifact.abi,
-      client: { public: publicClient, wallet: walletClient },
-    });
-
-    // Note kind produced by Note::new_with_psi() — see bridged_polygon_usdc_note_kind() in util.rs
-    // TODO: Go over polygon notes later
-    const mockBtcNoteKind =
-      "0x000200000000000000893c499c542cef5e3811e1192ce70d8cc03d5c33590000";
-
-    hash = await rollupProxy.write.addToken([mockBtcNoteKind, erc20Address], {
-      gas: 1_000_000n,
-    });
-
-    receipt = await publicClient.waitForTransactionReceipt({ hash });
-    if (receipt.status !== "success") {
-      throw new Error(
-        `Failed to register mock BTC note kind for ${erc20Address}`,
-      );
-    }
-    console.log(`✅ Registered mock BTC note kind → ${erc20Address}`);
-  }
-
   // Machine-readable output for the test harness
   console.log(
     `DEPLOY_OUTPUT=${JSON.stringify({

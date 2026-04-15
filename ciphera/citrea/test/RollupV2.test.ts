@@ -16,7 +16,7 @@
 //   Self-review fix H1: nonReentrant blocks reentrant verifyRollup
 //   Self-review fix H2: blacklisted feeSink leaves fee stuck, burn still settles
 //
-//   Plan-alignment: addToken stays V1-shape (onlyOwner, existing check)
+//   Plan-alignment: addToken is disabled (single-token policy)
 //   Plan-alignment: initializeV2 deploys timelock + transfers ownership
 
 import { describe, it } from "node:test";
@@ -683,15 +683,11 @@ describe("RollupV1 V2 upgrade", () => {
   // Plan-alignment tests
   // =================================================================
   describe("Plan alignment", () => {
-    // addToken is back to its V1 shape: onlyOwner, existing-check,
-    // store. No version gate, no alias constraint. The existing
-    // devnet deploy.ts flow works unchanged because it calls addToken
-    // pre-V2 from the deployer (who IS the owner at that point).
-    it("addToken works from owner pre-V2 (V1 behavior restored)", async () => {
+    // Multi-token expansion is intentionally disabled.
+    it("addToken is disabled (single-token policy)", async () => {
       const { viem } = await network.connect();
       const [deployer, prover, validator] = await viem.getWalletClients();
       const mockToken = await viem.deployContract("MockERC20");
-      const otherToken = await viem.deployContract("MockERC20");
       const mockVerifier = await viem.deployContract("MockVerifier");
       const impl = await viem.deployContract("RollupV1");
 
@@ -714,31 +710,20 @@ describe("RollupV1 V2 upgrade", () => {
       ]);
       const rollup = await viem.getContractAt("RollupV1", proxy.address);
 
-      // Deployer can register any token (V1 semantics).
+      // Owner call still reverts because the feature is removed.
       const kindA =
         "0x0001000000000000000000000000000000000000000000000000000000000000" as const;
-      await rollup.write.addToken([kindA, otherToken.address], {
-        account: deployer.account,
-      });
-
-      const registered = await rollup.read.noteKindTokenAddress([kindA]);
-      assert.equal(
-        registered.toLowerCase(),
-        otherToken.address.toLowerCase(),
-      );
-
-      // Existing check still fires.
       await assert.rejects(
-        rollup.write.addToken([kindA, otherToken.address], {
+        rollup.write.addToken([kindA, deployer.account.address], {
           account: deployer.account,
         }),
       );
 
-      // Non-owner rejected (unchanged).
+      // Non-owner also reverts.
       const kindB =
         "0x0001000000000000000000000000000000000000000000000000000000000001" as const;
       await assert.rejects(
-        rollup.write.addToken([kindB, otherToken.address], {
+        rollup.write.addToken([kindB, deployer.account.address], {
           account: validator.account,
         }),
       );
@@ -765,13 +750,9 @@ describe("RollupV1 V2 upgrade", () => {
 
       // EOA calls to onlyOwner functions fail.
       await assert.rejects(
-        rollup.write.addToken(
-          [
-            "0x0001000000000000000000000000000000000000000000000000000000000099" as const,
-            deployer.account.address,
-          ],
-          { account: deployer.account },
-        ),
+        rollup.write.setOpenProvingDelay([SEVEN_DAYS + 1n], {
+          account: deployer.account,
+        }),
         "deployer should no longer be able to call onlyOwner functions",
       );
     });
