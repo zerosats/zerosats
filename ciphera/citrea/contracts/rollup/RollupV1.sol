@@ -273,33 +273,8 @@ contract RollupV1 is
     }
 
     /**
-     * @notice V2 initializer — called once via proxy upgrade.
-     *
-     * Uses OZ's reinitializer(2) modifier so it can only be invoked once
-     * per proxy instance, and only after the original initialize() has
-     * run (it advances the Initializable version from 1 -> 2).
-     *
-     * All V2 state is set here in one shot. We also seed `currentTvl`
-     * from the live token balance of the contract, which is critical:
-     * if an upgrade happens on a populated contract and currentTvl
-     * starts at 0, the deposit cap would be trivially bypassable by
-     * whoever deposits first until enough burns catch the counter up.
-     * Seeding from balance avoids that window entirely.
-     *
-     * @param perMintCap_ Maximum single deposit (wei). e.g. 0.001 cBTC.
-     * @param globalTvlCap_ Maximum total value held by contract (wei).
-     * @param openProvingDelay_ Seconds of prover inactivity before escape.
-     *        Must be >= 1 day to prevent governance from accidentally
-     *        opening the chain to anyone with a short delay.
-     * @param validatorActivationMinDelayBlocks_ Minimum blocks of notice
-     *        before a new validator set can activate. ~604800 = 1 week
-     *        at 1s blocks.
-     * @param guardian_ Instant-pause multisig. Must be non-zero.
-     * @param burnFeeFloor_ Minimum fee per burn (wei of token).
-     * @param burnFeeBps_ Basis-points fee rate (10000 = 100%). Capped
-     *        at 500 (5%) to prevent governance from imposing predatory
-     *        fees silently.
-     * @param feeSink_ Destination for collected fees. Must be non-zero.
+     * @notice V2 initializer — one-shot upgrade init.
+     * @dev See docs/rollup-v2-upgrade-notes.md for security and ops rationale.
      */
     function initializeV2(
         uint256 perMintCap_,
@@ -311,51 +286,26 @@ contract RollupV1 is
         uint256 burnFeeBps_,
         address feeSink_
     ) external onlyOwner reinitializer(2) {
-        // Review fix (Finding 1): reinitializer(2) only guarantees
-        // the function runs at most once per V2. It does NOT restrict
-        // WHO calls it. Without onlyOwner, a non-atomic upgrade flow
-        // (deploy impl, then call upgradeTo, then separately call
-        // initializeV2) would let anyone in the mempool front-run
-        // the initialization and seize guardian / feeSink / caps.
-        //
-        // onlyOwner makes the contract self-defend: only the V1 owner
-        // (which at upgrade time is still the pre-upgrade EOA or
-        // existing timelock) can perform the one-shot V2 init.
-        // Combined with the isProvingOpen pre-init guard (Finding 2),
-        // the uninitialized window is both shortened and defanged.
+        // See docs: init is owner-gated to prevent non-atomic upgrade frontruns.
         require(guardian_ != address(0), "RollupV1: invalid guardian");
         require(feeSink_ != address(0), "RollupV1: invalid fee sink");
         require(openProvingDelay_ >= 1 days, "RollupV1: open proving delay too short");
         require(burnFeeBps_ <= 500, "RollupV1: burn fee bps too high");
         require(perMintCap_ > 0, "RollupV1: per-mint cap must be nonzero");
         require(globalTvlCap_ >= perMintCap_, "RollupV1: TVL cap < per-mint cap");
-        // Self-review fix (M1): enforce the activation-delay upper bound
-        // against _setValidators' max-future-blocks ceiling, so a too-large
-        // setting can't soft-brick validator rotations.
+        // Bound prevents validator-rotation soft-brick (see docs).
         require(
             validatorActivationMinDelayBlocks_ < MAX_FUTURE_BLOCKS,
             "RollupV1: validator activation delay too large"
         );
 
-        // Self-review fix (H1): initialize the ReentrancyGuardUpgradeable
-        // base so `nonReentrant` on verifyRollup works from the first V2
-        // call. The init sets the internal _status to NOT_ENTERED (1);
-        // without this the guard's first check would pass spuriously and
-        // subsequent calls could lock it into a wedged state.
-        //
-        // Must be called during an initializing phase — reinitializer(2)
-        // marks this as such, so the `onlyInitializing` check inside the
-        // OZ base passes.
+        // Initialize ReentrancyGuard storage for V2 verify path.
         __ReentrancyGuard_init();
 
         perMintCap = perMintCap_;
         globalTvlCap = globalTvlCap_;
 
-        // Seed currentTvl from the live token balance so upgrades on
-        // populated contracts don't start with an empty counter. If the
-        // current balance already exceeds the new global cap, we still
-        // set it — the cap check blocks *new* deposits, which is the
-        // correct behavior (freeze growth, allow burns to drain).
+        // Seed from live balance so caps start from current state.
         currentTvl = token.balanceOf(address(this));
 
         lastVerifiedAt = block.timestamp;
@@ -378,31 +328,8 @@ contract RollupV1 is
         _;
     }
 
-    // --- V2: Open proving escape hatch (Idea 3) -------------------------
-    //
-    // `isProvingOpen` returns true once the whitelisted provers have
-    // been silent for longer than `openProvingDelay`. In that state:
-    //  (1) `onlyProverOrOpen` admits anyone as a caller of verifyRollup,
-    //  (2) `verifyValidatorSignatures` short-circuits its require checks.
-    //
-    // Normal mode is unchanged: a whitelisted prover submits within
-    // the delay window, `lastVerifiedAt` resets on each success, and
-    // `isProvingOpen` never returns true.
-
     function isProvingOpen() public view returns (bool) {
-        // Review fix (Finding 2): pre-init guard.
-        //
-        // Before initializeV2 runs, both lastVerifiedAt and
-        // openProvingDelay default to zero, so the comparison
-        // `block.timestamp >= 0 + 0` is trivially true — the gate
-        // would falsely report "escape mode is open" during the
-        // upgrade window, before any V2 parameters are set.
-        //
-        // Returning false when openProvingDelay is unset restores
-        // V1-equivalent behavior until initializeV2 sets a real
-        // delay. Once set, initializeV2 also writes lastVerifiedAt
-        // to block.timestamp, so the first in-window check after
-        // init evaluates correctly.
+        // Pre-init guard for V2 config window; see docs.
         if (openProvingDelay == 0) return false;
         return block.timestamp >= lastVerifiedAt + openProvingDelay;
     }
@@ -533,20 +460,7 @@ contract RollupV1 is
         emit RootHashUpdated(oldRoot, newRoot);
     }
 
-    // --- V2: setRoot disabled (Idea 1) ----------------------------------
-    //
-    // `setRoot` previously allowed the owner to overwrite the merkle
-    // root to any value instantly. That made the owner a single point
-    // of failure: a compromised or coerced owner could pre-commit a
-    // hand-crafted root whose pre-image contained notes they owned,
-    // then drain all TVL through normal burns.
-    //
-    // The function is kept in the ABI (with its original selector)
-    // but is now `pure` and always reverts. Any off-chain tooling or
-    // script that still calls it will fail loudly rather than hit a
-    // fallback or silently no-op. If emergency root surgery is ever
-    // truly needed, it should require a dedicated upgrade — not a
-    // hot function anyone with the owner key can call.
+    // Kept for ABI compatibility, intentionally disabled in V2 (see docs).
     function setRoot(bytes32 /* newRoot */) public pure {
         revert("RollupV1: setRoot disabled in V2");
     }
@@ -555,40 +469,7 @@ contract RollupV1 is
         return rootHash;
     }
 
-    // Review fix (Finding 4): addToken is alias-only and pre-V2-only.
-    //
-    // The V2 deposit caps (perMintCap / globalTvlCap / currentTvl)
-    // are single global counters, not per-token. In a multi-token
-    // deployment those counters are unit-inconsistent: 1 wei of
-    // cBTC is not fungible with 1 wei of USDC, and summing them
-    // into a single cap is economically meaningless.
-    //
-    // initializeV2() seeds currentTvl from the live balance of the
-    // primary `token` state variable only — so any ERC20 other
-    // than `token` that got registered pre-V2 would sit outside
-    // the cap accounting entirely.
-    //
-    // But we cannot fully disable addToken because the devnet
-    // bootstrap in scripts/deploy.ts legitimately needs it: it
-    // registers a *second note kind* that resolves to the *same*
-    // underlying ERC20 (an alias), because the Rust side's
-    // Note::new_with_psi() produces different note-kind bytes for
-    // the same token.
-    //
-    // Two gates enforce the invariant together:
-    //   (1) version < 2 — addToken only runs during V1 bootstrap,
-    //       before caps come alive.
-    //   (2) tokenAddress == address(token) — even pre-V2, only
-    //       alias registrations for the primary ERC20 are allowed.
-    //       This is the bit that closes the V1->V2 TVL seeding
-    //       hole: since every registered note kind resolves to
-    //       the single `token`, initializeV2's balance-of read
-    //       is guaranteed to cover all held value.
-    //
-    // If multi-token support is ever actually needed post-V2, a
-    // dedicated V3 upgrade should reintroduce it together with
-    // per-note-kind caps (and likely per-token fee rates), as one
-    // cohesive change rather than a bolt-on.
+    // Alias-only and pre-V2-only; see docs for cap-accounting rationale.
     function addToken(bytes32 noteKind, address tokenAddress) public onlyOwner {
         require(version < 2, "RollupV1: addToken disabled in V2");
         require(
@@ -618,18 +499,7 @@ contract RollupV1 is
         perMintCap = newCap;
     }
 
-    /**
-     * @notice Update the global TVL cap.
-     *
-     * @dev Self-review note (M3): this setter does NOT require
-     * newCap >= currentTvl. Setting a value below currentTvl is
-     * intentional and useful — it acts as a "freeze growth"
-     * operational tool: new deposits (mint / mintClaimed) revert
-     * because `currentTvl + value <= globalTvlCap` fails, while
-     * existing burns continue to drain currentTvl back under the
-     * cap over time. Invariant `currentTvl <= globalTvlCap` can
-     * therefore be temporarily violated; this is by design.
-     */
+    // Intentionally allows cap < currentTvl to freeze growth; see docs.
     function setGlobalTvlCap(uint256 newCap) external onlyOwner {
         require(newCap >= perMintCap, "RollupV1: TVL cap < per-mint cap");
         emit GlobalTvlCapUpdated(globalTvlCap, newCap);
@@ -651,15 +521,7 @@ contract RollupV1 is
         external
         onlyOwner
     {
-        // Self-review fix (M1): must be strictly less than
-        // MAX_FUTURE_BLOCKS. _setValidators enforces both a floor
-        // (>= block.number + delay) and a ceiling (<= block.number
-        // + MAX_FUTURE_BLOCKS). If the delay were ever set at or
-        // above the ceiling, the two requirements would have no
-        // overlap and setValidators would soft-brick until this
-        // setter is called again to lower the delay — which is
-        // itself a timelocked operation, so the soft-brick window
-        // could be days.
+        // Must stay below MAX_FUTURE_BLOCKS; see docs.
         require(
             newDelayBlocks < MAX_FUTURE_BLOCKS,
             "RollupV1: validator activation delay too large"
@@ -762,31 +624,7 @@ contract RollupV1 is
     //
     ///////////
 
-    // Verify rollup
-    //
-    // V2: Access was `onlyProver`. Now `onlyProverOrOpen`: whitelisted
-    // provers can always submit; anyone can submit if
-    // `isProvingOpen()` returns true (i.e. provers have been silent
-    // longer than `openProvingDelay`). This is the liveness escape
-    // so users can exit via ZK proof even if operators disappear.
-    //
-    // Self-review fix (H1): nonReentrant. Burn payouts are ERC20
-    // transfers that can (with non-standard tokens or contract
-    // recipients with hooks) invoke callbacks. In V1 the onlyProver
-    // gate effectively prevented reentrancy by restricting callers
-    // to trusted operators. Escape mode removes that implicit
-    // protection — any attacker controlling a burn recipient address
-    // or the token contract itself could reenter verifyRollup with
-    // a second valid proof branched from the SAME rootHash (the
-    // state write `rootHash = newRoot` happens only at the tail of
-    // verifyRollup, so a reentrant call sees the unchanged root
-    // and can pass verifyRootHash). Two branches from one root
-    // double-spend the same notes; both payouts succeed; contract
-    // drains beyond the single correct branch's output.
-    //
-    // nonReentrant hard-closes that window. CEI-restructuring the
-    // inner loops would be fragile (many interacting transfers);
-    // the guard is the clean fix.
+    // V2 liveness escape + reentrancy hardening; see docs.
     function verifyRollup(
         uint256 height,
         bytes32 verificationKeyHash,
@@ -945,33 +783,11 @@ contract RollupV1 is
         );
         address substitutor = substitutedBurns[substituteBurnKey];
 
-        // V2 (Idea 9): apply burn fee. Same fee schedule regardless
-        // of path so users can't arbitrage substituted vs direct.
-        // See substituteBurnTo for the symmetric pre-pay in the
-        // substitutor flow; the math balances because:
-        //  - Substituted: sub pre-paid (value - fee), gets back
-        //    (value - fee), fee stays in contract and is forwarded
-        //    to feeSink below. Contract ends flat.
-        //  - Direct: user receives (value - fee), fee stays and is
-        //    forwarded to feeSink below. Contract ends flat.
+        // Same fee schedule for substituted and direct burns.
         uint256 fee = computeBurnFee(value);
         uint256 payout = value - fee;
 
-        // Review fix (Finding 3): capture executeBurn's return value.
-        //
-        // executeBurn can silently return false on a failed ERC20
-        // transfer (non-reverting tokens, blacklisted recipients,
-        // etc.). Previously we decremented currentTvl unconditionally
-        // and forwarded the fee regardless — both wrong when the
-        // tokens never actually left the contract. That would let
-        // future mints sneak past the global cap while balances
-        // stayed the same, undermining the whole point of the cap.
-        //
-        // We now only route fee AND decrement TVL when the payout
-        // actually succeeded. On a failed burn, the contract's token
-        // balance is unchanged, so TVL must also stay unchanged.
-        // The Burned event is still emitted with success=false by
-        // executeBurn, so observers can detect and investigate.
+        // Only settle fee/tvl deltas if payout transfer succeeds.
         bool success;
         if (substitutor != address(0)) {
             success = executeBurn(_token, substitutor, hash, payout, false);
@@ -980,28 +796,7 @@ contract RollupV1 is
         }
 
         if (success) {
-            // Self-review fix (H2): resilient fee routing.
-            //
-            // Previously used safeTransfer, which reverts on failure.
-            // If feeSink becomes a problematic recipient (token
-            // blacklist, recipient contract that reverts in a hook,
-            // etc.), safeTransfer would propagate the revert and
-            // the whole verifyRollup call would fail — blocking all
-            // burn settlements until governance rotates the sink
-            // (which is timelocked). That is a withdrawal-liveness
-            // DoS with fee routing as the trigger, which inverts
-            // the priority: settlement must never depend on revenue.
-            //
-            // We now use a low-level call, treat failure as
-            // "fee stuck," emit FeeStuck, and let the burn settle.
-            // A future sweep function or governance intervention
-            // can relocate stuck fees to a working sink.
-            //
-            // `tokensLeavingContract` drives the currentTvl
-            // decrement: when the fee successfully leaves, decrement
-            // by the full `value`; when it sticks, decrement only
-            // by `payout` so currentTvl continues to accurately
-            // reflect "value held by contract minus stuck fees."
+            // Non-reverting fee routing; if stuck, keep fee in contract.
             uint256 tokensLeavingContract = payout;
 
             if (fee > 0) {
@@ -1019,11 +814,7 @@ contract RollupV1 is
                 }
             }
 
-            // V2 (Idea 2): TVL accounting.
-            //
-            // Clamped to zero to handle legacy pre-V2 mints that
-            // were never counted into currentTvl — strict subtraction
-            // would underflow.
+            // Clamp handles legacy pre-V2 accounting edge cases.
             if (currentTvl >= tokensLeavingContract) {
                 currentTvl -= tokensLeavingContract;
             } else {
@@ -1100,13 +891,7 @@ contract RollupV1 is
         return true;
     }
 
-    // Self-review fix (H2): non-reverting fee transfer.
-    //
-    // Same low-level-call + returndata-check pattern as
-    // executeBurnToAddress — returns false on any failure (reverting
-    // token, non-standard return-false, etc.) instead of propagating
-    // the revert. This is what keeps verifyRollup's settlement path
-    // alive even when the configured feeSink is misbehaving.
+    // Non-reverting fee transfer helper for settlement liveness.
     function _tryTransferFee(
         address _token,
         address to,
@@ -1274,33 +1059,7 @@ contract RollupV1 is
 
     /**
      * @notice Record an off-chain substitution from the escrow manager.
-     *
-     * @dev V2 BEHAVIORAL CHANGE (self-review M2): when the rollup
-     * proof for this burn lands, `verifyBurn` now pays the
-     * substitute address `value - fee`, NOT `value`. This is
-     * symmetric with the on-chain `substituteBurn` path — both
-     * paths charge the protocol burn fee.
-     *
-     * Off-chain operational consequence: any off-chain component
-     * calling `burnClaimed` (the escrow manager, the substitutor
-     * coordinator) must now pay the user `value - fee` rather than
-     * `value`. Running pre-V2 off-chain code against a V2 contract
-     * will silently underpay the substitutor by `fee` on every
-     * settlement.
-     *
-     * The fee schedule is visible on-chain via `burnFeeFloor`,
-     * `burnFeeBps`, and the `computeBurnFee(value)` view function.
-     * Off-chain code should call `computeBurnFee` (or mirror the
-     * math) before paying the user.
-     *
-     * This change is a deliberate policy decision: charging fees
-     * consistently across paths prevents users / substitutors from
-     * arbitraging one path against the other. If preserving the
-     * zero-fee behavior of the `burnClaimed` path were required,
-     * it would need a separate storage flag and a diverging
-     * branch in `verifyBurn`; we opted not to add that complexity
-     * because the off-chain flow is under the team's control and
-     * coordination is feasible.
+     * @dev In V2, settlement returns `value - fee` on this path (see docs).
      */
     function burnClaimed(
         address substituteAddress,
