@@ -13,6 +13,15 @@ Core components (also including outdated Ciphera components):
 
 Setup uses deterministic accounts for development consistency.
 
+## Rollup V2 Notes
+
+Detailed security and operational rationale for the V2 rollup changes is in:
+
+- [`docs/rollup-v2-upgrade-notes.md`](docs/rollup-v2-upgrade-notes.md)
+
+Keep inline contract comments concise and treat that document as the source of
+truth for upgrade tradeoffs/invariants.
+
 ## Testing
 
 The project uses Hardhat with Mocha/Chai testing framework and blockchain-specific matchers for comprehensive smart 
