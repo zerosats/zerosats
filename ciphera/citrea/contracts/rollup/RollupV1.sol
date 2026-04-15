@@ -8,6 +8,7 @@ import "@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol
 import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/governance/TimelockController.sol";
 import {IVerifier} from "../noir/IVerifier.sol";
 
 struct Mint {
@@ -123,114 +124,57 @@ contract RollupV1 is
     // =====================================================================
     // V2 STORAGE (APPENDED — DO NOT REORDER OR INSERT ABOVE THIS LINE)
     //
-    // This contract has no `__gap`, so any storage added or reordered
-    // above this block would shift slot assignments and corrupt state
-    // in the proxy. All V2 additions must be appended *here*, in
-    // append-only order. If you need to add more state in V3, append
-    // it below this block — again, never above.
+    // This contract has no __gap, so any storage added or reordered
+    // above this block would shift slot assignments and corrupt
+    // state in the proxy. All V2 additions must be appended here.
     // =====================================================================
 
-    // --- Idea 2: Deposit caps -------------------------------------------
-    // Per-mint cap bounds the worst-case loss from any single malicious
-    // or buggy deposit. Global TVL cap bounds the total value at risk
-    // across the protocol during bootstrap. `currentTvl` is a running
-    // counter — incremented on deposit in mint()/mintClaimed() and
-    // decremented on burn in verifyBurn() — so the cap check has
-    // something to compare against. It is seeded from the live token
-    // balance during initializeV2 so an already-populated contract
-    // doesn't start from zero and let deposits balloon past the cap.
+    // Idea 2: deposit caps. `currentTvl` is a running counter
+    // incremented on mint() / mintClaimed() and decremented on
+    // successful burns in verifyBurn(). Seeded at V2 init from
+    // the live token balance.
     uint256 public perMintCap;
     uint256 public globalTvlCap;
     uint256 public currentTvl;
 
-    // --- Idea 3: Open proving (liveness escape hatch) -------------------
-    // `lastVerifiedAt` is the block.timestamp of the last successful
-    // verifyRollup. If `openProvingDelay` elapses without a proof
-    // landing — i.e. the whitelisted provers have gone silent — then
-    // `isProvingOpen()` flips to true, which (a) unlocks verifyRollup
-    // for any caller via onlyProverOrOpen and (b) short-circuits
-    // verifyValidatorSignatures so a dead validator set can no longer
-    // brick the chain. Both gates must open together; opening just
-    // one is security theater because the other would still revert.
-    //
-    // The ZK verifier remains the ONLY safety gate in escape mode.
-    // That is intentional and sufficient: the ZK proof is the only
-    // thing that ever actually protected funds. Validator signatures
-    // provide consensus coordination, not state-transition safety.
+    // Idea 3: open proving. `lastVerifiedAt` is set to block.timestamp
+    // on every successful verifyRollup. If `openProvingDelay` elapses
+    // without a proof, `isProvingOpen()` flips true and (a) admits
+    // anyone via onlyProverOrOpen, (b) short-circuits validator
+    // signature verification. The ZK proof remains the sole safety
+    // gate in escape mode.
     uint256 public lastVerifiedAt;
     uint256 public openProvingDelay;
 
-    // --- Idea 4: Validator activation floor -----------------------------
-    // Even with the owner moved to a timelock, we want the contract
-    // itself to enforce a minimum notice window before a newly
-    // scheduled validator set activates. This gives users a guaranteed
-    // reaction time independent of whatever delay the governance
-    // layer happens to be configured with. Measured in blocks because
-    // that is the unit `validFrom` already uses.
-    uint256 public validatorActivationMinDelayBlocks;
-
-    // --- Ideas 5-8: Guardian + withdrawal pause -------------------------
-    // Governance (ownership) sits behind a timelock. But a pause that
-    // is also delayed is useless in an active incident — by the time
-    // it lands on-chain, funds are already gone. The guardian role is
-    // therefore an instant-acting authority with exactly one power:
-    // setting `withdrawalsPaused`. It cannot rotate anything else,
-    // cannot upgrade, cannot mint. Its single power is intentionally
-    // narrow so handing it to a fast-acting multisig is low-risk.
-    //
-    // The pause is deliberately a *soft* pause: it blocks new burn
-    // substitutions (substituteBurn) but NOT the settlement path
-    // (verifyBurn). This way, already-substituted burns still pay
-    // substitutors back when the rollup lands — we avoid stranding
-    // operators who are mid-loan. If a truly adversarial scenario
-    // requires a hard pause, verifyBurn can be extended later.
-    address public guardian;
-    bool public withdrawalsPaused;
-
-    // --- Idea 9: Burn fee -----------------------------------------------
-    // Fee = max(burnFeeFloor, value * burnFeeBps / 10000), clamped to
-    // `value` so we never overcharge. Floor protects against dust
-    // spam (where bps fees would round to zero); bps scales revenue
-    // with large burns. The fee is shaved out of the user's payout
-    // in verifyBurn and forwarded to `feeSink` as a separate transfer.
-    //
-    // `feeSink` is a dedicated address — NOT the protocol owner —
-    // so fee ownership can be governed independently of protocol
-    // upgrades. This matters for any future handover to a DAO or
-    // treasury, where we don't want a single address to both
-    // upgrade the contract AND drain the fee balance.
-    //
-    // To keep token flow balanced when a burn is substituted, the
-    // substitutor pays the *post-fee* amount upfront and receives
-    // the post-fee amount back when the rollup lands. The fee stays
-    // in the contract and is routed to feeSink during verifyBurn.
-    // This keeps the substitutor whole on the loan principal.
-    uint256 public burnFeeFloor;
-    uint256 public burnFeeBps;
+    // Idea 9: flat burn fee (in wei of the primary token). Shaved
+    // out of payout in verifyBurn, routed to feeSink. No bps rate —
+    // single flat value only, matching the original ~$0.20 target.
+    uint256 public burnFee;
     address public feeSink;
+
+    // Timelock deployed at V2 init. Stored for observability; the
+    // actual owner check uses OZ Ownable's owner(), which is set to
+    // this address at the end of initializeV2.
+    TimelockController public timelock;
 
     // =====================================================================
     // END V2 STORAGE
     // =====================================================================
 
-    // --- Events added in V2 ---------------------------------------------
-    // Self-review fix (L1): emit both old and new values so subgraphs
-    // can derive deltas without a separate RPC read. Matches the
-    // pattern used by other V2 update events.
+    // V2 events
     event PerMintCapUpdated(uint256 oldCap, uint256 newCap);
     event GlobalTvlCapUpdated(uint256 oldCap, uint256 newCap);
     event OpenProvingDelayUpdated(uint256 oldDelay, uint256 newDelay);
-    event ValidatorActivationDelayUpdated(uint256 oldDelay, uint256 newDelay);
-    event GuardianUpdated(address indexed oldGuardian, address indexed newGuardian);
-    event WithdrawalsPausedSet(bool paused);
-    event BurnFeeUpdated(uint256 oldFloor, uint256 oldBps, uint256 newFloor, uint256 newBps);
+    event BurnFeeUpdated(uint256 oldFee, uint256 newFee);
     event FeeSinkUpdated(address indexed oldSink, address indexed newSink);
     event FeePaid(address indexed token, address indexed sink, uint256 amount);
-    // Self-review fix (H2): emitted when fee routing to feeSink fails
-    // (e.g. sink address blacklisted by token, receiver reverts).
-    // The fee is left in the contract; governance can either fix the
-    // sink configuration or deploy a V3 sweep function.
+    // Emitted when fee routing to feeSink fails (e.g. blacklisted
+    // recipient). Fee stays in contract; governance addresses via
+    // follow-up.
     event FeeStuck(address indexed token, uint256 amount);
+    // Emitted when V2 init completes and ownership transfers to the
+    // newly-deployed timelock.
+    event TimelockInstalled(address indexed timelock, uint256 minDelay);
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
@@ -273,54 +217,85 @@ contract RollupV1 is
     }
 
     /**
-     * @notice V2 initializer — one-shot upgrade init.
-     * @dev See docs/rollup-v2-upgrade-notes.md for security and ops rationale.
+     * @notice V2 initializer. One-shot — deploys a TimelockController
+     * with caller-provided (minDelay, proposers, executors) and
+     * transfers contract ownership to it atomically. After this runs,
+     * no EOA can call onlyOwner functions; all such calls must go
+     * through the timelock's propose+execute flow.
+     *
+     * @param perMintCap_ Max single deposit (wei of primary token).
+     * @param globalTvlCap_ Max total value held (wei of primary token).
+     * @param openProvingDelay_ Seconds of prover inactivity before
+     *        isProvingOpen() flips true. Must be >= 7 days.
+     * @param burnFee_ Flat fee per burn (wei). Zero disables fee.
+     * @param feeSink_ Destination for collected fees.
+     * @param timelockMinDelay_ Minimum delay the deployed timelock
+     *        enforces for every scheduled operation. Must be >= 1 day.
+     * @param timelockProposers_ Addresses allowed to schedule ops.
+     * @param timelockExecutors_ Addresses allowed to execute scheduled
+     *        ops. Use `[address(0)]` for "anyone can execute once
+     *        delay elapses."
      */
     function initializeV2(
         uint256 perMintCap_,
         uint256 globalTvlCap_,
         uint256 openProvingDelay_,
-        uint256 validatorActivationMinDelayBlocks_,
-        address guardian_,
-        uint256 burnFeeFloor_,
-        uint256 burnFeeBps_,
-        address feeSink_
+        uint256 burnFee_,
+        address feeSink_,
+        uint256 timelockMinDelay_,
+        address[] calldata timelockProposers_,
+        address[] calldata timelockExecutors_
     ) external onlyOwner reinitializer(2) {
-        // See docs: init is owner-gated to prevent non-atomic upgrade frontruns.
-        require(guardian_ != address(0), "RollupV1: invalid guardian");
         require(feeSink_ != address(0), "RollupV1: invalid fee sink");
-        require(openProvingDelay_ >= 1 days, "RollupV1: open proving delay too short");
-        require(burnFeeBps_ <= 500, "RollupV1: burn fee bps too high");
-        require(perMintCap_ > 0, "RollupV1: per-mint cap must be nonzero");
-        require(globalTvlCap_ >= perMintCap_, "RollupV1: TVL cap < per-mint cap");
-        // Bound prevents validator-rotation soft-brick (see docs).
         require(
-            validatorActivationMinDelayBlocks_ < MAX_FUTURE_BLOCKS,
-            "RollupV1: validator activation delay too large"
+            openProvingDelay_ >= 7 days,
+            "RollupV1: open proving delay too short"
+        );
+        require(perMintCap_ > 0, "RollupV1: per-mint cap must be nonzero");
+        require(
+            globalTvlCap_ >= perMintCap_,
+            "RollupV1: TVL cap < per-mint cap"
+        );
+        require(
+            timelockMinDelay_ >= 1 days,
+            "RollupV1: timelock delay too short"
+        );
+        require(
+            timelockProposers_.length > 0,
+            "RollupV1: at least one proposer required"
         );
 
-        // Initialize ReentrancyGuard storage for V2 verify path.
         __ReentrancyGuard_init();
 
         perMintCap = perMintCap_;
         globalTvlCap = globalTvlCap_;
-
-        // Seed from live balance so caps start from current state.
+        // Seed from live balance so caps start from actual state.
         currentTvl = token.balanceOf(address(this));
 
         lastVerifiedAt = block.timestamp;
         openProvingDelay = openProvingDelay_;
 
-        validatorActivationMinDelayBlocks = validatorActivationMinDelayBlocks_;
-
-        guardian = guardian_;
-        withdrawalsPaused = false;
-
-        burnFeeFloor = burnFeeFloor_;
-        burnFeeBps = burnFeeBps_;
+        burnFee = burnFee_;
         feeSink = feeSink_;
 
+        // Deploy the timelock and transfer ownership atomically.
+        // Passing admin=address(0) means the timelock self-governs
+        // its own role changes after deployment (standard OZ pattern).
+        TimelockController tl = new TimelockController(
+            timelockMinDelay_,
+            timelockProposers_,
+            timelockExecutors_,
+            address(0)
+        );
+        timelock = tl;
+
         version = 2;
+
+        // Transfer ownership AFTER all state writes so the init
+        // itself doesn't trip onlyOwner halfway through.
+        _transferOwnership(address(tl));
+
+        emit TimelockInstalled(address(tl), timelockMinDelay_);
     }
 
     modifier onlyProver() {
@@ -339,12 +314,6 @@ contract RollupV1 is
             provers[msg.sender] == 1 || isProvingOpen(),
             "RollupV1: not prover and proving not open"
         );
-        _;
-    }
-
-    // --- V2: Guardian (Ideas 5-8) ---------------------------------------
-    modifier onlyGuardian() {
-        require(msg.sender == guardian, "RollupV1: not guardian");
         _;
     }
 
@@ -460,35 +429,23 @@ contract RollupV1 is
         emit RootHashUpdated(oldRoot, newRoot);
     }
 
-    // Kept for ABI compatibility, intentionally disabled in V2 (see docs).
-    function setRoot(bytes32 /* newRoot */) public pure {
-        revert("RollupV1: setRoot disabled in V2");
-    }
-
     function currentRootHash() public view returns (bytes32) {
         return rootHash;
     }
 
-    // Alias-only and pre-V2-only; see docs for cap-accounting rationale.
     function addToken(bytes32 noteKind, address tokenAddress) public onlyOwner {
-        require(version < 2, "RollupV1: addToken disabled in V2");
         require(
             tokens[noteKind] == address(0),
             "RollupV1: Token already exists"
-        );
-        require(
-            tokenAddress == address(token),
-            "RollupV1: addToken must alias primary token"
         );
 
         tokens[noteKind] = tokenAddress;
     }
 
     // =====================================================================
-    // V2 setters — all `onlyOwner`, which means timelocked once ownership
-    // has been transferred to a TimelockController. The guardian has its
-    // own instant-acting setter (setWithdrawalsPaused) below; everything
-    // else here requires going through the governance delay.
+    // V2 setters — all `onlyOwner`. After initializeV2, the owner is
+    // the TimelockController deployed inline, so every setter here
+    // must be invoked via timelock propose+execute.
     // =====================================================================
 
     // --- Idea 2: Deposit caps -------------------------------------------
@@ -508,66 +465,17 @@ contract RollupV1 is
 
     // --- Idea 3: Open proving delay -------------------------------------
     function setOpenProvingDelay(uint256 newDelay) external onlyOwner {
-        // 1 day floor matches the floor in initializeV2; prevents
-        // governance from setting a near-zero delay that would make
-        // escape mode trigger after a single missed block.
-        require(newDelay >= 1 days, "RollupV1: open proving delay too short");
+        // 7-day floor matches the initializeV2 floor and the original
+        // "1 week of prover inactivity" plan.
+        require(newDelay >= 7 days, "RollupV1: open proving delay too short");
         emit OpenProvingDelayUpdated(openProvingDelay, newDelay);
         openProvingDelay = newDelay;
     }
 
-    // --- Idea 4: Validator activation floor -----------------------------
-    function setValidatorActivationMinDelayBlocks(uint256 newDelayBlocks)
-        external
-        onlyOwner
-    {
-        // Must stay below MAX_FUTURE_BLOCKS; see docs.
-        require(
-            newDelayBlocks < MAX_FUTURE_BLOCKS,
-            "RollupV1: validator activation delay too large"
-        );
-        emit ValidatorActivationDelayUpdated(
-            validatorActivationMinDelayBlocks,
-            newDelayBlocks
-        );
-        validatorActivationMinDelayBlocks = newDelayBlocks;
-    }
-
-    // --- Ideas 5-8: Guardian + withdrawal pause -------------------------
-    function setGuardian(address newGuardian) external onlyOwner {
-        require(newGuardian != address(0), "RollupV1: invalid guardian");
-        emit GuardianUpdated(guardian, newGuardian);
-        guardian = newGuardian;
-    }
-
-    /**
-     * @notice Pause or unpause new withdrawals. Instant, guardian-only.
-     *
-     * Soft pause semantics: this blocks new calls to substituteBurn()
-     * but does NOT block verifyBurn(). In-flight substituted burns
-     * continue to settle so substitutors don't get stranded mid-loan.
-     *
-     * If a hard pause is ever needed (an active exploit, not a
-     * precaution), add the same check to verifyBurn in a follow-up
-     * upgrade — intentionally not included here because the soft
-     * pause is almost always what you want and the hard pause has
-     * more failure modes for honest users and substitutors.
-     */
-    function setWithdrawalsPaused(bool paused_) external onlyGuardian {
-        withdrawalsPaused = paused_;
-        emit WithdrawalsPausedSet(paused_);
-    }
-
     // --- Idea 9: Burn fee -----------------------------------------------
-    function setBurnFee(uint256 newFloor, uint256 newBps) external onlyOwner {
-        // 500 bps (5%) hard cap prevents governance from silently
-        // imposing predatory withdrawal fees. If the protocol ever
-        // wants a fee above 5%, that requires a contract upgrade,
-        // which users can observe and react to.
-        require(newBps <= 500, "RollupV1: burn fee bps too high");
-        emit BurnFeeUpdated(burnFeeFloor, burnFeeBps, newFloor, newBps);
-        burnFeeFloor = newFloor;
-        burnFeeBps = newBps;
+    function setBurnFee(uint256 newFee) external onlyOwner {
+        emit BurnFeeUpdated(burnFee, newFee);
+        burnFee = newFee;
     }
 
     function setFeeSink(address newSink) external onlyOwner {
@@ -576,25 +484,15 @@ contract RollupV1 is
         feeSink = newSink;
     }
 
-    // --- Idea 9: Internal fee helper ------------------------------------
+    // --- Idea 9: fee computation ----------------------------------------
     /**
-     * @dev Computes the fee charged on a burn of `value` wei.
-     *
-     * fee = max(burnFeeFloor, value * burnFeeBps / 10000),
-     * clamped to `value` so we never try to charge more than the
-     * burn itself is worth (which would underflow the payout).
-     *
-     * Edge cases:
-     *  - If the fee would consume the entire burn, the payout is 0.
-     *    The user gets nothing but the fee is still routed to the
-     *    sink. We could revert instead, but that would let a fee
-     *    misconfiguration brick verifyRollup; returning 0 keeps the
-     *    protocol live and lets governance fix the fee afterwards.
+     * @dev Flat burn fee clamped to `value`. If the configured fee
+     * exceeds the burn amount, the payout is zero but the whole
+     * value is routed to the sink as fee; we don't revert so that
+     * a misconfigured fee doesn't brick settlement.
      */
     function computeBurnFee(uint256 value) public view returns (uint256) {
-        uint256 bpsFee = (value * burnFeeBps) / 10000;
-        uint256 fee = bpsFee >= burnFeeFloor ? bpsFee : burnFeeFloor;
-        return fee > value ? value : fee;
+        return burnFee > value ? value : burnFee;
     }
 
     function noteKindTokenAddress(
@@ -932,12 +830,6 @@ contract RollupV1 is
         uint256 amount,
         uint256 burnBlockHeight
     ) public onlyBurnSubstitutor {
-        // V2 (Ideas 5-8): guardian-triggered soft pause.
-        // We only block *new* substitutions. Already-substituted
-        // burns continue to settle via verifyBurn so operators
-        // who have money in flight don't get stranded.
-        require(!withdrawalsPaused, "RollupV1: withdrawals paused");
-
         substituteBurnTo(
             burnAddress,
             msg.sender,
@@ -1225,26 +1117,6 @@ contract RollupV1 is
             validFrom == 0 || validFrom <= block.number + MAX_FUTURE_BLOCKS,
             "RollupV1: validFrom cannot be more than 30 days in the future"
         );
-
-        // V2 (Idea 4): enforce a minimum activation notice window for
-        // every non-initial validator set.
-        //
-        // The initial validator set (when validatorSets.length == 0)
-        // skips this check — deployment naturally establishes it with
-        // validFrom=0, and there are no users yet to protect.
-        //
-        // For every subsequent rotation, the floor guarantees users
-        // get `validatorActivationMinDelayBlocks` of notice regardless
-        // of what delay the governance layer (timelock) is using.
-        // This is defense-in-depth: even if governance is subverted
-        // or its delay is shortened, the contract itself still
-        // enforces a minimum reaction time.
-        if (validatorSets.length > 0) {
-            require(
-                validFrom >= block.number + validatorActivationMinDelayBlocks,
-                "RollupV1: validator activation too early"
-            );
-        }
 
         // Create a new ValidatorSet and push it to the array
         validatorSets.push();
