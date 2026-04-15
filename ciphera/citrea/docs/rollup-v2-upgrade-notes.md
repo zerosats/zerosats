@@ -9,9 +9,8 @@ use this file for detailed context.
 V2 adds:
 - deposit/TVL caps
 - open-proving liveness escape hatch
-- validator-activation delay floor
-- guardian pause for substitution path
 - burn fees + fee sink
+- inline timelock installation + ownership handoff
 - upgrade hardening from review/self-review passes
 
 ## Security Invariants
@@ -23,7 +22,7 @@ V2 adds:
 Why:
 - `reinitializer(2)` only enforces single execution.
 - Without `onlyOwner`, non-atomic upgrade flows can be front-run and let an
-  attacker set guardian/fee sink/caps.
+  attacker set fee sink/caps/timelock params.
 
 ### 2) Escape mode must not be open before V2 init
 
@@ -55,29 +54,15 @@ Why:
 - settlement liveness must not depend on fee sink behavior.
 - TVL should track tokens that actually left the contract.
 
-## Multi-token Policy in V2
+## Single-token Policy in V2
 
-V2 caps are global counters, not per-token accounting. Therefore V2 assumes a
-single underlying ERC20 for all supported note kinds.
-
-`addToken` is restricted to:
-- pre-V2 only (`version < 2`)
-- alias-only (`tokenAddress == address(token)`)
+V2 caps are global counters, not per-token accounting. Therefore V2 is strictly
+single-token and `addToken` is disabled.
 
 Why:
-- dev bootstrap still needs note-kind aliases.
-- allowing a different ERC20 pre-V2 would break V2 TVL seed correctness
-  (`currentTvl = token.balanceOf(address(this))`).
-
-## Validator Delay Bound
-
-`validatorActivationMinDelayBlocks` must be `< MAX_FUTURE_BLOCKS` in both:
-- `initializeV2`
-- `setValidatorActivationMinDelayBlocks`
-
-Why:
-- `_setValidators` also enforces `validFrom <= block.number + MAX_FUTURE_BLOCKS`.
-- setting delay at/above max would leave no satisfiable `validFrom`.
+- allowing dynamic token registration makes `currentTvl` ambiguous across assets.
+- TVL seed (`currentTvl = token.balanceOf(address(this))`) is defined only for
+  the primary ERC20.
 
 ## Burn Fee Behavioral Change (Escrow Path)
 
@@ -93,7 +78,7 @@ Operational requirement:
   - This intentionally freezes growth (new mints fail) while allowing burns to
     drain TVL back under cap.
 
-- `setRoot` is disabled in V2.
+- `setRoot` no longer exists.
   - State reset should use redeploy/testnet reset workflows, not owner root
     surgery.
 
@@ -102,6 +87,5 @@ Operational requirement:
 `test/RollupV2.test.ts` includes:
 - V2 behavior tests (ideas 1-9)
 - review fixes (init ownership, pre-init open-proving guard, TVL-on-failed-burn,
-  addToken constraints)
-- self-review fixes (reentrancy guard, fee-sink failure liveness, validator-delay bound)
-
+  timelock brick-prevention)
+- self-review fixes (reentrancy guard, fee-sink failure liveness)
