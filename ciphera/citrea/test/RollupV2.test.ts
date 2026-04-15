@@ -22,7 +22,13 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { network } from "hardhat";
-import { parseEther, encodeFunctionData } from "viem";
+import {
+  parseEther,
+  encodeFunctionData,
+  parseAbi,
+  getContract,
+} from "viem";
+import transparentProxyArtifact from "../openzeppelin-contracts/contracts/proxy/transparent/TransparentUpgradeableProxy.sol/TransparentUpgradeableProxy.json";
 
 const NOTE_KIND =
   "0x000200000000000013fb8d0c9d1c17ae5e40fff9be350f57840e9e66cd930000" as const;
@@ -33,6 +39,31 @@ const VK_HASH =
 const SEVEN_DAYS = 604800n;
 // One day in seconds — the contract's floor for the timelock minDelay.
 const ONE_DAY = 86400n;
+const BURN_FEE_300_SATS = 3_000_000_000_000n;
+const BURN_FEE_MAX = 30_000_000_000_000n;
+const ZERO_BYTES32 =
+  "0x0000000000000000000000000000000000000000000000000000000000000000" as const;
+const EIP1967_ADMIN_STORAGE_SLOT =
+  "0xb53127684a568b3173ae13b9f8a6016e243e63b6e8ee1178d6a717850b5d6103";
+const EIP1967_IMPLEMENTATION_STORAGE_SLOT =
+  "0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc";
+
+const PROXY_ADMIN_ABI = parseAbi([
+  "function owner() view returns (address)",
+  "function transferOwnership(address newOwner)",
+  "function upgradeAndCall(address proxy, address implementation, bytes data) payable",
+]);
+
+const TIMELOCK_ABI = parseAbi([
+  "function getMinDelay() view returns (uint256)",
+  "function schedule(address target, uint256 value, bytes data, bytes32 predecessor, bytes32 salt, uint256 delay)",
+  "function execute(address target, uint256 value, bytes data, bytes32 predecessor, bytes32 salt) payable",
+]);
+
+function readAddressFromSlot(slotValue: `0x${string}` | undefined): `0x${string}` {
+  assert.ok(slotValue && slotValue.length >= 66, `invalid slot value: ${slotValue}`);
+  return `0x${slotValue.slice(26)}` as `0x${string}`;
+}
 
 // Helper: deploy RollupV1 behind an ERC1967 proxy, run initialize(),
 // then run initializeV2(). Returns the rollup handle typed as
@@ -87,7 +118,7 @@ async function deployRollupV2() {
     parseEther("1"),
     parseEther("10"),
     SEVEN_DAYS,
-    2000n,
+    BURN_FEE_300_SATS,
     sink.account.address,
     ONE_DAY,
     [deployer.account.address] as readonly `0x${string}`[],
@@ -221,9 +252,9 @@ describe("RollupV1 V2 upgrade", () => {
   describe("Idea 9: flat burn fee", () => {
     it("computeBurnFee returns the flat fee for large values", async () => {
       const { rollup } = await deployRollupV2();
-      // burnFee = 2000; any value >= 2000 returns 2000.
+      // burnFee = 300 sats (in token-wei).
       const fee = await rollup.read.computeBurnFee([parseEther("1")]);
-      assert.equal(fee, 2000n);
+      assert.equal(fee, BURN_FEE_300_SATS);
     });
 
     it("computeBurnFee clamps to value when value < fee", async () => {
@@ -231,6 +262,48 @@ describe("RollupV1 V2 upgrade", () => {
       // value=500 < fee=2000 → fee clamped to 500.
       const fee = await rollup.read.computeBurnFee([500n]);
       assert.equal(fee, 500n);
+    });
+
+    it("initializeV2 rejects burnFee above 3000 sats max", async () => {
+      const { viem } = await network.connect();
+      const [deployer, prover, validator, sink] = await viem.getWalletClients();
+      const mockToken = await viem.deployContract("MockERC20");
+      const mockVerifier = await viem.deployContract("MockVerifier");
+      const impl = await viem.deployContract("RollupV1");
+      const initData = encodeFunctionData({
+        abi: impl.abi,
+        functionName: "initialize",
+        args: [
+          deployer.account.address,
+          deployer.account.address,
+          mockToken.address,
+          mockVerifier.address,
+          prover.account.address,
+          [validator.account.address],
+          VK_HASH,
+        ],
+      });
+      const proxy = await viem.deployContract("RollupV2TestProxy", [
+        impl.address,
+        initData,
+      ]);
+      const rollup = await viem.getContractAt("RollupV1", proxy.address);
+
+      await assert.rejects(
+        rollup.write.initializeV2(
+          [
+            parseEther("1"),
+            parseEther("10"),
+            SEVEN_DAYS,
+            BURN_FEE_MAX + 1n,
+            sink.account.address,
+            ONE_DAY,
+            [deployer.account.address] as readonly `0x${string}`[],
+            [deployer.account.address] as readonly `0x${string}`[],
+          ],
+          { account: deployer.account },
+        ),
+      );
     });
   });
 
@@ -881,6 +954,168 @@ describe("RollupV1 V2 upgrade", () => {
           { account: deployer.account },
         );
       }
+    });
+  });
+
+  // =================================================================
+  // End-to-end deployment/admin flow using the real Transparent proxy
+  // + ProxyAdmin path.
+  // =================================================================
+  describe("Deployment/admin wiring", () => {
+    it("wires initializeV2 + ProxyAdmin handoff + timelocked upgrade path", async () => {
+      const { viem, networkHelpers } = await network.connect();
+      const [deployer, prover, validator, sink] = await viem.getWalletClients();
+      const publicClient = await viem.getPublicClient();
+
+      const mockToken = await viem.deployContract("MockERC20");
+      const mockVerifier = await viem.deployContract("MockVerifier");
+      const implV1 = await viem.deployContract("RollupV1");
+      const initData = encodeFunctionData({
+        abi: implV1.abi,
+        functionName: "initialize",
+        args: [
+          deployer.account.address,
+          deployer.account.address,
+          mockToken.address,
+          mockVerifier.address,
+          prover.account.address,
+          [validator.account.address],
+          VK_HASH,
+        ],
+      });
+
+      const proxyHash = await deployer.deployContract({
+        abi: transparentProxyArtifact.abi,
+        bytecode: transparentProxyArtifact.bytecode,
+        args: [implV1.address, deployer.account.address, initData],
+      });
+      const proxyReceipt = await publicClient.waitForTransactionReceipt({
+        hash: proxyHash,
+      });
+      assert.equal(proxyReceipt.status, "success");
+      assert.ok(proxyReceipt.contractAddress);
+
+      const proxyAddress = proxyReceipt.contractAddress as `0x${string}`;
+      const rollup = await viem.getContractAt("RollupV1", proxyAddress);
+
+      const adminSlot = await publicClient.getStorageAt({
+        address: proxyAddress,
+        slot: EIP1967_ADMIN_STORAGE_SLOT,
+      });
+      const proxyAdminAddress = readAddressFromSlot(adminSlot);
+
+      const implementationBeforeSlot = await publicClient.getStorageAt({
+        address: proxyAddress,
+        slot: EIP1967_IMPLEMENTATION_STORAGE_SLOT,
+      });
+      const implementationBefore = readAddressFromSlot(implementationBeforeSlot);
+      assert.equal(
+        implementationBefore.toLowerCase(),
+        implV1.address.toLowerCase(),
+      );
+
+      const proxyAdmin = getContract({
+        address: proxyAdminAddress,
+        abi: PROXY_ADMIN_ABI,
+        client: { public: publicClient, wallet: deployer },
+      });
+      const proxyAdminOwnerBefore =
+        (await proxyAdmin.read.owner()) as `0x${string}`;
+      assert.equal(
+        proxyAdminOwnerBefore.toLowerCase(),
+        deployer.account.address.toLowerCase(),
+      );
+
+      // V2 init now timelocks rollup owner actions.
+      await rollup.write.initializeV2(
+        [
+          parseEther("0.001"),
+          parseEther("10"),
+          SEVEN_DAYS,
+          20_000_000_000_000n,
+          sink.account.address,
+          ONE_DAY,
+          [deployer.account.address] as readonly `0x${string}`[],
+          [deployer.account.address] as readonly `0x${string}`[],
+        ],
+        { account: deployer.account },
+      );
+
+      const timelockAddress = await rollup.read.timelock();
+      const rollupOwner = await rollup.read.owner();
+      assert.equal(rollupOwner.toLowerCase(), timelockAddress.toLowerCase());
+
+      // ProxyAdmin handoff is required for upgrade-delay guarantees.
+      await proxyAdmin.write.transferOwnership([timelockAddress]);
+      const proxyAdminOwnerAfter = (await proxyAdmin.read.owner()) as `0x${string}`;
+      assert.equal(
+        proxyAdminOwnerAfter.toLowerCase(),
+        timelockAddress.toLowerCase(),
+      );
+
+      // After handoff, deployer can no longer upgrade directly.
+      const implV2 = await viem.deployContract("RollupV1");
+      await assert.rejects(
+        deployer.writeContract({
+          address: proxyAdminAddress,
+          abi: PROXY_ADMIN_ABI,
+          functionName: "upgradeAndCall",
+          args: [proxyAddress, implV2.address, "0x"],
+        }),
+      );
+
+      // Timelock-proposed upgrade should execute only after delay.
+      const timelock = getContract({
+        address: timelockAddress,
+        abi: TIMELOCK_ABI,
+        client: { public: publicClient, wallet: deployer },
+      });
+      const minDelay = await timelock.read.getMinDelay();
+      assert.equal(minDelay, ONE_DAY);
+
+      const upgradeCalldata = encodeFunctionData({
+        abi: PROXY_ADMIN_ABI,
+        functionName: "upgradeAndCall",
+        args: [proxyAddress, implV2.address, "0x"],
+      });
+      const salt =
+        "0x1111111111111111111111111111111111111111111111111111111111111111" as const;
+
+      await timelock.write.schedule([
+        proxyAdminAddress,
+        0n,
+        upgradeCalldata,
+        ZERO_BYTES32,
+        salt,
+        ONE_DAY,
+      ]);
+      await assert.rejects(
+        timelock.write.execute([
+          proxyAdminAddress,
+          0n,
+          upgradeCalldata,
+          ZERO_BYTES32,
+          salt,
+        ]),
+      );
+
+      await networkHelpers.time.increase(Number(ONE_DAY) + 1);
+      await networkHelpers.mine(1);
+
+      await timelock.write.execute([
+        proxyAdminAddress,
+        0n,
+        upgradeCalldata,
+        ZERO_BYTES32,
+        salt,
+      ]);
+
+      const implementationAfterSlot = await publicClient.getStorageAt({
+        address: proxyAddress,
+        slot: EIP1967_IMPLEMENTATION_STORAGE_SLOT,
+      });
+      const implementationAfter = readAddressFromSlot(implementationAfterSlot);
+      assert.equal(implementationAfter.toLowerCase(), implV2.address.toLowerCase());
     });
   });
 });

@@ -46,6 +46,8 @@ struct Verifier {
 string constant NETWORK = "Ciphera";
 uint64 constant NETWORK_LEN = 7;
 uint256 constant MAX_FUTURE_BLOCKS = 2_592_000; // 30 days (~1 sec blocks)
+// For 18-decimal BTC wrappers, 1 sat = 1e10 token-wei.
+uint256 constant MAX_BURN_FEE = 30_000_000_000_000; // 3000 sats
 
 contract RollupV1 is
     Initializable,
@@ -245,6 +247,7 @@ contract RollupV1 is
         address[] calldata timelockExecutors_
     ) external onlyOwner reinitializer(2) {
         require(feeSink_ != address(0), "RollupV1: invalid fee sink");
+        require(burnFee_ <= MAX_BURN_FEE, "RollupV1: burn fee too high");
         require(
             openProvingDelay_ >= 7 days,
             "RollupV1: open proving delay too short"
@@ -491,6 +494,7 @@ contract RollupV1 is
 
     // --- Idea 9: Burn fee -----------------------------------------------
     function setBurnFee(uint256 newFee) external onlyOwner {
+        require(newFee <= MAX_BURN_FEE, "RollupV1: burn fee too high");
         emit BurnFeeUpdated(burnFee, newFee);
         burnFee = newFee;
     }
