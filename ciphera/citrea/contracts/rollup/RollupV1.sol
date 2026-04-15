@@ -521,7 +521,7 @@ contract RollupV1 is Initializable, OwnableUpgradeable {
         return rootHash;
     }
 
-    // Review fix (Finding 4): addToken is gated on the pre-V2 window.
+    // Review fix (Finding 4): addToken is alias-only and pre-V2-only.
     //
     // The V2 deposit caps (perMintCap / globalTvlCap / currentTvl)
     // are single global counters, not per-token. In a multi-token
@@ -529,17 +529,27 @@ contract RollupV1 is Initializable, OwnableUpgradeable {
     // cBTC is not fungible with 1 wei of USDC, and summing them
     // into a single cap is economically meaningless.
     //
-    // However, we cannot fully disable addToken because the
-    // pre-upgrade bootstrap flow legitimately needs it — the
-    // devnet deploy path in scripts/deploy.ts registers a mock
-    // BTC note kind after initialize() and before initializeV2().
+    // initializeV2() seeds currentTvl from the live balance of the
+    // primary `token` state variable only — so any ERC20 other
+    // than `token` that got registered pre-V2 would sit outside
+    // the cap accounting entirely.
     //
-    // The clean resolution: allow addToken ONLY while version < 2.
-    // During the V1 bootstrap window there are no caps yet, so
-    // multi-token registration does not violate any invariant.
-    // Once initializeV2() runs and bumps version to 2, caps become
-    // active and the single-token invariant must hold — so addToken
-    // locks.
+    // But we cannot fully disable addToken because the devnet
+    // bootstrap in scripts/deploy.ts legitimately needs it: it
+    // registers a *second note kind* that resolves to the *same*
+    // underlying ERC20 (an alias), because the Rust side's
+    // Note::new_with_psi() produces different note-kind bytes for
+    // the same token.
+    //
+    // Two gates enforce the invariant together:
+    //   (1) version < 2 — addToken only runs during V1 bootstrap,
+    //       before caps come alive.
+    //   (2) tokenAddress == address(token) — even pre-V2, only
+    //       alias registrations for the primary ERC20 are allowed.
+    //       This is the bit that closes the V1->V2 TVL seeding
+    //       hole: since every registered note kind resolves to
+    //       the single `token`, initializeV2's balance-of read
+    //       is guaranteed to cover all held value.
     //
     // If multi-token support is ever actually needed post-V2, a
     // dedicated V3 upgrade should reintroduce it together with
@@ -550,6 +560,10 @@ contract RollupV1 is Initializable, OwnableUpgradeable {
         require(
             tokens[noteKind] == address(0),
             "RollupV1: Token already exists"
+        );
+        require(
+            tokenAddress == address(token),
+            "RollupV1: addToken must alias primary token"
         );
 
         tokens[noteKind] = tokenAddress;
