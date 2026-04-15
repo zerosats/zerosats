@@ -264,6 +264,30 @@ contract RollupV1 is
             timelockProposers_.length > 0,
             "RollupV1: at least one proposer required"
         );
+        // Empty executors bricks the timelock — nothing ever executes,
+        // nothing can grant EXECUTOR_ROLE either, so the contract ends
+        // up with ownership permanently stuck behind an unusable
+        // timelock. Single non-zero executor is fine; `address(0)` is
+        // also a valid entry (OZ's "anyone can execute" sentinel).
+        require(
+            timelockExecutors_.length > 0,
+            "RollupV1: at least one executor required"
+        );
+        // At least one proposer must be a real (non-zero) address.
+        // If every entry is address(0), PROPOSER_ROLE is granted only
+        // to the zero address and no real account can ever schedule
+        // an operation — same bricking outcome.
+        bool hasRealProposer = false;
+        for (uint256 i = 0; i < timelockProposers_.length; i++) {
+            if (timelockProposers_[i] != address(0)) {
+                hasRealProposer = true;
+                break;
+            }
+        }
+        require(
+            hasRealProposer,
+            "RollupV1: at least one non-zero proposer required"
+        );
 
         __ReentrancyGuard_init();
 
