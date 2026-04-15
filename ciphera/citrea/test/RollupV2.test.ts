@@ -775,5 +775,131 @@ describe("RollupV1 V2 upgrade", () => {
         "deployer should no longer be able to call onlyOwner functions",
       );
     });
+
+    // Brick-prevention: initializeV2 must reject timelock configs
+    // that would produce a non-functional TimelockController.
+    //
+    // Three paths, all equivalent outcomes (bricked governance):
+    //   (a) empty executors  — nobody has EXECUTOR_ROLE
+    //   (b) empty proposers  — nobody has PROPOSER_ROLE
+    //   (c) only address(0) as proposer — PROPOSER_ROLE granted
+    //       only to the zero address, no real account can schedule
+    //
+    // All three must revert at initializeV2 BEFORE ownership transfers,
+    // so the deployer retains control and can redeploy / retry.
+    it("initializeV2 rejects bricking timelock configs", async () => {
+      // Helper: spin up a fresh proxy, return rollup handle + signer set.
+      async function freshRollup() {
+        const { viem } = await network.connect();
+        const [deployer, prover, validator, sink] =
+          await viem.getWalletClients();
+        const mockToken = await viem.deployContract("MockERC20");
+        const mockVerifier = await viem.deployContract("MockVerifier");
+        const impl = await viem.deployContract("RollupV1");
+        const initData = encodeFunctionData({
+          abi: impl.abi,
+          functionName: "initialize",
+          args: [
+            deployer.account.address,
+            deployer.account.address,
+            mockToken.address,
+            mockVerifier.address,
+            prover.account.address,
+            [validator.account.address],
+            VK_HASH,
+          ],
+        });
+        const proxy = await viem.deployContract("RollupV2TestProxy", [
+          impl.address,
+          initData,
+        ]);
+        const rollup = await viem.getContractAt(
+          "RollupV1",
+          proxy.address,
+        );
+        return { rollup, deployer, sink };
+      }
+
+      const ZERO_ADDR =
+        "0x0000000000000000000000000000000000000000" as const;
+
+      // (a) empty executors
+      {
+        const { rollup, deployer, sink } = await freshRollup();
+        await assert.rejects(
+          rollup.write.initializeV2(
+            [
+              parseEther("1"),
+              parseEther("10"),
+              SEVEN_DAYS,
+              2000n,
+              sink.account.address,
+              ONE_DAY,
+              [deployer.account.address] as readonly `0x${string}`[],
+              [] as readonly `0x${string}`[],
+            ],
+            { account: deployer.account },
+          ),
+        );
+      }
+
+      // (b) empty proposers
+      {
+        const { rollup, deployer, sink } = await freshRollup();
+        await assert.rejects(
+          rollup.write.initializeV2(
+            [
+              parseEther("1"),
+              parseEther("10"),
+              SEVEN_DAYS,
+              2000n,
+              sink.account.address,
+              ONE_DAY,
+              [] as readonly `0x${string}`[],
+              [deployer.account.address] as readonly `0x${string}`[],
+            ],
+            { account: deployer.account },
+          ),
+        );
+      }
+
+      // (c) only address(0) as proposer
+      {
+        const { rollup, deployer, sink } = await freshRollup();
+        await assert.rejects(
+          rollup.write.initializeV2(
+            [
+              parseEther("1"),
+              parseEther("10"),
+              SEVEN_DAYS,
+              2000n,
+              sink.account.address,
+              ONE_DAY,
+              [ZERO_ADDR] as readonly `0x${string}`[],
+              [deployer.account.address] as readonly `0x${string}`[],
+            ],
+            { account: deployer.account },
+          ),
+        );
+      }
+
+      // Sanity: executors = [address(0)] (open-role sentinel) is OK.
+      {
+        const { rollup, deployer, sink } = await freshRollup();
+        await rollup.write.initializeV2(
+          [
+            parseEther("1"),
+            parseEther("10"),
+            SEVEN_DAYS,
+            2000n,
+            sink.account.address,
+            ONE_DAY,
+            [deployer.account.address] as readonly `0x${string}`[],
+            [ZERO_ADDR] as readonly `0x${string}`[],
+          ],
+          { account: deployer.account },
+        );
+      }
+    });
   });
 });
