@@ -47,7 +47,7 @@ string constant NETWORK = "Ciphera";
 uint64 constant NETWORK_LEN = 7;
 uint256 constant MAX_FUTURE_BLOCKS = 2_592_000; // 30 days (~1 sec blocks)
 // For 18-decimal BTC wrappers, 1 sat = 1e10 token-wei.
-uint256 constant MAX_BURN_FEE = 30_000_000_000_000; // 3000 sats
+uint256 constant MAX_BURN_FEE = 300_0_000_000_000; // 300 sats
 
 contract RollupV1 is
     Initializable,
