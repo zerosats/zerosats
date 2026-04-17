@@ -651,7 +651,7 @@ contract RollupV1 is
         } else if (kind == 2) {
             // Mint
             return verifyMint(index, publicInputs);
-        } else if (kind == 3) {
+        } else if (kind == 3 || kind == 4) {
             // Burn
             return verifyBurn(index, publicInputs, height);
         } else {
