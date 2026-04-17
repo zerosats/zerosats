@@ -1,5 +1,4 @@
 import { HardhatUserConfig } from "hardhat/config";
-
 import hardhatToolboxViemPlugin from "@nomicfoundation/hardhat-toolbox-viem";
 import { configVariable } from "hardhat/config";
 
@@ -17,6 +16,7 @@ const config: HardhatUserConfig = {
       },
     ],
   },
+
   networks: {
     hardhatMainnet: {
       type: "edr-simulated",
@@ -37,8 +37,7 @@ const config: HardhatUserConfig = {
     citreaMainnet: {
       type: "http",
       chainId: 4114,
-      url:
-          `https://citrea-mainnet.g.alchemy.com/v2/${configVariable("ALCHEMY_MAINNET_API_KEY")}`,
+      url: `https://citrea-mainnet.g.alchemy.com/v2/${configVariable("ALCHEMY_MAINNET_API_KEY")}`,
       accounts: { mnemonic: configVariable("MNEMONIC") },
     },
   },
