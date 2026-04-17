@@ -32,7 +32,7 @@ jobs:
         include:
           - name: fast
             runs-on: ubuntu-latest
-            skip-args: "--skip test_agg_utxo --skip test_alt_agg_utxo"
+            skip-args: "--skip test_agg_utxo --skip test_alt_agg_utxo --skip test_agg_agg"
           - name: full
             runs-on: ubicloud-standard-16
             skip-args: ""
