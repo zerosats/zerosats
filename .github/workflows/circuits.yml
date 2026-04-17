@@ -1,15 +1,6 @@
 name: Barretenberg tests
 
 on:
-  push:
-    paths:
-      - 'ciphera/noir/**'
-      - 'ciphera/fixtures/programs/**'
-      - 'ciphera/fixtures/keys/**'
-      - 'ciphera/fixtures/params/**'
-      - 'ciphera/pkg/barretenberg/**'
-      - 'ciphera/pkg/element/**'
-      - 'ciphera/pkg/zk-primitives/**'
   pull_request:
     paths:
       - 'ciphera/noir/**'
