@@ -16,30 +16,47 @@ on:
       - 'ciphera/Cargo.toml'
       - 'ciphera/Cargo.lock'
       - 'ciphera/rust-toolchain.toml'
-      - 'ciphera/.github/workflows/barretenberg-test.yml'
+      - 'ciphera/.github/workflows/circuits.yml'
+
+concurrency:
+  group: circuits-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    name: test (${{ matrix.name }})
+    runs-on: ${{ matrix.runs-on }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: fast
+            runs-on: ubuntu-latest
+            skip-args: "--skip test_agg_utxo --skip test_alt_agg_utxo"
+          - name: full
+            runs-on: ubicloud-standard-16
+            skip-args: ""
+    defaults:
+      run:
+        working-directory: ciphera
     steps:
       - uses: actions/checkout@v4
 
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: 1.88.0
-          components: clippy, rustfmt
 
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: . -> target
+          workspaces: ciphera -> target
+          key: ${{ matrix.name }}
 
       - name: Install Barretenberg
         working-directory: ciphera/web
         run: |
-          mkdir -p ~/.bb                                                                                                                                          
-          tar -xzf binaries/linux64/barretenberg-amd64-linux.tar.gz -C ~/.bb                                                                                      
+          mkdir -p ~/.bb
+          tar -xzf binaries/linux64/barretenberg-amd64-linux.tar.gz -C ~/.bb
           chmod +x ~/.bb/bb
 
       - name: cargo test -p barretenberg --lib
-        working-directory: ciphera
-        run: cargo test -p barretenberg --lib
+        run: cargo test -p barretenberg --lib -- ${{ matrix.skip-args }}
