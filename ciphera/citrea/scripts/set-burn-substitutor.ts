@@ -1,8 +1,17 @@
 import rollupV1Artifact from "../artifacts/contracts/rollup/RollupV1.sol/RollupV1.json";
 import { network } from "hardhat";
-import { createWalletClient, getContract, http } from "viem";
+import {
+    createWalletClient,
+    encodeFunctionData,
+    getContract,
+    http,
+} from "viem";
 import { mnemonicToAccount } from "viem/accounts";
-import { citreaTestChain } from "./shared";
+import {
+    citreaTestChain,
+    parseTimelockMode,
+    timelockDispatch,
+} from "./shared";
 
 const { viem } = await network.connect({
     network: "citreaTestnet",
@@ -12,6 +21,7 @@ const { viem } = await network.connect({
 const ROLLUP_ADDRESS = process.env.ROLLUP_ADDRESS as `0x${string}`;
 const BURN_SUBSTITUTOR = process.env.BURN_SUBSTITUTOR as `0x${string}`;
 const ACTION = (process.env.ACTION || "").toLowerCase(); // "add" | "remove"
+const SALT = process.env.TIMELOCK_SALT as `0x${string}` | undefined;
 
 async function main() {
     if (!ROLLUP_ADDRESS) throw new Error("ROLLUP_ADDRESS env var is not set");
@@ -19,6 +29,7 @@ async function main() {
     if (ACTION !== "add" && ACTION !== "remove") {
         throw new Error("ACTION env var must be either 'add' or 'remove'");
     }
+    const mode = parseTimelockMode(process.env.MODE);
 
     const seed = process.env.MNEMONIC;
     if (!seed) throw new Error("MNEMONIC env var is not set");
@@ -42,10 +53,11 @@ async function main() {
         }),
     });
 
-    console.log("Wallet address:", senderClient.account.address);
-    console.log("Rollup address:", ROLLUP_ADDRESS);
-    console.log("Action:", ACTION);
-    console.log("Burn substitutor:", BURN_SUBSTITUTOR);
+    console.log("Wallet address:   ", senderClient.account.address);
+    console.log("Rollup address:   ", ROLLUP_ADDRESS);
+    console.log("Action:           ", ACTION);
+    console.log("Burn substitutor: ", BURN_SUBSTITUTOR);
+    console.log("Mode:             ", mode);
 
     const rollup = getContract({
         address: ROLLUP_ADDRESS,
@@ -53,24 +65,25 @@ async function main() {
         client: { public: publicClient, wallet: senderClient },
     });
 
-    const hash =
-        ACTION === "add"
-            ? await rollup.write.addBurnSubstitutor([BURN_SUBSTITUTOR], {
-                gas: 100_000n,
-            })
-            : await rollup.write.removeBurnSubstitutor([BURN_SUBSTITUTOR], {
-                gas: 100_000n,
-            });
+    const timelock = (await rollup.read.timelock()) as `0x${string}`;
 
-    console.log(`📝 Transaction hash: ${hash}`);
+    const functionName =
+        ACTION === "add" ? "addBurnSubstitutor" : "removeBurnSubstitutor";
+    const data = encodeFunctionData({
+        abi: rollupV1Artifact.abi,
+        functionName,
+        args: [BURN_SUBSTITUTOR],
+    });
 
-    const receipt = await publicClient.waitForTransactionReceipt({ hash });
-
-    if (receipt.status !== "success") {
-        console.error(`❌ Transaction reverted`, receipt);
-        throw new Error(`${ACTION}BurnSubstitutor transaction reverted`);
-    }
-    console.log(`✅ Transaction confirmed in block ${receipt.blockNumber}`);
+    await timelockDispatch({
+        publicClient,
+        walletClient: senderClient,
+        timelock,
+        target: ROLLUP_ADDRESS,
+        data,
+        mode,
+        salt: SALT,
+    });
 }
 
 main()
