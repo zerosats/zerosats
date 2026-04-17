@@ -42,6 +42,13 @@ jobs:
         with:
           workspaces: . -> target
 
+      - name: Install Barretenberg
+        working-directory: ciphera/web
+        run: |
+          mkdir -p ~/.bb                                                                                                                                          
+          tar -xzf binaries/linux64/barretenberg-amd64-linux.tar.gz -C ~/.bb                                                                                      
+          chmod +x ~/.bb/bb
+
       - name: cargo test -p barretenberg --lib
         working-directory: ciphera
         run: cargo test -p barretenberg --lib
