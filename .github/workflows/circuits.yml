@@ -1,0 +1,46 @@
+name: Barretenberg tests
+
+on:
+  push:
+    paths:
+      - 'ciphera/noir/**'
+      - 'ciphera/fixtures/programs/**'
+      - 'ciphera/fixtures/keys/**'
+      - 'ciphera/fixtures/params/**'
+      - 'ciphera/pkg/barretenberg/**'
+      - 'ciphera/pkg/element/**'
+      - 'ciphera/pkg/zk-primitives/**'
+  pull_request:
+    paths:
+      - 'ciphera/noir/**'
+      - 'ciphera/fixtures/programs/**'
+      - 'ciphera/fixtures/keys/**'
+      - 'ciphera/fixtures/params/**'
+      - 'ciphera/pkg/barretenberg/**'
+      - 'ciphera/pkg/element/**'
+      - 'ciphera/pkg/zk-primitives/**'
+      - 'ciphera/pkg/hash/**'
+      - 'ciphera/pkg/hash-poseidon/**'
+      - 'ciphera/pkg/minimal-poseidon/**'
+      - 'ciphera/Cargo.toml'
+      - 'ciphera/Cargo.lock'
+      - 'ciphera/rust-toolchain.toml'
+      - 'ciphera/.github/workflows/barretenberg-test.yml'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.88.0
+          components: clippy, rustfmt
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: . -> target
+
+      - name: cargo test -p barretenberg --lib
+        run: cargo test -p barretenberg --lib
