@@ -410,6 +410,95 @@ fn test_burn_single_input() {
         [3, bridged_note_kind(), 10, get_note_commitment(note_1), 0],
     )
 }
+#[test]
+fn test_burn_no_sub() {
+    let pk: Field = 101;
+    let address = get_address(pk);
+
+    // Inputs
+    let note_1 = Note { kind: bridged_note_kind(), value: 15, address, psi: 1 };
+    let note_2 = Note { kind: bridged_note_kind(), value: 5, address, psi: 2 };
+    let input_note_1 = InputNote { note: note_1, secret_key: pk };
+    let input_note_2 = InputNote { note: note_2, secret_key: pk };
+
+    // Outputs
+    let note_3 = Note { kind: 0, value: 0, address: 0, psi: 0 };
+    let note_4 = Note { kind: bridged_note_kind(), value: 10, address, psi: 3 };
+
+    // Commitments
+    main(
+        [input_note_1, input_note_2],
+        [note_3, note_4],
+        0,
+        [
+            get_note_commitment(note_1),
+            get_note_commitment(note_2),
+            get_note_commitment(note_3),
+            get_note_commitment(note_4),
+        ],
+        [4, bridged_note_kind(), 10, get_note_commitment(note_1), 0],
+    )
+}
+
+#[test]
+fn test_burn_no_sub_single_input() {
+    let pk: Field = 101;
+    let address = get_address(pk);
+
+    // Inputs - one real note, one padding
+    let note_1 = Note { kind: bridged_note_kind(), value: 15, address, psi: 1 };
+    let note_2 = Note { kind: 0, value: 0, address, psi: 0 };
+    let input_note_1 = InputNote { note: note_1, secret_key: pk };
+    let input_note_2 = InputNote { note: note_2, secret_key: 0 };
+
+    // Outputs - burn 10 value, keep 5
+    let note_3 = Note { kind: 0, value: 0, address: 0, psi: 0 };
+    let note_4 = Note { kind: bridged_note_kind(), value: 5, address, psi: 3 };
+
+    main(
+        [input_note_1, input_note_2],
+        [note_3, note_4],
+        0,
+        [
+            get_note_commitment(note_1),
+            get_note_commitment(note_2),
+            get_note_commitment(note_3),
+            get_note_commitment(note_4),
+        ],
+        [4, bridged_note_kind(), 10, get_note_commitment(note_1), 0],
+    )
+}
+
+#[test(should_fail)]
+fn test_burn_no_sub_invalid_addr() {
+    let pk: Field = 101;
+    let address = get_address(pk);
+
+    // Inputs
+    let note_1 = Note { kind: bridged_note_kind(), value: 15, address, psi: 1 };
+    let note_2 = Note { kind: bridged_note_kind(), value: 5, address, psi: 2 };
+    let input_note_1 = InputNote { note: note_1, secret_key: pk };
+    let input_note_2 = InputNote { note: note_2, secret_key: pk };
+
+    // Outputs
+    let note_3 = Note { kind: 0, value: 0, address: 0, psi: 0 };
+    let note_4 = Note { kind: bridged_note_kind(), value: 10, address, psi: 3 };
+
+    // pmessage4 (private burn addr) does not match messages[4] (public burn_addr) — must fail
+    main(
+        [input_note_1, input_note_2],
+        [note_3, note_4],
+        12345, // pmessage4 ≠ burn_addr below
+        [
+            get_note_commitment(note_1),
+            get_note_commitment(note_2),
+            get_note_commitment(note_3),
+            get_note_commitment(note_4),
+        ],
+        [4, bridged_note_kind(), 10, get_note_commitment(note_1), 99999],
+    )
+}
+
 #[test(should_fail)]
 fn test_mint_different_kinds() {
     let pk: Field = 101;
