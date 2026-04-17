@@ -54,9 +54,17 @@ jobs:
       - name: Install Barretenberg
         working-directory: ciphera/web
         run: |
-          mkdir -p ~/.bb
-          tar -xzf binaries/linux64/barretenberg-amd64-linux.tar.gz -C ~/.bb
-          chmod +x ~/.bb/bb
+          tmp=$(mktemp -d)
+          tar -xzf binaries/linux64/barretenberg-amd64-linux.tar.gz -C "$tmp"
+          chmod +x "$tmp/bb"
+          # Runner's home, used by the default get_bb_path() lookup
+          install -Dm755 "$tmp/bb" "$HOME/.bb/bb"
+          # Required by test_bb_in_bb_path_env (hardcodes BB_PATH=/root/.bb)
+          sudo install -Dm755 "$tmp/bb" /root/.bb/bb
+          # Required by test_bb_in_system_path / test_bb_in_local_dir (which bb)
+          # and provides a safety net when other tests thrash $HOME in parallel
+          sudo install -Dm755 "$tmp/bb" /usr/local/bin/bb
+          bb --version
 
       - name: cargo test -p barretenberg --lib
         run: cargo test -p barretenberg --lib -- ${{ matrix.skip-args }}
