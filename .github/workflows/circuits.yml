@@ -43,4 +43,5 @@ jobs:
           workspaces: . -> target
 
       - name: cargo test -p barretenberg --lib
+        working-directory: ciphera
         run: cargo test -p barretenberg --lib
