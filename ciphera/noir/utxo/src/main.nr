@@ -484,11 +484,11 @@ fn test_burn_no_sub_invalid_addr() {
     let note_3 = Note { kind: 0, value: 0, address: 0, psi: 0 };
     let note_4 = Note { kind: bridged_note_kind(), value: 10, address, psi: 3 };
 
-    // pmessage4 (private burn addr) does not match messages[4] (public burn_addr) — must fail
+    // pmessage4 (private burn addr) does not match messages[4] (public burn_addr), it must fail
     main(
         [input_note_1, input_note_2],
         [note_3, note_4],
-        12345, // pmessage4 ≠ burn_addr below
+        12345, // pmessage4 != burn_addr below
         [
             get_note_commitment(note_1),
             get_note_commitment(note_2),
