@@ -53,6 +53,7 @@ pub struct HeightResp {
 pub struct NetworkResp {
     pub rollup_contract: String,
     pub chain_id: u64,
+    pub escrow_manager: String,
 }
 
 #[derive(Debug, Deserialize)]

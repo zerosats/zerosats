@@ -782,7 +782,7 @@ async fn handle_withdraw_ln(
     };
 
     let input_amount: u64 = u64::try_from(input_amount_wei)
-        .map_err(|_| color_eyre::eyre::eyre!("Converted satoshi amount exceeds u64 maximum"))?;
+        .map_err(|_| color_eyre::eyre::eyre!("Converted Wei amount exceeds u64 maximum"))?;
 
     let quote_expiry = quote["quoteExpiry"].as_u64().unwrap_or(0);
 
@@ -793,7 +793,7 @@ async fn handle_withdraw_ln(
     println!("\n   Burning {input_amount} cBTC to substitutor {substitutor}...");
 
     // Step 2 — Create a burn note for inputAmount and submit it to the Ciphera node.
-    // The substitutor address is the burn target: the offramp service claims the burned
+    // The user address is the burn target for refunds. The offramp service claims the burned
     // cBTC on the EVM side and settles the Lightning invoice.
     handle_burn(
         name,

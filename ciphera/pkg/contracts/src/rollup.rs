@@ -1087,7 +1087,7 @@ impl ReadonlyRollupContract {
     }
 
     #[tracing::instrument(err, ret, skip(self))]
-    pub async fn escrow_manager(&self) -> Result<String> {
+    pub async fn escrow_manager(&self) -> Result<Address> {
         let em = self
             .client
             .query(

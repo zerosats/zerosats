@@ -182,10 +182,12 @@ impl BurnSubstitutor {
             e => return Err(eyre::eyre!("/swaps returned unexpected status: {e}")),
         }
 
+        tracing::info!("looking into swaps for burner {:x}", self.substitutor_address);
+
         let swaps_resp = resp
             .json::<SwapsResponse>()
             .await
-            .context("Failed to parse /swaps response")?;
+            .context("Failed to parse/swaps response")?;
 
         // Step B — Find a matching swap in CREATED (0) or ONGOING (-1) state
         let swap = swaps_resp.swaps.into_iter().find(|s| {
@@ -242,10 +244,11 @@ impl BurnSubstitutor {
             .json::<OfframpResponse>()
             .await
             .context("Failed to parse /offramp response")?;
-        println!("{:?}", offramp_resp);
-        // Step D — Submit commit transactions if state is CREATED
+
+        // Step D — Skip iteration only when there is no transaction to prepare
+        // We can't rely on swap status since it may soft-expire before burner picks it
         if offramp_resp.commit_txs.is_empty() {
-            //offramp_resp.state != "CREATED" ||
+            // != "CREATED" ||
             tracing::info!(
                 ?burn_hash,
                 state = %offramp_resp.state,
@@ -253,6 +256,8 @@ impl BurnSubstitutor {
             );
             return Ok(());
         }
+
+        tracing::info!(%offramp_resp.state, %swap_id, "Proceeding to commitment step");
 
         let web3_client = self.rollup_contract.client.client().clone();
 
