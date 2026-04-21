@@ -14,12 +14,6 @@ opt-level = 1
 [profile.dev.package."*"]
 opt-level = 3
 
-
-[patch.crates-io]
-ethers-core = { git = "https://github.com/scroll-tech/ethers-rs.git", branch = "v2.0.7" }
-ethers-providers = { git = "https://github.com/scroll-tech/ethers-rs.git", branch = "v2.0.7" }
-ethers-signers = { git = "https://github.com/scroll-tech/ethers-rs.git", branch = "v2.0.7" }
-
 [workspace.dependencies]
 barretenberg = { path = "./pkg/barretenberg" }
 block-store = { path = "./pkg/block-store" }

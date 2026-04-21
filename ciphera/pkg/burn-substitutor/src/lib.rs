@@ -164,7 +164,7 @@ impl BurnSubstitutor {
         burn_hash: Element,
     ) -> Result<(), eyre::Error> {
         let burn_value = amount.to_eth_u256();
-        let address_hex = format!("{:#x}", self.substitutor_address);
+        let burner_addr = format!("{:#x}", self.substitutor_address);
 
         // Step A — Query /swaps
         let client = reqwest::Client::new();
@@ -173,7 +173,7 @@ impl BurnSubstitutor {
             .get(&swaps_url)
             .query(&[
                 ("amount", burn_value.to_string()),
-                ("address", address_hex.clone()),
+                ("address", burner_addr.clone()),
             ])
             .send()
             .await
@@ -193,7 +193,7 @@ impl BurnSubstitutor {
 
         // Step B — Find a matching swap in CREATED (0) or ONGOING (-1) state
         let swap = swaps_resp.swaps.into_iter().find(|s| {
-            let addr_match = s.input_address.eq_ignore_ascii_case(&address_hex);
+            let addr_match = s.input_address.eq_ignore_ascii_case(&burner_addr);
 
             let amount_match = web3::types::U256::from_dec_str(&s.amount)
                 .map(|a| a == burn_value)
@@ -210,7 +210,7 @@ impl BurnSubstitutor {
                 tracing::info!(
                     ?burn_hash,
                     ?burn_value,
-                    ?address_hex,
+                    ?burner_addr,
                     "No matching CREATED swap found for NoSub burn; will retry on next tick"
                 );
                 return Ok(());
@@ -222,42 +222,66 @@ impl BurnSubstitutor {
 
         // Step C — Query /offramp/:swapId
         let offramp_url = format!("{}/offramp/{}", self.offramp_url, swap_id);
-        let resp = client
-            .get(&offramp_url)
-            .send()
-            .await
-            .context("Failed to query /offramp/:swapId")?;
 
-        match resp.status() {
-            StatusCode::OK => {}
-            e if e.is_server_error() => {
-                tracing::warn!(
+        const MAX_ATTEMPTS: u32 = 3;
+        const RETRY_DELAY: Duration = Duration::from_secs(5);
+
+        let offramp_resp = {
+            let mut attempt = 0;
+            loop {
+                attempt += 1;
+
+                let resp = client
+                    .get(&offramp_url)
+                    .send()
+                    .await
+                    .context("Failed to query /offramp/:swapId")?;
+
+                match resp.status() {
+                    StatusCode::OK => {}
+                    e if e.is_server_error() => {
+                        tracing::warn!(
+                            ?burn_hash,
+                            %swap_id,
+                            status = %e,
+                            "Transient server error from /offramp/:id; will retry on next tick"
+                        );
+                        return Ok(());
+                    }
+                    e => return Err(eyre::eyre!("/offramp/:id returned unexpected status: {e}")),
+                }
+
+                let offramp_resp = resp
+                    .json::<OfframpResponse>()
+                    .await
+                    .context("Failed to parse /offramp response")?;
+
+                // Step D — Skip iteration only when there is no transaction to prepare
+                // We can't rely on swap status since it may soft-expire before burner picks it
+                if !offramp_resp.commit_txs.is_empty() {
+                    break offramp_resp;
+                }
+
+                if attempt >= MAX_ATTEMPTS {
+                    tracing::info!(
+                        ?burn_hash,
+                        state = %offramp_resp.state,
+                        attempts = attempt,
+                        "Swap has no commitTxs; skipping"
+                    );
+                    return Ok(());
+                }
+
+                tracing::info!(
                     ?burn_hash,
-                    %swap_id,
-                    status = %e,
-                    "Transient server error from /offramp/:id; will retry on next tick"
+                    state = %offramp_resp.state,
+                    attempt,
+                    "Swap has no commitTxs; retrying in {}s",
+                    RETRY_DELAY.as_secs()
                 );
-                return Ok(());
+                tokio::time::sleep(RETRY_DELAY).await;
             }
-            e => return Err(eyre::eyre!("/offramp/:id returned unexpected status: {e}")),
-        }
-
-        let offramp_resp = resp
-            .json::<OfframpResponse>()
-            .await
-            .context("Failed to parse /offramp response")?;
-
-        // Step D — Skip iteration only when there is no transaction to prepare
-        // We can't rely on swap status since it may soft-expire before burner picks it
-        if offramp_resp.commit_txs.is_empty() {
-            // != "CREATED" ||
-            tracing::info!(
-                ?burn_hash,
-                state = %offramp_resp.state,
-                "Swap is not in CREATED state or has no commitTxs; skipping"
-            );
-            return Ok(());
-        }
+        };
 
         tracing::info!(%offramp_resp.state, %swap_id, "Proceeding to commitment step");
 
@@ -269,6 +293,30 @@ impl BurnSubstitutor {
             let data_bytes =
                 hex::decode(commit_tx.data.trim_start_matches("0x"))
                     .context("Failed to decode commitTx.data")?;
+
+            let Ok(escrow) = EscrowData::from_transaction_calldata(&data_bytes) else {
+                tracing::warn!(
+                    "Failed to decode EscrowData from commitTx.data; skipping"
+                );
+                return Ok(());
+            };
+
+            if escrow.offerer != self.substitutor_address {
+                tracing::warn!(
+                    ?escrow.offerer,
+                    "Swap was created for a different address; skipping"
+                );
+                return Ok(());
+            }
+
+            if escrow.amount != burn_value {
+                tracing::warn!(
+                    ?escrow.amount,
+                    "Swap was created for a different amount; skipping"
+                );
+                return Ok(());
+            }
+
             let data = web3::types::Bytes(data_bytes);
 
             let value = web3::types::U256::from_dec_str(&commit_tx.value)

@@ -84,16 +84,16 @@ dependencies = [
 
 [[package]]
 name = "actix-http"
-version = "3.4.0"
+version = "3.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a92ef85799cba03f76e4f7c10f533e66d87c9a7e7055f3391f09000ad8351bc9"
+checksum = "4eb9843d84c775696c37d9a418bbb01b932629d01870722c0f13eb3f95e2536d"
 dependencies = [
  "actix-codec",
  "actix-rt",
  "actix-service",
  "actix-utils",
  "ahash",
- "base64 0.21.5",
+ "base64 0.22.1",
  "bitflags 2.9.1",
  "brotli",
  "bytes",
@@ -969,6 +969,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "bindgen"
+version = "0.72.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "993776b509cfb49c750f11b8f07a46fa23e0a1386ffc01fb1e7d343efc387895"
+dependencies = [
+ "bitflags 2.9.1",
+ "cexpr",
+ "clang-sys",
+ "itertools 0.10.5",
+ "proc-macro2",
+ "quote",
+ "regex",
+ "rustc-hash 2.1.1",
+ "shlex",
+ "syn 2.0.104",
+]
+
+[[package]]
 name = "bit-set"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1144,9 +1162,9 @@ dependencies = [
 
 [[package]]
 name = "brotli"
-version = "3.4.0"
+version = "6.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "516074a47ef4bce09577a3b379392300159ce5b1ba2e501ff1c819950066100f"
+checksum = "74f7971dbd9326d58187408ab83117d8ac1bb9c17b085fdacd1cf2f598719b6b"
 dependencies = [
  "alloc-no-stdlib",
  "alloc-stdlib",
@@ -1155,9 +1173,9 @@ dependencies = [
 
 [[package]]
 name = "brotli-decompressor"
-version = "2.5.1"
+version = "4.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4e2e4afe60d7dd600fdd3de8d0f08c2b7ec039712e3b6137ff98b7004e82de4f"
+checksum = "a334ef7c9e23abf0ce748e8cd309037da93e606ad52eb372e4ce327a0dcfbdfd"
 dependencies = [
  "alloc-no-stdlib",
  "alloc-stdlib",
@@ -5281,9 +5299,9 @@ dependencies = [
 
 [[package]]
 name = "pkg-config"
-version = "0.3.27"
+version = "0.3.33"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "26072860ba924cbfa98ea39c8c19b4dd6a4a25423dbdf219c1eca91aa0cf6964"
+checksum = "19f132c84eca552bf34cab8ec81f1c1dcc229b811638f9d283dceabe58c5569e"
 
 [[package]]
 name = "platforms"
@@ -9225,44 +9243,29 @@ dependencies = [
 
 [[package]]
 name = "zstd"
-version = "0.12.4"
+version = "0.13.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1a27595e173641171fc74a1232b7b1c7a7cb6e18222c11e9dfb9888fa424c53c"
+checksum = "e91ee311a569c327171651566e07972200e76fcfe2242a4fa446149a3881c08a"
 dependencies = [
  "zstd-safe",
 ]
 
 [[package]]
 name = "zstd-safe"
-version = "6.0.6"
+version = "7.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ee98ffd0b48ee95e6c5168188e44a54550b1564d9d530ee21d5f0eaed1069581"
+checksum = "8f49c4d5f0abb602a93fb8736af2a4f4dd9512e36f7f570d66e65ff867ed3b9d"
 dependencies = [
- "libc",
  "zstd-sys",
 ]
 
 [[package]]
 name = "zstd-sys"
-version = "2.0.10+zstd.1.5.6"
+version = "2.0.16+zstd.1.5.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c253a4914af5bafc8fa8c86ee400827e83cf6ec01195ec1f1ed8441bf00d65aa"
+checksum = "91e19ebc2adc8f83e43039e79776e3fda8ca919132d68a1fed6a5faca2683748"
 dependencies = [
+ "bindgen 0.72.1",
  "cc",
  "pkg-config",
 ]
-
-[[patch.unused]]
-name = "ethers-core"
-version = "2.0.7"
-source = "git+https://github.com/scroll-tech/ethers-rs.git?branch=v2.0.7#e32dfd62e7cdec31160b91c5a646883594a586ba"
-
-[[patch.unused]]
-name = "ethers-providers"
-version = "2.0.7"
-source = "git+https://github.com/scroll-tech/ethers-rs.git?branch=v2.0.7#e32dfd62e7cdec31160b91c5a646883594a586ba"
-
-[[patch.unused]]
-name = "ethers-signers"
-version = "2.0.7"
-source = "git+https://github.com/scroll-tech/ethers-rs.git?branch=v2.0.7#e32dfd62e7cdec31160b91c5a646883594a586ba"
