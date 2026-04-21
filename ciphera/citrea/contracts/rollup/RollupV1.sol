@@ -695,6 +695,7 @@ contract RollupV1 is
         address burn_addr = bytes32ToAddress(messages[i + 4]);
 
         address _token = tokens[note_kind];
+        require(_token != address(0), "RollupV1: Unsupported token");
 
         bytes32 substituteBurnKey = getSubstituteBurnKey(
             hash,
