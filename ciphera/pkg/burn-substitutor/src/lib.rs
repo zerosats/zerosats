@@ -223,7 +223,7 @@ impl BurnSubstitutor {
                     .await
                     .context("Failed to parse /swaps response")?;
 
-                // Step B — Find a matching swap in CREATED (0) or ONGOING (-1) state
+                // Step B — Find a matching swap in a state the burner can still act on.
                 let swap = swaps_resp.swaps.into_iter().find(|s| {
                     let addr_match = s.input_address.eq_ignore_ascii_case(&burner_addr);
 
@@ -231,8 +231,11 @@ impl BurnSubstitutor {
                         .map(|a| a == burn_value)
                         .unwrap_or(false);
 
-                    let state_match = s.state == 0 || s.state == -1;
-
+                    let state_match = matches!(
+                        s.state,
+                        0 | -1 // 0 - CREATED in all types of swaps, -1 - QUOTE_SOFT_EXPIRED
+                    );
+                    info!("{:?} {:?} {:?}", addr_match, amount_match, state_match);
                     addr_match && amount_match && state_match
                 });
 
@@ -299,14 +302,25 @@ impl BurnSubstitutor {
                     .await
                     .context("Failed to parse /offramp response")?;
 
-                // Step D — Retry while there is no transaction to prepare yet.
-                if offramp_resp.commit_txs.is_empty() {
+                // Step D — Accept either a commit-ready state with commitTxs, or a
+                // claimed state with a revealed preimage. Otherwise retry.
+                let commit_ready = matches!(
+                    offramp_resp.state,
+                    0 | -1 // -1 QUOTE_SOFT_EXPIRED to BTC swaps
+                ) && !offramp_resp.commit_txs.is_empty();
+
+                let claimed_with_preimage = matches!(
+                    offramp_resp.state,
+                    2 | 3
+                ) && offramp_resp.preimage.is_some();
+
+                if !commit_ready && !claimed_with_preimage {
                     tracing::info!(
                         ?burn_hash,
                         %swap_id,
                         state = %offramp_resp.state,
                         attempt,
-                        "Swap has no commitTxs; retrying in {}s",
+                        "Swap not ready (no commitTxs or preimage); retrying in {}s",
                         RETRY_DELAY.as_secs()
                     );
                     return Ok(None);
@@ -321,10 +335,23 @@ impl BurnSubstitutor {
             tracing::info!(
                 ?burn_hash,
                 %swap_id,
-                "No commitTxs after retries; skipping"
+                "Swap did not reach a ready state after retries; skipping"
             );
             return Ok(());
         };
+
+        if matches!(offramp_resp.state, 2 | 3) {
+            if let Some(preimage) = offramp_resp.preimage.as_deref() {
+                tracing::info!(
+                    ?burn_hash,
+                    %swap_id,
+                    state = %offramp_resp.state,
+                    %preimage,
+                    "Swap already claimed; preimage revealed"
+                );
+            }
+            return Ok(());
+        }
 
         tracing::info!(%offramp_resp.state, %swap_id, "Proceeding to commitment step");
 
@@ -525,9 +552,11 @@ where
 
 #[derive(Debug, serde::Deserialize)]
 struct OfframpResponse {
-    state: String,
+    state: i32,
     #[serde(rename = "commitTxs", default, deserialize_with = "null_as_empty")]
     commit_txs: Vec<CommitTx>,
+    #[serde(default)]
+    preimage: Option<String>,
 }
 
 /// Flags used in EscrowData

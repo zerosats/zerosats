@@ -814,7 +814,7 @@ async fn handle_withdraw_ln(
     use serde::Deserialize;
     #[derive(Deserialize, Debug)]
     struct OfframpStatusResponse {
-        state: String,
+        state: i32,
         description: String,
     }
 
@@ -857,13 +857,13 @@ async fn handle_withdraw_ln(
 
         println!("State: {} - {}", response.state, response.description);
 
-        match response.state.as_str() {
-            "PAID" | "CLAIMED" => {
+        match response.state {
+            2 | 3 => {
                 println!("\n✅ Lightning invoice settled! Swap complete.");
                 println!("   Swap ID: {swap_id}");
                 break;
             }
-            "REFUNDED" | "EXPIRED" => {
+            -2 | -3 => {
                 return Err(color_eyre::eyre::eyre!(
                     "Offramp swap reached terminal failure state {}: {}",
                     response.state,
