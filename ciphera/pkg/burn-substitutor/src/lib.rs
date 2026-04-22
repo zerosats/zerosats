@@ -12,6 +12,32 @@ use zk_primitives::{UtxoKind, UtxoKindMessages, UtxoProof};
 
 use ethereum_types::{H256, U256};
 
+const MAX_ATTEMPTS: u32 = 3;
+const RETRY_DELAY: Duration = Duration::from_secs(5);
+
+/// Call `op` up to `max_attempts` times with `delay` between attempts, returning the first
+/// `Some` result. On `Ok(None)` the helper sleeps and retries; on `Err` it short-circuits.
+/// Returns `Ok(None)` if all attempts are exhausted without a `Some`.
+async fn retry_until_some<F, Fut, T>(
+    max_attempts: u32,
+    delay: Duration,
+    mut op: F,
+) -> Result<Option<T>, eyre::Error>
+where
+    F: FnMut(u32) -> Fut,
+    Fut: std::future::Future<Output = Result<Option<T>, eyre::Error>>,
+{
+    for attempt in 1..=max_attempts {
+        if let Some(value) = op(attempt).await? {
+            return Ok(Some(value));
+        }
+        if attempt < max_attempts {
+            tokio::time::sleep(delay).await;
+        }
+    }
+    Ok(None)
+}
+
 pub struct BurnSubstitutor {
     rollup_contract: RollupContract,
     erc20_contract: ERC20Contract,
@@ -166,71 +192,86 @@ impl BurnSubstitutor {
         let burn_value = amount.to_eth_u256();
         let burner_addr = format!("{:#x}", self.substitutor_address);
 
-        // Step A — Query /swaps
+        // Step A — Query /swaps (with retry)
         let client = reqwest::Client::new();
         let swaps_url = format!("{}/swaps", self.offramp_url);
-        let resp = client
-            .get(&swaps_url)
-            .query(&[
-                ("amount", burn_value.to_string()),
-                ("address", burner_addr.clone()),
-            ])
-            .send()
-            .await
-            .context("Failed to query /swaps")?;
-
-        match resp.status() {
-            StatusCode::OK => {}
-            e => return Err(eyre::eyre!("/swaps returned unexpected status: {e}")),
-        }
 
         tracing::info!("looking into swaps for burner {:x}", self.substitutor_address);
 
-        let swaps_resp = resp
-            .json::<SwapsResponse>()
-            .await
-            .context("Failed to parse/swaps response")?;
+        let swap = retry_until_some(MAX_ATTEMPTS, RETRY_DELAY, |attempt| {
+            let client = client.clone();
+            let swaps_url = swaps_url.clone();
+            let burner_addr = burner_addr.clone();
+            async move {
+                let resp = client
+                    .get(&swaps_url)
+                    .query(&[
+                        ("amount", burn_value.to_string()),
+                        ("address", burner_addr.clone()),
+                    ])
+                    .send()
+                    .await
+                    .context("Failed to query /swaps")?;
 
-        // Step B — Find a matching swap in CREATED (0) or ONGOING (-1) state
-        let swap = swaps_resp.swaps.into_iter().find(|s| {
-            let addr_match = s.input_address.eq_ignore_ascii_case(&burner_addr);
+                match resp.status() {
+                    StatusCode::OK => {}
+                    e => return Err(eyre::eyre!("/swaps returned unexpected status: {e}")),
+                }
 
-            let amount_match = web3::types::U256::from_dec_str(&s.amount)
-                .map(|a| a == burn_value)
-                .unwrap_or(false);
+                let swaps_resp = resp
+                    .json::<SwapsResponse>()
+                    .await
+                    .context("Failed to parse /swaps response")?;
 
-            let state_match = s.state == 0 || s.state == -1;
+                // Step B — Find a matching swap in CREATED (0) or ONGOING (-1) state
+                let swap = swaps_resp.swaps.into_iter().find(|s| {
+                    let addr_match = s.input_address.eq_ignore_ascii_case(&burner_addr);
 
-            addr_match && amount_match && state_match
-        });
+                    let amount_match = web3::types::U256::from_dec_str(&s.amount)
+                        .map(|a| a == burn_value)
+                        .unwrap_or(false);
 
-        let swap = match swap {
-            Some(s) => s,
-            None => {
-                tracing::info!(
-                    ?burn_hash,
-                    ?burn_value,
-                    ?burner_addr,
-                    "No matching CREATED swap found for NoSub burn; will retry on next tick"
-                );
-                return Ok(());
+                    let state_match = s.state == 0 || s.state == -1;
+
+                    addr_match && amount_match && state_match
+                });
+
+                if swap.is_none() {
+                    tracing::info!(
+                        ?burn_hash,
+                        %burn_value,
+                        %burner_addr,
+                        attempt,
+                        "No matching swap found; retrying in {}s",
+                        RETRY_DELAY.as_secs()
+                    );
+                }
+                Ok(swap)
             }
+        })
+        .await?;
+
+        let Some(swap) = swap else {
+            tracing::info!(
+                ?burn_hash,
+                "No matching swap after retries; will retry on next tick"
+            );
+            return Ok(());
         };
 
-        let swap_id = &swap.id;
+        let swap_id = swap.id.clone();
         tracing::info!(?burn_hash, %swap_id, "Matched NoSub burn to swap");
 
-        // Step C — Query /offramp/:swapId
+        // Step C — Query /offramp/:swapId (with retry)
+        // We can't rely on swap status since it may soft-expire before burner picks it;
+        // retry while commitTxs is empty or the server returns a transient 5xx.
         let offramp_url = format!("{}/offramp/{}", self.offramp_url, swap_id);
 
-        const MAX_ATTEMPTS: u32 = 3;
-        const RETRY_DELAY: Duration = Duration::from_secs(5);
-
-        let offramp_resp = {
-            let mut attempt = 0;
-            loop {
-                attempt += 1;
-
+        let offramp_resp = retry_until_some(MAX_ATTEMPTS, RETRY_DELAY, |attempt| {
+            let client = client.clone();
+            let offramp_url = offramp_url.clone();
+            let swap_id = swap_id.clone();
+            async move {
                 let resp = client
                     .get(&offramp_url)
                     .send()
@@ -244,9 +285,11 @@ impl BurnSubstitutor {
                             ?burn_hash,
                             %swap_id,
                             status = %e,
-                            "Transient server error from /offramp/:id; will retry on next tick"
+                            attempt,
+                            "Transient server error from /offramp/:id; retrying in {}s",
+                            RETRY_DELAY.as_secs()
                         );
-                        return Ok(());
+                        return Ok(None);
                     }
                     e => return Err(eyre::eyre!("/offramp/:id returned unexpected status: {e}")),
                 }
@@ -256,31 +299,31 @@ impl BurnSubstitutor {
                     .await
                     .context("Failed to parse /offramp response")?;
 
-                // Step D — Skip iteration only when there is no transaction to prepare
-                // We can't rely on swap status since it may soft-expire before burner picks it
-                if !offramp_resp.commit_txs.is_empty() {
-                    break offramp_resp;
-                }
-
-                if attempt >= MAX_ATTEMPTS {
+                // Step D — Retry while there is no transaction to prepare yet.
+                if offramp_resp.commit_txs.is_empty() {
                     tracing::info!(
                         ?burn_hash,
+                        %swap_id,
                         state = %offramp_resp.state,
-                        attempts = attempt,
-                        "Swap has no commitTxs; skipping"
+                        attempt,
+                        "Swap has no commitTxs; retrying in {}s",
+                        RETRY_DELAY.as_secs()
                     );
-                    return Ok(());
+                    return Ok(None);
                 }
 
-                tracing::info!(
-                    ?burn_hash,
-                    state = %offramp_resp.state,
-                    attempt,
-                    "Swap has no commitTxs; retrying in {}s",
-                    RETRY_DELAY.as_secs()
-                );
-                tokio::time::sleep(RETRY_DELAY).await;
+                Ok(Some(offramp_resp))
             }
+        })
+        .await?;
+
+        let Some(offramp_resp) = offramp_resp else {
+            tracing::info!(
+                ?burn_hash,
+                %swap_id,
+                "No commitTxs after retries; skipping"
+            );
+            return Ok(());
         };
 
         tracing::info!(%offramp_resp.state, %swap_id, "Proceeding to commitment step");
