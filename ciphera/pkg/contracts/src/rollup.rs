@@ -2,18 +2,18 @@ use std::ops::Deref;
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::Client;
 use crate::constants::{UTXO_INPUTS, UTXO_N};
 use crate::error::Result;
-use crate::util::{calculate_domain_separator, convert_element_to_h256, convert_fr_to_u256};
+use crate::util::{calculate_domain_separator, convert_element_to_h256};
+use crate::Client;
 use element::Element;
 use eth_util::Eth;
-use ethereum_types::{H160, H256, U64, U256};
+use ethereum_types::{H160, H256, U256, U64};
 use parking_lot::RwLock;
 use sha3::{Digest, Keccak256};
 #[cfg(any(test, feature = "test-helpers"))]
 use testutil::eth::EthNode;
-use tokio::time::{Instant, interval_at};
+use tokio::time::{interval_at, Instant};
 use tracing::{info, warn};
 use web3::contract::tokens::{Detokenize, Tokenizable, TokenizableItem, Tokenize};
 use web3::ethabi::Token;
@@ -26,6 +26,8 @@ use web3::{
     signing::{Key, SecretKey},
     types::Address,
 };
+
+pub const AGG_AGG_VERIFICATION_KEY_HASH: &str = "0x1a2fd848d2ce42026ddbda10d22bbdcad96c89eb501e2c55996c58f76d04840c";
 
 /// Maximum number of blocks to scan in a single getLogs call.
 /// Citrea RPC API enforces a 1000-block limit for event scanning.
@@ -506,9 +508,7 @@ impl SignedRollupContract {
                 "verifyRollup",
                 (
                     U256::from(height),
-                    "0x1594fce0e59bc3785292f9ab4f5a1e45f5795b4a616aff5cdc4d32a223f69f0c"
-                        .parse::<H256>()
-                        .expect("verification key is parsable"),
+                    AGG_AGG_VERIFICATION_KEY_HASH.parse::<H256>().expect("verification key is parsable"),
                     web3::types::Bytes::from(proof),
                     public_inputs,
                     H256::from_slice(&other_hash),
@@ -564,42 +564,6 @@ impl SignedRollupContract {
                     convert_element_to_h256(value),
                     convert_element_to_h256(source),
                     convert_element_to_h256(sig),
-                ),
-            )
-            .await?;
-
-        Ok(call_tx)
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    #[tracing::instrument(err, ret, skip(self, proof))]
-    pub async fn burn_to_router(
-        &self,
-        kind: &Element,
-        msg_hash: &Element,
-        proof: &[u8],
-        nullifier: &Element,
-        value: &Element,
-        source: &Element,
-        sig: &Element,
-        router: &Address,
-        router_calldata: &[u8],
-        return_address: &Address,
-    ) -> Result<H256> {
-        let call_tx = self
-            .call(
-                "burnToRouter",
-                (
-                    convert_element_to_h256(kind),
-                    convert_element_to_h256(msg_hash),
-                    web3::types::Bytes::from(proof),
-                    convert_element_to_h256(nullifier),
-                    convert_element_to_h256(value),
-                    convert_element_to_h256(source),
-                    convert_element_to_h256(sig),
-                    *router,
-                    web3::types::Bytes::from(router_calldata),
-                    *return_address,
                 ),
             )
             .await?;
@@ -751,23 +715,6 @@ impl ReadonlyRollupContract {
 
         Ok(events)
     }
-
-    #[tracing::instrument(err, ret, skip(self))]
-    pub async fn has_burn(&self, key: &Element) -> Result<bool> {
-        let exists: bool = self
-            .client
-            .query(
-                &self.contract,
-                "hasBurn",
-                (convert_element_to_h256(key),),
-                None,
-                Default::default(),
-                self.block_height.map(|x| x.into()),
-            )
-            .await?;
-
-        Ok(exists)
-    }
 }
 
 impl SignedRollupContract {
@@ -816,7 +763,7 @@ impl ReadonlyRollupContract {
                     Token::Address(*burn_address),
                     convert_element_to_h256(note_kind).into_token(),
                     convert_element_to_h256(hash).into_token(),
-                    Token::Uint(convert_fr_to_u256(amount)),
+                    Token::Uint(U256::from_little_endian(&amount.to_le_bytes())),
                     U256::from(burn_block_height),
                 ),
                 None,
@@ -1137,6 +1084,23 @@ impl ReadonlyRollupContract {
             .await?;
 
         Ok(version)
+    }
+
+    #[tracing::instrument(err, ret, skip(self))]
+    pub async fn escrow_manager(&self) -> Result<Address> {
+        let em = self
+            .client
+            .query(
+                &self.contract,
+                "escrowManager",
+                (),
+                None,
+                Default::default(),
+                self.block_height.map(|x| x.into()),
+            )
+            .await?;
+
+        Ok(em)
     }
 
     #[tracing::instrument(err, ret, skip(self))]

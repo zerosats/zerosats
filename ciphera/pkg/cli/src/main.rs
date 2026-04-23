@@ -137,6 +137,24 @@ enum Commands {
         #[arg(long, default_value = "https://testnet.lx.dev")]
         onramp_uri: String,
     },
+    /// Withdraw via Lightning Network by burning cBTC through an offramp service
+    WithdrawLn {
+        /// BOLT11 Lightning invoice to pay out
+        #[arg(required = true, long)]
+        invoice: String,
+
+        /// Burn substitutor EVM address (middleware)
+        #[arg(required = true, long)]
+        substitutor: String,
+
+        /// Address to be encoded into burn note
+        #[arg(required = true, long)]
+        address: String,
+
+        /// Offramp service base URI
+        #[arg(long, default_value = "https://testnet.lx.dev")]
+        offramp_uri: String,
+    },
 }
 
 use thiserror::Error;
@@ -691,6 +709,174 @@ async fn handle_depo_ln(
     }
 }
 
+async fn handle_withdraw_ln(
+    name: &str,
+    host: &str,
+    port: u16,
+    timeout_secs: u64,
+    chain: u64,
+    invoice: &str,
+    substitutor: &str,
+    address: &str,
+    offramp_uri: &str,
+) -> Result<()> {
+/*    let client = NodeClient::builder()
+        .name(name)
+        .host(host)
+        .port(port)
+        .timeout_secs(timeout_secs)
+        .build(chain, false)?;
+
+    let b = client.get_wallet().balance;
+    TODO: balance check before everything even starts
+*/
+    // Step 1 — GET /offramp/{lnInvoice}/{substitutorAddress}
+    // Returns the swap quote: swap ID and the cBTC amount the user must burn.
+    let http = reqwest::Client::new();
+    let quote_url = format!("{}/offramp/{}/{}", offramp_uri, invoice, substitutor);
+
+    println!("\n⚡ Requesting offramp quote...");
+
+    let quote_resp = http
+        .get(&quote_url)
+        .send()
+        .await
+        .map_err(|e| color_eyre::eyre::eyre!("Failed to reach offramp service: {}", e))?;
+
+    if !quote_resp.status().is_success() {
+        let status = quote_resp.status();
+        let body = quote_resp.text().await.unwrap_or_default();
+        return Err(color_eyre::eyre::eyre!(
+            "Offramp service error {}: {}",
+            status,
+            body
+        ));
+    }
+
+    let quote: serde_json::Value = quote_resp
+        .json()
+        .await
+        .map_err(|e| color_eyre::eyre::eyre!("Failed to parse offramp quote: {}", e))?;
+
+    let swap_id = quote["id"]
+        .as_str()
+        .ok_or_else(|| color_eyre::eyre::eyre!("Missing 'id' in offramp quote"))?
+        .to_string();
+
+    // inputAmountWei is the burn amount in ERC-20 wei (cBTC has 18 decimals).
+    // Convert to satoshis: 1 sat = 1e10 wei  (1 BTC = 1e8 sats = 1e18 wei).
+    // Use u128 for the intermediate wei value: amounts above ~18 BTC overflow u64.
+    // The API may return this field as a decimal string or as a JSON number.
+    let input_amount_wei: u128 = {
+        let v = &quote["inputAmountWei"];
+        if let Some(s) = v.as_str() {
+            s.parse::<u128>()
+                .map_err(|_| color_eyre::eyre::eyre!("Invalid 'inputAmountWei' in offramp quote"))?
+        } else if let Some(n) = v.as_u64() {
+            n as u128
+        } else {
+            return Err(color_eyre::eyre::eyre!(
+                "Missing or invalid 'inputAmountWei' in offramp quote"
+            ));
+        }
+    };
+
+    let input_amount: u64 = u64::try_from(input_amount_wei)
+        .map_err(|_| color_eyre::eyre::eyre!("Converted Wei amount exceeds u64 maximum"))?;
+
+    let quote_expiry = quote["quoteExpiry"].as_u64().unwrap_or(0);
+
+    println!("\n✅ Offramp quote received!");
+    println!("   Swap ID:      {swap_id}");
+    println!("   Burn amount:  {input_amount} wei");
+    println!("   Quote expiry: {quote_expiry} (unix timestamp)");
+    println!("\n   Burning {input_amount} cBTC to substitutor {substitutor}...");
+
+    // Step 2 — Create a burn note for inputAmount and submit it to the Ciphera node.
+    // The user address is the burn target for refunds. The offramp service claims the burned
+    // cBTC on the EVM side and settles the Lightning invoice.
+    handle_burn(
+        name,
+        host,
+        port,
+        timeout_secs,
+        chain,
+        address, // refund address
+        input_amount,
+        "WCBTC",
+        false,
+    )
+    .await?;
+
+    println!("\n✅ Burn submitted. Waiting for the substitutor to settle the Lightning invoice...");
+
+    // Step 3 — Poll /offramp/{swapId} until the swap reaches a terminal state.
+    use serde::Deserialize;
+    #[derive(Deserialize, Debug)]
+    struct OfframpStatusResponse {
+        state: i32,
+        description: String,
+    }
+
+    const MAX_POLL_ATTEMPTS: u32 = 150; // ~10 minutes at 4 s intervals
+    const POLL_INTERVAL_SECS: u64 = 4;
+
+    let status_url = format!("{}/offramp/{}", offramp_uri, swap_id);
+    let mut attempts = 0u32;
+    loop {
+        tokio::time::sleep(std::time::Duration::from_secs(POLL_INTERVAL_SECS)).await;
+
+        attempts += 1;
+        if attempts > MAX_POLL_ATTEMPTS {
+            return Err(color_eyre::eyre::eyre!(
+                "Timed out waiting for offramp swap to complete after {} attempts",
+                MAX_POLL_ATTEMPTS
+            ));
+        }
+
+        let resp = http
+            .get(&status_url)
+            .send()
+            .await
+            .map_err(|e| color_eyre::eyre::eyre!("Poll error: {}", e))?;
+
+        let http_status = resp.status();
+        if !http_status.is_success() {
+            let body = resp.text().await.unwrap_or_default();
+            return Err(color_eyre::eyre::eyre!(
+                "Offramp status check failed with HTTP {}: {}",
+                http_status,
+                body
+            ));
+        }
+
+        let response: OfframpStatusResponse = resp
+            .json()
+            .await
+            .map_err(|e| color_eyre::eyre::eyre!("Failed to parse offramp status: {}", e))?;
+
+        println!("State: {} - {}", response.state, response.description);
+
+        match response.state {
+            2 | 3 => {
+                println!("\n✅ Lightning invoice settled! Swap complete.");
+                println!("   Swap ID: {swap_id}");
+                break;
+            }
+            -2 | -3 => {
+                return Err(color_eyre::eyre::eyre!(
+                    "Offramp swap reached terminal failure state {}: {}",
+                    response.state,
+                    response.description
+                ));
+            }
+            _ => {} // CREATED, COMMITED, or other in-progress states; keep polling.
+        }
+    }
+
+    Ok(())
+}
+
 async fn handle_mint(
     name: &str,
     host: &str,
@@ -757,6 +943,7 @@ async fn handle_burn(
     address: &str,
     amount: u64,
     ticker: &str,
+    natively_substitute: bool
 ) -> Result<(), AppError> {
     // Build client with fluent API
     let mut client = NodeClient::builder()
@@ -800,7 +987,8 @@ async fn handle_burn(
 
     let (wallet_after_burn, burner_utxo) = client
         .get_wallet()
-        .prepare_burn(&burner_note, &evm_address)?;
+        .prepare_burn(&burner_note, &evm_address, natively_substitute)?;
+
     let snark = burner_utxo.prove().unwrap();
 
     match client.transaction(&snark).await {
@@ -1042,6 +1230,7 @@ async fn main() -> Result<()> {
                 &address,
                 amount,
                 &ticker_normalized,
+                true
             )
             .await?;
         }
@@ -1063,6 +1252,25 @@ async fn main() -> Result<()> {
                 cli.chain,
                 amount_sat,
                 &onramp_uri,
+            )
+            .await?;
+        }
+        Commands::WithdrawLn {
+            invoice,
+            substitutor,
+            address,
+            offramp_uri,
+        } => {
+            handle_withdraw_ln(
+                &cli.name,
+                &cli.host,
+                cli.port,
+                cli.timeout,
+                cli.chain,
+                &invoice,
+                &substitutor,
+                &address,
+                &offramp_uri,
             )
             .await?;
         }

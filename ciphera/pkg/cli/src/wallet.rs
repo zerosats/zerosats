@@ -409,24 +409,33 @@ impl Wallet {
         &mut self,
         burner_note: &InputNote,
         evm_address: &Element,
+        natively_substitute: bool,
     ) -> Result<Utxo, WalletError> {
         let ticker = citrea_ticker_from_contract(burner_note.note.contract);
 
         let b = self.pull_from_avail(&ticker, burner_note.to_owned())?;
         debug!(balance = b, "pulled first input note");
 
-        Ok(Utxo::new_burn(
-            [burner_note.to_owned(), InputNote::padding_note()],
-            evm_address.to_owned(),
-        ))
+        if natively_substitute {
+            Ok(Utxo::new_burn(
+                [burner_note.to_owned(), InputNote::padding_note()],
+                evm_address.to_owned(),
+            ))
+        } else {
+            Ok(Utxo::new_burn_no_sub(
+                [burner_note.to_owned(), InputNote::padding_note()],
+                evm_address.to_owned(),
+            ))
+        }
     }
 
     pub fn prepare_burn(
         &self,
         burner_note: &InputNote,
         evm_address: &Element,
+        natively_substitute: bool,
     ) -> Result<(Self, Utxo), WalletError> {
-        self.stage(|wallet| wallet.burn(burner_note, evm_address))
+        self.stage(|wallet| wallet.burn(burner_note, evm_address, natively_substitute))
     }
 
     fn receive_note(&mut self, amount: u64, ticker: &str) -> InputNote {
@@ -1364,7 +1373,7 @@ mod wallet_tests {
         wallet.mint(1000, "WCBTC").unwrap();
         let burner_note = wallet.avail["WCBTC"][0].clone();
 
-        wallet.burn(&burner_note, &Element::from(42u64)).unwrap();
+        wallet.burn(&burner_note, &Element::from(42u64), false).unwrap();
 
         assert_eq!(wallet.avail["WCBTC"].len(), 0);
     }
@@ -1375,7 +1384,7 @@ mod wallet_tests {
         wallet.mint(1000, "WCBTC").unwrap();
         let burner_note = wallet.avail["WCBTC"][0].clone();
 
-        wallet.burn(&burner_note, &Element::from(42u64)).unwrap();
+        wallet.burn(&burner_note, &Element::from(42u64), false).unwrap();
 
         assert_eq!(wallet.balance, 0);
     }
@@ -1386,7 +1395,7 @@ mod wallet_tests {
         wallet.mint(1000, "WCBTC").unwrap();
         let burner_note = wallet.avail["WCBTC"][0].clone();
 
-        let utxo = wallet.burn(&burner_note, &Element::from(42u64)).unwrap();
+        let utxo = wallet.burn(&burner_note, &Element::from(42u64), false).unwrap();
 
         assert_eq!(utxo.kind, UtxoKind::Burn);
     }
@@ -1407,7 +1416,7 @@ mod wallet_tests {
             pk,
         );
 
-        let result = wallet.burn(&input_note, &Element::from(42u64));
+        let result = wallet.burn(&input_note, &Element::from(42u64), false);
 
         assert!(matches!(result, Err(WalletError::CantPullNote)));
     }
@@ -1419,7 +1428,7 @@ mod wallet_tests {
         wallet.mint(500, "WCBTC").unwrap();
         let burner_note = wallet.avail["WCBTC"][0].clone();
 
-        wallet.burn(&burner_note, &Element::from(42u64)).unwrap();
+        wallet.burn(&burner_note, &Element::from(42u64), false).unwrap();
 
         assert_eq!(wallet.avail["WCBTC"].len(), 1);
         assert_eq!(wallet.balance, 500);

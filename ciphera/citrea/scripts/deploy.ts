@@ -10,19 +10,65 @@ import {
   formatEther,
   encodeFunctionData,
   getContract,
-  parseUnits,
   formatUnits,
   maxUint256,
+  parseAbi,
 } from "viem";
 import { privateKeyToAccount, mnemonicToAccount } from "viem/accounts";
 import { deployBin, citreaDevChain, citreaTestChain } from "./shared";
-import { readFile } from "fs/promises";
-import { join } from "path";
 import IERC20Artifact from "../openzeppelin-contracts/token/ERC20/IERC20.json";
 
-// Auto-updated by generate_fixturecs.sh - do not modify manually
-const AGG_AGG_VERIFICATION_KEY_HASH =
-  "0x1594fce0e59bc3785292f9ab4f5a1e45f5795b4a616aff5cdc4d32a223f69f0c";
+// Auto-updated by generate_fixtures.sh - do not modify manually
+const AGG_AGG_VERIFICATION_KEY_HASH = "0x1a2fd848d2ce42026ddbda10d22bbdcad96c89eb501e2c55996c58f76d04840c";
+
+const EIP1967_ADMIN_STORAGE_SLOT =
+  "0xb53127684a568b3173ae13b9f8a6016e243e63b6e8ee1178d6a717850b5d6103";
+
+const PROXY_ADMIN_ABI = parseAbi([
+  "function owner() view returns (address)",
+  "function transferOwnership(address newOwner)",
+]);
+
+const ONE_DAY_SECONDS = 86_400n;
+const SEVEN_DAYS_SECONDS = 7n * ONE_DAY_SECONDS;
+const DEFAULT_PER_MINT_CAP_WEI = 1_000_000_000_000_000n; // 0.001 token
+const DEFAULT_GLOBAL_TVL_CAP_WEI = 10_000_000_000_000_000_000n; // 10 token
+const SATS_TO_WEI = 10_000_000_000n; // 18-dec BTC wrappers
+const DEFAULT_BURN_FEE_WEI = 300n * SATS_TO_WEI; // 300 sats
+const MAX_BURN_FEE_WEI = 3_000n * SATS_TO_WEI; // 3000 sats
+
+function parseBigIntEnv(name: string, fallback: bigint): bigint {
+  const value = process.env[name];
+  if (!value || value.trim() === "") return fallback;
+  try {
+    return BigInt(value);
+  } catch {
+    throw new Error(`${name} must be an integer string, got: ${value}`);
+  }
+}
+
+function parseAddressListEnv(
+  name: string,
+  fallback: `0x${string}`[],
+): `0x${string}`[] {
+  const value = process.env[name];
+  if (!value || value.trim() === "") return fallback;
+  const parsed = value
+    .split(",")
+    .map((v) => v.trim())
+    .filter((v) => v.length > 0) as `0x${string}`[];
+  if (parsed.length === 0) {
+    throw new Error(`${name} must contain at least one address`);
+  }
+  return parsed;
+}
+
+function readAddressFromSlot(slotValue: `0x${string}` | undefined): `0x${string}` {
+  if (!slotValue || slotValue.length < 66) {
+    throw new Error(`Unexpected slot value: ${slotValue}`);
+  }
+  return `0x${slotValue.slice(26)}` as `0x${string}`;
+}
 
 async function main() {
   console.log("Initialization...");
@@ -31,8 +77,6 @@ async function main() {
   let proverAddress = process.env.PROVER_ADDRESS as `0x${string}`;
   let validators =
     process.env.VALIDATORS?.split(",") ?? ([] as Array<`0x${string}`>);
-
-  let escrowManagerAddress = process.env.ESCROW_MANAGER;
 
   console.log("    Citrea Testnet - ", isTestnet);
   console.log("    Prover Address - ", proverAddress);
@@ -53,7 +97,6 @@ async function main() {
     if (proverAddress === undefined)
       throw new Error("PROVER_ADDRESS is not set");
     if (validators.length === 0) throw new Error("VALIDATORS is not set");
-    if (!escrowManagerAddress) throw new Error("ESCROW_MANAGER is not set");
 
     walletClient = createWalletClient({
       account,
@@ -83,10 +126,6 @@ async function main() {
       validators = [account.address];
     }
 
-    if (!escrowManagerAddress) {
-      escrowManagerAddress = account.address;
-    }
-
     walletClient = createWalletClient({
       account,
       chain: {
@@ -103,15 +142,46 @@ async function main() {
     });
   }
 
-  if (!/^0x[0-9a-fA-F]{40}$/.test(escrowManagerAddress!)) {
-    throw new Error(
-      `ESCROW_MANAGER is not a valid Ethereum address: "${escrowManagerAddress}"`,
-    );
-  }
-  const escrowManager = escrowManagerAddress as `0x${string}`;
-
   let ownerAddress = account.address;
   console.log("    Owner - ", ownerAddress);
+
+  // V2 config: secure defaults can be overridden via env vars.
+  const v2PerMintCap = parseBigIntEnv(
+    "V2_PER_MINT_CAP_WEI",
+    DEFAULT_PER_MINT_CAP_WEI,
+  );
+  const v2GlobalTvlCap = parseBigIntEnv(
+    "V2_GLOBAL_TVL_CAP_WEI",
+    DEFAULT_GLOBAL_TVL_CAP_WEI,
+  );
+  const v2OpenProvingDelay = parseBigIntEnv(
+    "V2_OPEN_PROVING_DELAY_SECONDS",
+    SEVEN_DAYS_SECONDS,
+  );
+  const v2BurnFee = parseBigIntEnv("V2_BURN_FEE_WEI", DEFAULT_BURN_FEE_WEI);
+  const v2FeeSink =
+    (process.env.V2_FEE_SINK as `0x${string}` | undefined) ?? ownerAddress;
+  const v2TimelockMinDelay = parseBigIntEnv(
+    "V2_TIMELOCK_MIN_DELAY_SECONDS",
+    ONE_DAY_SECONDS,
+  );
+  const v2TimelockProposers = parseAddressListEnv(
+    "V2_TIMELOCK_PROPOSERS",
+    [ownerAddress],
+  );
+  const v2TimelockExecutors = parseAddressListEnv(
+    "V2_TIMELOCK_EXECUTORS",
+    [ownerAddress],
+  );
+
+  if (v2FeeSink === "0x0000000000000000000000000000000000000000") {
+    throw new Error("V2_FEE_SINK cannot be zero address");
+  }
+  if (v2BurnFee > MAX_BURN_FEE_WEI) {
+    throw new Error(
+      `V2_BURN_FEE_WEI exceeds max (${MAX_BURN_FEE_WEI.toString()} wei = 3000 sats)`,
+    );
+  }
 
   console.log("🚀 Connecting to Citrea...");
   console.log(`    Using URL: ${rpcUrl}`);
@@ -119,7 +189,7 @@ async function main() {
   // Create clients with dynamic RPC URL
   const publicClient = createPublicClient({
     chain: {
-      ...citreaDevChain,
+      ...(isTestnet ? citreaTestChain : citreaDevChain),
       rpcUrls: {
         default: { http: [rpcUrl] },
         public: { http: [rpcUrl] },
@@ -149,9 +219,9 @@ async function main() {
   // Get gas price
   const gasPrice = await publicClient.getGasPrice();
   console.log(
-    `✅ Gas Price: ${gasPrice} wei, ${formatUnits(gasPrice, "gwei")} GWei`,
+    `✅ Gas Price: ${gasPrice} wei, ${formatUnits(gasPrice, 9)} GWei`,
   );
-  const latestBlock = await publicClient.getBlock("latest");
+  const latestBlock = await publicClient.getBlock({ blockTag: "latest" });
   const baseFee = latestBlock.baseFeePerGas;
   if (!baseFee) {
     throw new Error("Network doesn't support EIP-1559");
@@ -230,7 +300,7 @@ async function main() {
     functionName: "initialize",
     args: [
       ownerAddress,
-      escrowManager,
+      ownerAddress, // escrowManager must be set later
       erc20Address,
       aggregateVerifierAddr,
       proverAddress,
@@ -259,32 +329,18 @@ async function main() {
 
   console.log(`✅ Rollup Contract (Proxy): ${rollupProxyAddr}`);
 
-  const eip1967AdminStorageSlot =
-    "0xb53127684a568b3173ae13b9f8a6016e243e63b6e8ee1178d6a717850b5d6103";
-  let admin = await publicClient.getStorageAt({
+  const adminSlot = await publicClient.getStorageAt({
     address: rollupProxyAddr,
-    slot: eip1967AdminStorageSlot,
+    slot: EIP1967_ADMIN_STORAGE_SLOT,
   });
-  admin = `0x${admin?.slice(2 + 12 * 2)}`;
-  console.log(`✅ Rollup Proxy Admin: ${admin}`);
+  const proxyAdminAddress = readAddressFromSlot(adminSlot);
+  console.log(`✅ Rollup Proxy Admin: ${proxyAdminAddress}`);
 
-  /*
-    const proxyAdmin = await getContract({
-        address: admin,
-        abi: "@openzeppelin/contracts/proxy/transparent/ProxyAdmin.sol:ProxyAdmin",
-        client: {public: publicClient, wallet: walletClient},
-    });
-*/
-
-  /*
-    console.log("\n🔍 Sending some tokens to prover");
-    const sendTx = await walletClient.sendTransaction({
-        to: proverAddress,
-       value: 1n,
-    });
-    await publicClient.waitForTransactionReceipt({ hash: sendTx });
-    console.log("Transaction sent successfully");
-*/
+  const rollup = getContract({
+    address: rollupProxyAddr,
+    abi: rollupV1Artifact.abi,
+    client: { public: publicClient, wallet: walletClient },
+  });
 
   const aliceToken = getContract({
     address: erc20Address,
@@ -308,39 +364,98 @@ async function main() {
   }
   console.log(`✅ Approved maxUint256 to ${rollupProxyAddr}: ${hash}`);
 
-  // Register the mock BTC note kind used by the Rust test suite.
-  // RollupV1.initialize() only registers the Citrea testnet note kind (chain 5115),
-  // but Note::new_with_psi() in the Rust code produces a different note kind.
-  if (!isTestnet) {
-    console.log("\n🔍 Registering mock BTC note kind for dev testing...");
-    const rollupProxy = getContract({
-      address: rollupProxyAddr,
-      abi: rollupV1Artifact.abi,
-      client: { public: publicClient, wallet: walletClient },
-    });
+  console.log("\n🔍 Initializing Rollup V2...");
+  console.log(
+    `    perMintCap=${v2PerMintCap} globalTvlCap=${v2GlobalTvlCap} openProvingDelay=${v2OpenProvingDelay}s burnFee=${v2BurnFee} wei`,
+  );
+  console.log(`    feeSink=${v2FeeSink}`);
+  console.log(
+    `    timelockDelay=${v2TimelockMinDelay}s proposers=${v2TimelockProposers.join(",")} executors=${v2TimelockExecutors.join(",")}`,
+  );
 
-    // Note kind produced by Note::new_with_psi() — see bridged_polygon_usdc_note_kind() in util.rs
-    // TODO: Go over polygon notes later
-    const mockBtcNoteKind =
-      "0x000200000000000000893c499c542cef5e3811e1192ce70d8cc03d5c33590000";
+  hash = await rollup.write.initializeV2(
+    [
+      v2PerMintCap,
+      v2GlobalTvlCap,
+      v2OpenProvingDelay,
+      v2BurnFee,
+      v2FeeSink,
+      v2TimelockMinDelay,
+      v2TimelockProposers,
+      v2TimelockExecutors,
+    ],
+    {
+      gas: 5_000_000n,
+    },
+  );
+  receipt = await publicClient.waitForTransactionReceipt({ hash });
+  if (receipt.status !== "success") {
+    throw new Error("Rollup V2 initialize reverted");
+  }
+  console.log(`✅ Rollup V2 initialized: ${hash}`);
 
-    hash = await rollupProxy.write.addToken([mockBtcNoteKind, erc20Address], {
-      gas: 1_000_000n,
-    });
+  const timelockAddress = (await rollup.read.timelock()) as `0x${string}`;
+  const rollupOwner = (await rollup.read.owner()) as `0x${string}`;
+  if (rollupOwner.toLowerCase() !== timelockAddress.toLowerCase()) {
+    throw new Error(
+      `Rollup owner mismatch after V2 init. owner=${rollupOwner} timelock=${timelockAddress}`,
+    );
+  }
+  console.log(`✅ Rollup owner now timelock: ${timelockAddress}`);
 
-    receipt = await publicClient.waitForTransactionReceipt({ hash });
-    if (receipt.status !== "success") {
+  const proxyAdmin = getContract({
+    address: proxyAdminAddress,
+    abi: PROXY_ADMIN_ABI,
+    client: { public: publicClient, wallet: walletClient },
+  });
+
+  const proxyAdminOwnerBefore =
+    (await proxyAdmin.read.owner()) as `0x${string}`;
+  console.log(`✅ ProxyAdmin owner before handoff: ${proxyAdminOwnerBefore}`);
+
+  if (proxyAdminOwnerBefore.toLowerCase() !== timelockAddress.toLowerCase()) {
+    if (proxyAdminOwnerBefore.toLowerCase() !== ownerAddress.toLowerCase()) {
       throw new Error(
-        `Failed to register mock BTC note kind for ${erc20Address}`,
+        `Unexpected ProxyAdmin owner ${proxyAdminOwnerBefore}; expected ${ownerAddress} before transfer`,
       );
     }
-    console.log(`✅ Registered mock BTC note kind → ${erc20Address}`);
+    const transferHash = await proxyAdmin.write.transferOwnership(
+      [timelockAddress],
+      { account },
+    );
+    const transferReceipt = await publicClient.waitForTransactionReceipt({
+      hash: transferHash,
+    });
+    if (transferReceipt.status !== "success") {
+      throw new Error("ProxyAdmin transferOwnership reverted");
+    }
+    console.log(`✅ ProxyAdmin ownership transferred to timelock: ${transferHash}`);
+  } else {
+    console.log("✅ ProxyAdmin ownership already timelocked");
   }
+
+  const proxyAdminOwnerAfter = (await proxyAdmin.read.owner()) as `0x${string}`;
+  if (proxyAdminOwnerAfter.toLowerCase() !== timelockAddress.toLowerCase()) {
+    throw new Error(
+      `ProxyAdmin owner mismatch after transfer. owner=${proxyAdminOwnerAfter} timelock=${timelockAddress}`,
+    );
+  }
+  console.log(`✅ ProxyAdmin owner now timelock: ${proxyAdminOwnerAfter}`);
 
   // Machine-readable output for the test harness
   console.log(
     `DEPLOY_OUTPUT=${JSON.stringify({
       rollupProxy: rollupProxyAddr,
+      rollupImplementation: rollupAddress,
+      rollupOwner,
+      timelock: timelockAddress,
+      proxyAdmin: proxyAdminAddress,
+      proxyAdminOwner: proxyAdminOwnerAfter,
+      perMintCap: v2PerMintCap.toString(),
+      globalTvlCap: v2GlobalTvlCap.toString(),
+      openProvingDelaySeconds: v2OpenProvingDelay.toString(),
+      burnFeeWei: v2BurnFee.toString(),
+      feeSink: v2FeeSink,
       erc20: erc20Address,
       verifier: aggregateVerifierAddr,
     })}`,

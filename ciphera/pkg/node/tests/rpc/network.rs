@@ -13,4 +13,6 @@ async fn network_info() {
     let address_str = format!("0x{:x}", server.rollup_contract_addr);
     assert_eq!(resp.rollup_contract, address_str);
     assert_eq!(resp.chain_id, 5655);
+    assert!(resp.escrow_manager.starts_with("0x"));
+    assert_eq!(resp.escrow_manager.len(), 42);
 }

@@ -1,0 +1,70 @@
+name: Barretenberg tests
+
+on:
+  pull_request:
+    paths:
+      - 'ciphera/noir/**'
+      - 'ciphera/fixtures/programs/**'
+      - 'ciphera/fixtures/keys/**'
+      - 'ciphera/fixtures/params/**'
+      - 'ciphera/pkg/barretenberg/**'
+      - 'ciphera/pkg/element/**'
+      - 'ciphera/pkg/zk-primitives/**'
+      - 'ciphera/pkg/hash/**'
+      - 'ciphera/pkg/hash-poseidon/**'
+      - 'ciphera/pkg/minimal-poseidon/**'
+      - 'ciphera/Cargo.toml'
+      - 'ciphera/Cargo.lock'
+      - 'ciphera/rust-toolchain.toml'
+      - 'ciphera/.github/workflows/circuits.yml'
+
+concurrency:
+  group: circuits-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: test (${{ matrix.name }})
+    runs-on: ${{ matrix.runs-on }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: fast
+            runs-on: ubuntu-latest
+            skip-args: "--skip test_agg_utxo --skip test_alt_agg_utxo --skip test_agg_agg"
+          - name: full
+            runs-on: ubicloud-standard-16
+            skip-args: ""
+    defaults:
+      run:
+        working-directory: ciphera
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.88.0
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ciphera -> target
+          key: ${{ matrix.name }}
+
+      - name: Install Barretenberg
+        working-directory: ciphera/web
+        run: |
+          tmp=$(mktemp -d)
+          tar -xzf binaries/linux64/barretenberg-amd64-linux.tar.gz -C "$tmp"
+          chmod +x "$tmp/bb"
+          # Runner's home, used by the default get_bb_path() lookup
+          install -Dm755 "$tmp/bb" "$HOME/.bb/bb"
+          # Required by test_bb_in_bb_path_env (hardcodes BB_PATH=/root/.bb)
+          sudo install -Dm755 "$tmp/bb" /root/.bb/bb
+          # Required by test_bb_in_system_path / test_bb_in_local_dir (which bb)
+          # and provides a safety net when other tests thrash $HOME in parallel
+          sudo install -Dm755 "$tmp/bb" /usr/local/bin/bb
+          bb --version
+
+      - name: cargo test -p barretenberg --lib
+        run: cargo test -p barretenberg --lib -- ${{ matrix.skip-args }}

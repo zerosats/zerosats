@@ -19,13 +19,18 @@ const { viem } = await network.connect({
 });
 
 const ROLLUP_ADDRESS = process.env.ROLLUP_ADDRESS as `0x${string}`;
-const NEW_ESCROW_MANAGER = process.env.NEW_ESCROW_MANAGER as `0x${string}`;
+const BURN_SUBSTITUTOR = process.env.BURN_SUBSTITUTOR as `0x${string}`;
+const ACTION = (process.env.ACTION || "").toLowerCase(); // "add" | "remove"
 const SALT = process.env.TIMELOCK_SALT as `0x${string}` | undefined;
 
 async function main() {
     if (!ROLLUP_ADDRESS) throw new Error("ROLLUP_ADDRESS env var is not set");
-    if (!NEW_ESCROW_MANAGER) throw new Error("NEW_ESCROW_MANAGER env var is not set");
+    if (!BURN_SUBSTITUTOR) throw new Error("BURN_SUBSTITUTOR env var is not set");
+    if (ACTION !== "add" && ACTION !== "remove") {
+        throw new Error("ACTION env var must be either 'add' or 'remove'");
+    }
     const mode = parseTimelockMode(process.env.MODE);
+
     const seed = process.env.MNEMONIC;
     if (!seed) throw new Error("MNEMONIC env var is not set");
     const account = mnemonicToAccount(seed);
@@ -48,10 +53,11 @@ async function main() {
         }),
     });
 
-    console.log("Wallet address:    ", senderClient.account.address);
-    console.log("Rollup address:    ", ROLLUP_ADDRESS);
-    console.log("New escrow manager:", NEW_ESCROW_MANAGER);
-    console.log("Mode:              ", mode);
+    console.log("Wallet address:   ", senderClient.account.address);
+    console.log("Rollup address:   ", ROLLUP_ADDRESS);
+    console.log("Action:           ", ACTION);
+    console.log("Burn substitutor: ", BURN_SUBSTITUTOR);
+    console.log("Mode:             ", mode);
 
     const rollup = getContract({
         address: ROLLUP_ADDRESS,
@@ -61,10 +67,12 @@ async function main() {
 
     const timelock = (await rollup.read.timelock()) as `0x${string}`;
 
+    const functionName =
+        ACTION === "add" ? "addBurnSubstitutor" : "removeBurnSubstitutor";
     const data = encodeFunctionData({
         abi: rollupV1Artifact.abi,
-        functionName: "setEscrowManager",
-        args: [NEW_ESCROW_MANAGER],
+        functionName,
+        args: [BURN_SUBSTITUTOR],
     });
 
     await timelockDispatch({

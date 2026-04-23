@@ -97,6 +97,70 @@ fn test_utxo() {
     prove_and_verify(&utxo).unwrap();
 }
 
+fn process_utxo_for_agg_generic(
+    tree: &mut smirk::Tree<161, ()>,
+    utxo: &Utxo,
+) -> Result<(
+    UtxoProof,
+    MerklePath<161>,
+    MerklePath<161>,
+    MerklePath<161>,
+    MerklePath<161>,
+    Element,
+)> {
+    let utxo_proof = utxo.prove()?;
+    let padding_path = MerklePath::default();
+
+    let p1 = if utxo.input_notes[0].note.commitment().is_zero() {
+        padding_path.clone()
+    } else {
+        let path = MerklePath::new(
+            tree.path_for(utxo.input_notes[0].note.commitment())
+                .siblings
+                .to_vec(),
+        );
+        tree.remove(utxo.input_notes[0].note.commitment()).unwrap();
+        path
+    };
+
+    let p2 = if utxo.input_notes[1].note.commitment().is_zero() {
+        padding_path.clone()
+    } else {
+        let path = MerklePath::new(
+            tree.path_for(utxo.input_notes[1].note.commitment())
+                .siblings
+                .to_vec(),
+        );
+        tree.remove(utxo.input_notes[1].note.commitment()).unwrap();
+        path
+    };
+
+    let p3 = if utxo.output_notes[0].commitment().is_zero() {
+        padding_path.clone()
+    } else {
+        tree.insert(utxo.output_notes[0].commitment(), ()).unwrap();
+        MerklePath::new(
+            tree.path_for(utxo.output_notes[0].commitment())
+                .siblings
+                .to_vec(),
+        )
+    };
+
+    let p4 = if utxo.output_notes[1].commitment().is_zero() {
+        padding_path
+    } else {
+        tree.insert(utxo.output_notes[1].commitment(), ()).unwrap();
+        MerklePath::new(
+            tree.path_for(utxo.output_notes[1].commitment())
+                .siblings
+                .to_vec(),
+        )
+    };
+
+    let new_root = tree.root_hash();
+    Ok((utxo_proof, p1, p2, p3, p4, new_root))
+}
+
 fn process_utxo_for_agg(
     tree: &mut smirk::Tree<161, ()>,
     utxo: &Utxo,
@@ -277,4 +341,70 @@ fn test_agg_agg() {
     let agg_agg = AggAgg::new([agg_utxo1_proof, agg_utxo2_proof]);
 
     prove_and_verify(&agg_agg).unwrap();
+}
+
+#[test]
+fn test_alt_agg_utxo() {
+    let (secret_key, address) = get_keypair(202);
+    let mut tree = smirk::Tree::<161, ()>::new();
+
+    // Pre-insert NoSub input notes so they exist before the aggregate's old_root
+    let nosub_input_note1 = InputNote {
+        note: send_note(25, address, 12),
+        secret_key,
+    };
+    tree.insert(nosub_input_note1.note.commitment(), ()).unwrap();
+
+    let nosub_input_note2 = InputNote {
+        note: send_note(15, address, 13),
+        secret_key,
+    };
+    tree.insert(nosub_input_note2.note.commitment(), ()).unwrap();
+
+    let old_root = tree.root_hash();
+
+    // --- UTXO 1: Mint (padding inputs, 2 real outputs) ---
+    let mint_output_note1 = send_note(30, address, 10);
+    let mint_output_note2 = send_note(20, address, 11);
+    let mint_utxo = Utxo::new_mint([mint_output_note1.clone(), mint_output_note2.clone()]);
+
+    let (mint_proof, mp1, mp2, mp3, mp4, _) =
+        process_utxo_for_agg_generic(&mut tree, &mint_utxo).unwrap();
+    verify_proof(&mint_proof);
+
+    // --- UTXO 2: Burn (mint outputs as inputs, padding outputs) ---
+    let burn_address = Element::new(0xDeadBeef);
+    let burn_utxo = Utxo::new_burn(
+        [
+            InputNote { note: mint_output_note1.clone(), secret_key },
+            InputNote { note: mint_output_note2.clone(), secret_key },
+        ],
+        burn_address,
+    );
+
+    let (burn_proof, bp1, bp2, bp3, bp4, _) =
+        process_utxo_for_agg_generic(&mut tree, &burn_utxo).unwrap();
+    verify_proof(&burn_proof);
+
+    // --- UTXO 3: NoSub (pre-inserted inputs, padding outputs) ---
+    let nosub_utxo = Utxo::new_burn_no_sub(
+        [nosub_input_note1.clone(), nosub_input_note2.clone()],
+        burn_address,
+    );
+
+    let (nosub_proof, np1, np2, np3, np4, new_root) =
+        process_utxo_for_agg_generic(&mut tree, &nosub_utxo).unwrap();
+    verify_proof(&nosub_proof);
+
+    let agg_utxo = AggUtxo::new(
+        [
+            UtxoProofBundleWithMerkleProofs::new(mint_proof, &[mp1, mp2, mp3, mp4]),
+            UtxoProofBundleWithMerkleProofs::new(burn_proof, &[bp1, bp2, bp3, bp4]),
+            UtxoProofBundleWithMerkleProofs::new(nosub_proof, &[np1, np2, np3, np4]),
+        ],
+        old_root,
+        new_root,
+    );
+
+    prove_and_verify(&agg_utxo).unwrap();
 }

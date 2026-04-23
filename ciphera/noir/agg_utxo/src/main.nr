@@ -2,8 +2,7 @@ use dep::std;
 use common::is_one_of;
 use poseidon::poseidon2;
 
-global UTXO_VERIFICATION_KEY_HASH: Field =
-    18779959434705083215725546760451184879298382931437993861134690217528836166710;
+global UTXO_VERIFICATION_KEY_HASH: Field = 13437558190188331359745244003168182966555402200567357761776677508237206900292;
 
 struct AggUtxoProofInput {
     proof: [Field; 508],
@@ -38,8 +37,8 @@ fn main(
 
         let utxo_kind = proof.utxo_kind;
         let is_padding = utxo_kind == 0;
-        let is_proof_kind_mint_or_burn = is_one_of(utxo_kind, [2, 3]);
-        let is_burn = utxo_kind == 3;
+        let is_proof_kind_mint_or_burn = is_one_of(utxo_kind, [2, 3, 4]);
+        let is_burn = is_one_of(utxo_kind, [3, 4]);
 
         let mut msg_note_kind = 0;
         let mut msg_value = 0;

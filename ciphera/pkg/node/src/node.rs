@@ -570,4 +570,9 @@ impl NodeShared {
     pub(crate) fn chain_id(&self) -> u64 {
         self.config.chain_id
     }
+
+    pub(crate) async fn escrow_manager(&self) -> crate::errors::Result<String> {
+        let addr = self.rollup_contract.escrow_manager().await?;
+        Ok(format!("0x{}", hex::encode(addr.as_bytes())))
+    }
 }
