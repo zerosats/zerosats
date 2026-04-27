@@ -261,7 +261,7 @@ contract RollupV1 is
             "RollupV1: TVL cap < per-mint cap"
         );
         require(
-            timelockMinDelay_ >= 1 days,
+            timelockMinDelay_ >= 1 hours,
             "RollupV1: timelock delay too short"
         );
         require(
