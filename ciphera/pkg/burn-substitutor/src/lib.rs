@@ -10,6 +10,7 @@ use reqwest::StatusCode;
 use std::time::Duration;
 use zk_primitives::{UtxoKind, UtxoKindMessages, UtxoProof};
 
+use tracing::{debug, info};
 use ethereum_types::{H256, U256};
 
 const MAX_ATTEMPTS: u32 = 3;
@@ -72,7 +73,7 @@ impl BurnSubstitutor {
         if self.cursor.is_none() {
             let last_rollup = self.fetch_last_rollup_block().await?;
 
-            tracing::info!("Last rollup height: {}", last_rollup);
+            info!("Last rollup height: {}", last_rollup);
 
             self.cursor = Some(
                 CursorChoice::After(CursorChoiceAfter::After(ListTxnsPosition {
@@ -93,7 +94,7 @@ impl BurnSubstitutor {
         .await
         .context("Failed to fetch transactions")?;
 
-        tracing::info!("Fetched transactions");
+        info!("Fetched transactions");
 
         let mut substituted_burns = Vec::new();
         let mut other_burns = Vec::new();
@@ -118,7 +119,7 @@ impl BurnSubstitutor {
                         )
                         .await?
                     {
-                        tracing::info!("Skipping substituted Burn with hash {:2x}", hash);
+                        info!("Skipping substituted Burn with hash {:2x}", hash);
                         continue;
                     }
 
@@ -133,7 +134,7 @@ impl BurnSubstitutor {
                         .context("Failed to fetch ERC20 balance for burn substitution")?;
 
                     if burn_value > token_balance {
-                        tracing::info!(
+                        info!(
                         ?txn.proof.public_inputs,
                         %burn_value,
                         %token_balance,
@@ -154,7 +155,7 @@ impl BurnSubstitutor {
                         .await
                         .context("Failed to substitute burn")?;
 
-                    tracing::info!("Substitution transaction {:x} has been sent", txn);
+                    info!("Substitution transaction {:x} has been sent", txn);
 
                     self.rollup_contract
                         .client
@@ -168,7 +169,7 @@ impl BurnSubstitutor {
 
                     substituted_burns.push(hash);
                 } else {
-                    tracing::info!("Transaction of NoSubstitution kind");
+                    info!("Transaction of NoSubstitution kind");
                     self.handle_nosub_burn(amount, hash).await?;
                     other_burns.push(hash);
                 }
@@ -196,7 +197,7 @@ impl BurnSubstitutor {
         let client = reqwest::Client::new();
         let swaps_url = format!("{}/swaps", self.offramp_url);
 
-        tracing::info!("looking into swaps for burner {:x}", self.substitutor_address);
+        info!("looking into swaps for burner {:x}", self.substitutor_address);
 
         let swap = retry_until_some(MAX_ATTEMPTS, RETRY_DELAY, |attempt| {
             let client = client.clone();
@@ -235,12 +236,12 @@ impl BurnSubstitutor {
                         s.state,
                         0 | -1 // 0 - CREATED in all types of swaps, -1 - QUOTE_SOFT_EXPIRED
                     );
-                    info!("{:?} {:?} {:?}", addr_match, amount_match, state_match);
+                    debug!("Received swap {:?} {:?} - {:?}", addr_match, amount_match, state_match);
                     addr_match && amount_match && state_match
                 });
 
                 if swap.is_none() {
-                    tracing::info!(
+                    info!(
                         ?burn_hash,
                         %burn_value,
                         %burner_addr,
@@ -255,7 +256,7 @@ impl BurnSubstitutor {
         .await?;
 
         let Some(swap) = swap else {
-            tracing::info!(
+            info!(
                 ?burn_hash,
                 "No matching swap after retries; will retry on next tick"
             );
@@ -263,7 +264,7 @@ impl BurnSubstitutor {
         };
 
         let swap_id = swap.id.clone();
-        tracing::info!(?burn_hash, %swap_id, "Matched NoSub burn to swap");
+        info!(?burn_hash, %swap_id, "Matched NoSub burn to swap");
 
         // Step C — Query /offramp/:swapId (with retry)
         // We can't rely on swap status since it may soft-expire before burner picks it;
@@ -315,7 +316,7 @@ impl BurnSubstitutor {
                 ) && offramp_resp.preimage.is_some();
 
                 if !commit_ready && !claimed_with_preimage {
-                    tracing::info!(
+                    info!(
                         ?burn_hash,
                         %swap_id,
                         state = %offramp_resp.state,
@@ -332,7 +333,7 @@ impl BurnSubstitutor {
         .await?;
 
         let Some(offramp_resp) = offramp_resp else {
-            tracing::info!(
+            info!(
                 ?burn_hash,
                 %swap_id,
                 "Swap did not reach a ready state after retries; skipping"
@@ -342,7 +343,7 @@ impl BurnSubstitutor {
 
         if matches!(offramp_resp.state, 2 | 3) {
             if let Some(preimage) = offramp_resp.preimage.as_deref() {
-                tracing::info!(
+                info!(
                     ?burn_hash,
                     %swap_id,
                     state = %offramp_resp.state,
@@ -353,7 +354,7 @@ impl BurnSubstitutor {
             return Ok(());
         }
 
-        tracing::info!(%offramp_resp.state, %swap_id, "Proceeding to commitment step");
+        info!(%offramp_resp.state, %swap_id, "Proceeding to commitment step");
 
         let web3_client = self.rollup_contract.client.client().clone();
 
@@ -440,7 +441,7 @@ impl BurnSubstitutor {
                 .await
                 .map_err(|e| eyre::eyre!("Failed to send commitTx: {e}"))?;
 
-            tracing::info!(?burn_hash, %swap_id, "Sent commitTx {:x}", tx_hash);
+            info!(?burn_hash, %swap_id, "Sent commitTx {:x}", tx_hash);
 
             self.rollup_contract
                 .client
