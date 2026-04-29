@@ -1,7 +1,11 @@
+pub mod keystore;
+
 use element::Element;
 use ethereum_types::{Address, H160, H256, U256};
 use secp256k1::{PublicKey, Secp256k1, SecretKey};
 use sha3::{Digest, Keccak256};
+
+pub use keystore::{KeystoreOpts, unlock_keystore};
 
 pub trait Eth {
     fn to_secp256k1_secret_key(&self) -> SecretKey;

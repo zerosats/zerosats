@@ -9,6 +9,7 @@ contracts = { workspace = true }
 constants = { workspace = true }
 doomslug = { workspace = true }
 element = { workspace = true }
+eth-util = { workspace = true }
 node-interface = { workspace = true }
 p2p2 = { workspace = true }
 primitives = { workspace = true }

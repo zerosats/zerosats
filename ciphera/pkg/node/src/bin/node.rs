@@ -91,10 +91,10 @@ async fn main() -> Result<()> {
     let rpc_laddr = config.rpc_laddr.clone();
 
     // Private key
-    let peer_signer = config.secret_key.clone();
+    let peer_signer = config.signer().clone();
 
     let secret_key =
-        web3::signing::SecretKey::from_slice(&config.secret_key.secret_key().secret_bytes()[..])
+        web3::signing::SecretKey::from_slice(&config.signer().secret_key().secret_bytes()[..])
             .unwrap();
     let contracts_client =
         contracts::Client::new(&config.evm_rpc_url, config.minimum_gas_price_gwei);

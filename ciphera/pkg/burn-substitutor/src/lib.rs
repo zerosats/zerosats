@@ -519,6 +519,7 @@ struct SwapEntry {
     state: i32,
     #[serde(rename = "inputAddress")]
     input_address: String,
+    #[allow(dead_code)]
     #[serde(rename = "outputAddress")]
     output_address: String,
     amount: String,

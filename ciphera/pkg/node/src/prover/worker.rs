@@ -42,7 +42,7 @@ pub async fn run_prover(config: &Config, node: Arc<NodeShared>) -> Result<()> {
     };
 
     let secret_key =
-        web3::signing::SecretKey::from_slice(&config.secret_key.secret_key().secret_bytes()[..])
+        web3::signing::SecretKey::from_slice(&config.signer().secret_key().secret_bytes()[..])
             .unwrap();
 
     let contracts_client =
