@@ -115,6 +115,8 @@ async fn main() -> Result<(), eyre::Error> {
         .await?
         != U256::MAX
     {
+        const MAX_APPROVE_RETRIES: u32 = 10;
+        let mut retries = 0u32;
         loop {
             match erc20_contract
                 .approve_max(rollup_contract.address())
@@ -131,9 +133,19 @@ async fn main() -> Result<(), eyre::Error> {
                     break;
                 }
                 Err(e) => {
+                    let is_transient = e.to_string().to_lowercase().contains("insufficient funds");
+                    retries += 1;
+                    if !is_transient || retries >= MAX_APPROVE_RETRIES {
+                        return Err(eyre!(
+                            "Failed to approve ERC20 spending after {} attempt(s): {}",
+                            retries,
+                            e
+                        ));
+                    }
                     tracing::error!(
                         wallet = %format!("{:#x}", wallet_address),
                         error = %e,
+                        attempt = retries,
                         "Failed to approve ERC20 spending — wallet likely has insufficient funds for gas. Retrying in 10s",
                     );
                     tokio::time::sleep(Duration::from_secs(10)).await;
