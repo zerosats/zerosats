@@ -1399,7 +1399,7 @@ mod wallet_tests {
         let burner_note = wallet.avail["WCBTC"][0].clone();
 
         let utxo = wallet
-            .burn(&burner_note, &Element::from(42u64), false)
+            .burn(&burner_note, &Element::from(42u64), true)
             .unwrap();
 
         assert_eq!(utxo.kind, UtxoKind::Burn);
