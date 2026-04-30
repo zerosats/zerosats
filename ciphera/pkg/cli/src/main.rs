@@ -547,7 +547,7 @@ async fn handle_depo_ln(
 
     // 4. Init swap: GET /onramp/{amount}/{payment_hash}
     let http = reqwest::Client::new();
-    let init_url = format!("{}/onramp/{}/{}", onramp_uri, amount_sat, payment_hash_hex);
+    let init_url = format!("{onramp_uri}/onramp/{amount_sat}/{payment_hash_hex}");
     let init_resp = http
         .get(&init_url)
         .send()
@@ -598,7 +598,7 @@ async fn handle_depo_ln(
     const POLL_INTERVAL_SECS: u64 = 4;
 
     // 7. Poll for payment
-    let status_url = format!("{}/onramp/{}", onramp_uri, swap_id);
+    let status_url = format!("{onramp_uri}/onramp/{swap_id}");
 
     let amount_out;
     let mut attempts = 0u32;
@@ -733,7 +733,7 @@ async fn handle_withdraw_ln(
     // Step 1 — GET /offramp/{lnInvoice}/{substitutorAddress}
     // Returns the swap quote: swap ID and the cBTC amount the user must burn.
     let http = reqwest::Client::new();
-    let quote_url = format!("{}/offramp/{}/{}", offramp_uri, invoice, substitutor);
+    let quote_url = format!("{offramp_uri}/offramp/{invoice}/{substitutor}");
 
     println!("\n⚡ Requesting offramp quote...");
 
@@ -821,7 +821,7 @@ async fn handle_withdraw_ln(
     const MAX_POLL_ATTEMPTS: u32 = 150; // ~10 minutes at 4 s intervals
     const POLL_INTERVAL_SECS: u64 = 4;
 
-    let status_url = format!("{}/offramp/{}", offramp_uri, swap_id);
+    let status_url = format!("{offramp_uri}/offramp/{swap_id}");
     let mut attempts = 0u32;
     loop {
         tokio::time::sleep(std::time::Duration::from_secs(POLL_INTERVAL_SECS)).await;
@@ -1041,14 +1041,11 @@ async fn handle_rollup(geth_rpc: &str, chain: u64, rollup: &str) -> Result<()> {
     loop {
         match rollup.zk_verifier_keys(U256::from(index)).await {
             Ok(key_hash) => {
-                match rollup.zk_verifiers(key_hash).await {
-                    Ok((address, circuit_id, enabled)) => {
-                        println!(
-                            "\t[{index}]\n\tkey={key_hash:#x}\n\taddress={address:#x}\n\t\
-                            circuit_id={circuit_id}  enabled={enabled}"
-                        );
-                    }
-                    Err(_) => {}
+                if let Ok((address, circuit_id, enabled)) = rollup.zk_verifiers(key_hash).await {
+                    println!(
+                        "\t[{index}]\n\tkey={key_hash:#x}\n\taddress={address:#x}\n\t\
+                        circuit_id={circuit_id}  enabled={enabled}"
+                    );
                 }
                 index += 1;
             }
@@ -1067,8 +1064,8 @@ async fn handle_rollup(geth_rpc: &str, chain: u64, rollup: &str) -> Result<()> {
         println!("\tNo mints found.");
     } else {
         println!(
-            "\t{:<66}  {:>20}  {:<66}  {}",
-            "Mint Hash", "Value", "Note Kind", "Block"
+            "\t{:<66}  {:>20}  {:<66}  Block",
+            "Mint Hash", "Value", "Note Kind"
         );
         for event in &mint_events {
             println!(
@@ -1095,8 +1092,8 @@ async fn handle_mints(geth_rpc: &str, chain: u64, rollup: &str) -> Result<()> {
         println!("\tNo mints found.");
     } else {
         println!(
-            "\t{:<66}  {:>20}  {:<66}  {}",
-            "Mint Hash", "Value", "Note Kind", "Block"
+            "\t{:<66}  {:>20}  {:<66}  Block",
+            "Mint Hash", "Value", "Note Kind"
         );
         println!("\t{}", "-".repeat(160));
         for event in &events {
