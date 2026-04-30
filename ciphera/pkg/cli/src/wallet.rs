@@ -472,8 +472,10 @@ impl Wallet {
 
                 debug!(ticker = ticker, amount = amount, "importing note");
 
-                let b =
-                    self.push_to_avail(&ticker, InputNote::new(note.clone(), pending_note.secret_key))?;
+                let b = self.push_to_avail(
+                    &ticker,
+                    InputNote::new(note.clone(), pending_note.secret_key),
+                )?;
 
                 debug!(balance = b, "updated wallet balance");
 
@@ -495,10 +497,7 @@ impl Wallet {
         self.push_to_avail(&ticker, input_note).map(|_| ())
     }
 
-    pub fn prepare_add_to_avail(
-        &self,
-        input_note: InputNote,
-    ) -> Result<(Self, ()), WalletError> {
+    pub fn prepare_add_to_avail(&self, input_note: InputNote) -> Result<(Self, ()), WalletError> {
         self.stage(|wallet| wallet.add_to_avail(input_note))
     }
 
@@ -1373,7 +1372,9 @@ mod wallet_tests {
         wallet.mint(1000, "WCBTC").unwrap();
         let burner_note = wallet.avail["WCBTC"][0].clone();
 
-        wallet.burn(&burner_note, &Element::from(42u64), false).unwrap();
+        wallet
+            .burn(&burner_note, &Element::from(42u64), false)
+            .unwrap();
 
         assert_eq!(wallet.avail["WCBTC"].len(), 0);
     }
@@ -1384,7 +1385,9 @@ mod wallet_tests {
         wallet.mint(1000, "WCBTC").unwrap();
         let burner_note = wallet.avail["WCBTC"][0].clone();
 
-        wallet.burn(&burner_note, &Element::from(42u64), false).unwrap();
+        wallet
+            .burn(&burner_note, &Element::from(42u64), false)
+            .unwrap();
 
         assert_eq!(wallet.balance, 0);
     }
@@ -1395,7 +1398,9 @@ mod wallet_tests {
         wallet.mint(1000, "WCBTC").unwrap();
         let burner_note = wallet.avail["WCBTC"][0].clone();
 
-        let utxo = wallet.burn(&burner_note, &Element::from(42u64), false).unwrap();
+        let utxo = wallet
+            .burn(&burner_note, &Element::from(42u64), false)
+            .unwrap();
 
         assert_eq!(utxo.kind, UtxoKind::Burn);
     }
@@ -1428,7 +1433,9 @@ mod wallet_tests {
         wallet.mint(500, "WCBTC").unwrap();
         let burner_note = wallet.avail["WCBTC"][0].clone();
 
-        wallet.burn(&burner_note, &Element::from(42u64), false).unwrap();
+        wallet
+            .burn(&burner_note, &Element::from(42u64), false)
+            .unwrap();
 
         assert_eq!(wallet.avail["WCBTC"].len(), 1);
         assert_eq!(wallet.balance, 500);

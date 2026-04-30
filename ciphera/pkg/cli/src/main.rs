@@ -1,9 +1,9 @@
 use clap::{Parser, Subcommand};
-use cli::address::citrea_ticker_from_contract;
-use cli::address::decode_address;
-use cli::note_url::{decode_url, CipheraURL};
 use cli::NodeClient;
 use cli::Wallet;
+use cli::address::citrea_ticker_from_contract;
+use cli::address::decode_address;
+use cli::note_url::{CipheraURL, decode_url};
 
 use color_eyre::Result;
 use tracing::{debug, error};
@@ -12,7 +12,7 @@ use web3::types::{H160, H256, U256};
 use barretenberg::Prove;
 use contracts::util::{convert_element_to_h256, convert_h160_to_element};
 use hash::hash_merge;
-use rand::{rngs::OsRng, RngCore};
+use rand::{RngCore, rngs::OsRng};
 use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::Path;
@@ -720,16 +720,16 @@ async fn handle_withdraw_ln(
     address: &str,
     offramp_uri: &str,
 ) -> Result<()> {
-/*    let client = NodeClient::builder()
-        .name(name)
-        .host(host)
-        .port(port)
-        .timeout_secs(timeout_secs)
-        .build(chain, false)?;
+    /*    let client = NodeClient::builder()
+            .name(name)
+            .host(host)
+            .port(port)
+            .timeout_secs(timeout_secs)
+            .build(chain, false)?;
 
-    let b = client.get_wallet().balance;
-    TODO: balance check before everything even starts
-*/
+        let b = client.get_wallet().balance;
+        TODO: balance check before everything even starts
+    */
     // Step 1 — GET /offramp/{lnInvoice}/{substitutorAddress}
     // Returns the swap quote: swap ID and the cBTC amount the user must burn.
     let http = reqwest::Client::new();
@@ -943,7 +943,7 @@ async fn handle_burn(
     address: &str,
     amount: u64,
     ticker: &str,
-    natively_substitute: bool
+    natively_substitute: bool,
 ) -> Result<(), AppError> {
     // Build client with fluent API
     let mut client = NodeClient::builder()
@@ -975,8 +975,9 @@ async fn handle_burn(
         }
     }
 
-    let (wallet_with_burner_note, _) =
-        client.get_wallet().prepare_add_to_avail(burner_note.clone())?;
+    let (wallet_with_burner_note, _) = client
+        .get_wallet()
+        .prepare_add_to_avail(burner_note.clone())?;
     wallet_with_burner_note.save()?;
     client.replace_wallet(wallet_with_burner_note);
 
@@ -985,9 +986,10 @@ async fn handle_burn(
         Err(e) => return Err(AppError::InvalidAddress(e.to_string())),
     };
 
-    let (wallet_after_burn, burner_utxo) = client
-        .get_wallet()
-        .prepare_burn(&burner_note, &evm_address, natively_substitute)?;
+    let (wallet_after_burn, burner_utxo) =
+        client
+            .get_wallet()
+            .prepare_burn(&burner_note, &evm_address, natively_substitute)?;
 
     let snark = burner_utxo.prove().unwrap();
 
@@ -1140,14 +1142,7 @@ async fn main() -> Result<()> {
             handle_create(cli.chain, &cli.name).await?;
         }
         Commands::Sync {} => {
-            handle_sync(
-                cli.chain,
-                &cli.name,
-                &cli.host,
-                cli.port,
-                cli.timeout,
-            )
-            .await?;
+            handle_sync(cli.chain, &cli.name, &cli.host, cli.port, cli.timeout).await?;
         }
         Commands::Address { amount, ticker } => {
             let ticker_normalized = ticker.to_uppercase();
@@ -1230,7 +1225,7 @@ async fn main() -> Result<()> {
                 &address,
                 amount,
                 &ticker_normalized,
-                true
+                true,
             )
             .await?;
         }

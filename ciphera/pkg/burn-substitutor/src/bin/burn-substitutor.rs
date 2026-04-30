@@ -1,11 +1,11 @@
 use clap::Parser;
 use contracts::{ConfirmationType, RollupContract, U256};
 use eth_util::KeystoreOpts;
+use eyre::{ContextCompat, eyre};
 use rpc::tracing::{LogFormat, LogLevel};
 use serde::{Deserialize, Serialize};
-use std::time::Duration;
 use std::str::FromStr;
-use eyre::{eyre, ContextCompat};
+use std::time::Duration;
 
 #[derive(Parser, Debug, Serialize, Deserialize, Clone)]
 #[clap(name = "Polybase Burn Subsitutor")]
@@ -42,10 +42,7 @@ pub struct Config {
     #[serde(skip)]
     keystore: KeystoreOpts,
 
-    #[arg(
-        long,
-        env = "SECRET_KEY"
-    )]
+    #[arg(long, env = "SECRET_KEY")]
     secret_key: Option<String>,
 
     #[arg(long, env = "EVM_RPC_URL", default_value = "http://localhost:8545")]
@@ -118,10 +115,7 @@ async fn main() -> Result<(), eyre::Error> {
         const MAX_APPROVE_RETRIES: u32 = 10;
         let mut retries = 0u32;
         loop {
-            match erc20_contract
-                .approve_max(rollup_contract.address())
-                .await
-            {
+            match erc20_contract.approve_max(rollup_contract.address()).await {
                 Ok(approve_txn) => {
                     client
                         .wait_for_confirm(
@@ -163,7 +157,10 @@ async fn main() -> Result<(), eyre::Error> {
         wallet_address,
     );
 
-    tracing::info!("Starting burn substitutor with wallet {:#x}", wallet_address);
+    tracing::info!(
+        "Starting burn substitutor with wallet {:#x}",
+        wallet_address
+    );
 
     loop {
         let substitutions = substitutor.tick().await?;

@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use eyre::{eyre, Context, Result};
+use eyre::{Context, Result, eyre};
 use web3::signing::SecretKey;
 
 /// CLI options for unlocking a geth-format keystore.
@@ -21,11 +21,20 @@ pub struct KeystoreOpts {
     /// Name of an environment variable that holds the keystore password
     #[arg(long, env = "ETH_KEYSTORE_PASSWORD_ENV")]
     pub keystore_password_env: Option<String>,
+
+    /// Console password input flag
+    #[arg(long, default_value = "false")]
+    pub allow_password_input: bool,
 }
 
 impl KeystoreOpts {
     pub fn is_set(&self) -> bool {
-        self.keystore_path.is_some() && (self.keystore_password_file.is_some() || self.keystore_password_env.is_some())
+        if self.allow_password_input {
+            self.keystore_path.is_some()
+        } else {
+            self.keystore_path.is_some()
+                && (self.keystore_password_file.is_some() || self.keystore_password_env.is_some())
+        }
     }
 
     /// Decrypt the configured keystore and return a `web3::signing::SecretKey`.
@@ -50,11 +59,17 @@ impl KeystoreOpts {
                 .with_context(|| format!("reading keystore password from env var {name}"));
         }
 
-        rpassword::prompt_password(format!(
-            "Enter password to unlock keystore {}: ",
-            path.display()
+        if self.allow_password_input {
+            return rpassword::prompt_password(format!(
+                "Enter password to unlock keystore {}: ",
+                path.display()
+            ))
+            .context("reading keystore password from terminal");
+        }
+
+        Err(eyre!(
+            "impossible to read unlock password. Check your launch parameters"
         ))
-        .context("reading keystore password from terminal")
     }
 }
 

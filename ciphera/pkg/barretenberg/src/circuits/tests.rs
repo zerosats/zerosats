@@ -353,13 +353,15 @@ fn test_alt_agg_utxo() {
         note: send_note(25, address, 12),
         secret_key,
     };
-    tree.insert(nosub_input_note1.note.commitment(), ()).unwrap();
+    tree.insert(nosub_input_note1.note.commitment(), ())
+        .unwrap();
 
     let nosub_input_note2 = InputNote {
         note: send_note(15, address, 13),
         secret_key,
     };
-    tree.insert(nosub_input_note2.note.commitment(), ()).unwrap();
+    tree.insert(nosub_input_note2.note.commitment(), ())
+        .unwrap();
 
     let old_root = tree.root_hash();
 
@@ -376,8 +378,14 @@ fn test_alt_agg_utxo() {
     let burn_address = Element::new(0xDeadBeef);
     let burn_utxo = Utxo::new_burn(
         [
-            InputNote { note: mint_output_note1.clone(), secret_key },
-            InputNote { note: mint_output_note2.clone(), secret_key },
+            InputNote {
+                note: mint_output_note1.clone(),
+                secret_key,
+            },
+            InputNote {
+                note: mint_output_note2.clone(),
+                secret_key,
+            },
         ],
         burn_address,
     );
