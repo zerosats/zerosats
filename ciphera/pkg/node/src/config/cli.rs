@@ -1,5 +1,6 @@
 use crate::Mode;
 use clap::Parser;
+use eth_util::KeystoreOpts;
 use libp2p::multiaddr::Multiaddr;
 use primitives::peer::PeerIdSigner;
 use rpc::tracing::{LogFormat, LogLevel};
@@ -34,9 +35,13 @@ pub struct CliArgs {
     #[arg(long, value_delimiter = ',')]
     pub p2p_dial: Option<Vec<Multiaddr>>,
 
-    /// Peers to dial
+    /// Raw hex-encoded secret key. Prefer `--keystore-path` for production.
     #[arg(long, env = "CIPHERA_SECRET_KEY")]
     pub secret_key: Option<PeerIdSigner>,
+
+    #[command(flatten)]
+    #[serde(skip)]
+    pub keystore: KeystoreOpts,
 
     /// Log level
     #[arg(value_enum, long, env = "CIPHERA_LOG_LEVEL", default_value = "INFO")]

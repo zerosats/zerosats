@@ -524,7 +524,9 @@ mod client_tests {
         let _ = std::fs::remove_file(&file);
 
         assert!(
-            client.base_url().starts_with("http://node.example.com:8091"),
+            client
+                .base_url()
+                .starts_with("http://node.example.com:8091"),
             "bare host should default to http://; got: {}",
             client.base_url()
         );
@@ -564,9 +566,7 @@ mod client_tests {
         let file = format!("{name}.json");
         let _ = std::fs::remove_file(&file);
 
-        let result = NodeClientBuilder::new()
-            .name(name)
-            .build(CHAIN_ID, true);
+        let result = NodeClientBuilder::new().name(name).build(CHAIN_ID, true);
 
         let _ = std::fs::remove_file(&file);
 
@@ -584,13 +584,9 @@ mod client_tests {
         let file = format!("{name}.json");
 
         // Pre-create the wallet.
-        let _ = NodeClientBuilder::new()
-            .name(name)
-            .build(CHAIN_ID, true);
+        let _ = NodeClientBuilder::new().name(name).build(CHAIN_ID, true);
 
-        let result = NodeClientBuilder::new()
-            .name(name)
-            .build(CHAIN_ID, true);
+        let result = NodeClientBuilder::new().name(name).build(CHAIN_ID, true);
 
         let _ = std::fs::remove_file(&file);
 
@@ -615,9 +611,7 @@ mod client_tests {
             .build(CHAIN_ID, true)
             .expect("pre-create wallet");
 
-        let result = NodeClientBuilder::new()
-            .name(name)
-            .build(CHAIN_ID, false);
+        let result = NodeClientBuilder::new().name(name).build(CHAIN_ID, false);
 
         let _ = std::fs::remove_file(&file);
 
@@ -635,9 +629,7 @@ mod client_tests {
         let file = format!("{name}.json");
         let _ = std::fs::remove_file(&file);
 
-        let result = NodeClientBuilder::new()
-            .name(name)
-            .build(CHAIN_ID, false);
+        let result = NodeClientBuilder::new().name(name).build(CHAIN_ID, false);
 
         let err = result.expect_err("create_wallet=false must fail when wallet file absent");
         let msg = format!("{err}");
@@ -714,9 +706,7 @@ mod client_tests {
         let file = format!("{name}.json");
         std::fs::write(&file, b"{bad json}").unwrap();
 
-        let result = NodeClientBuilder::new()
-            .name(name)
-            .build(CHAIN_ID, false); // load, not create
+        let result = NodeClientBuilder::new().name(name).build(CHAIN_ID, false); // load, not create
 
         let _ = std::fs::remove_file(&file);
 

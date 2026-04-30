@@ -2,13 +2,14 @@ use std::path::PathBuf;
 
 use self::cli::CliArgs;
 use crate::Mode;
-use color_eyre::Result;
+use color_eyre::{Result, eyre::eyre};
 use dirs::home_dir;
 use figment::{
     Figment,
     providers::{Env, Format, Toml},
 };
 use primitives::peer::PeerIdSigner;
+use secp256k1::SecretKey;
 use serde::Deserialize;
 use std::io::Read;
 use std::{fs::File, str::FromStr};
@@ -40,8 +41,12 @@ pub struct Config {
 
     pub mode: Mode,
 
-    /// Private key of validator
-    pub secret_key: PeerIdSigner,
+    /// Private key of validator. Resolved at startup from either a geth
+    /// keystore (preferred), the `--secret-key` CLI flag, or the
+    /// `--secret-key-path` file. Always `Some` once `Config::from_env`
+    /// returns successfully — use `Config::signer()` to access it.
+    #[serde(default)]
+    pub secret_key: Option<PeerIdSigner>,
 
     /// RPC config
     pub rpc_laddr: String,
@@ -82,6 +87,16 @@ impl Config {
     /// The text of the default config string
     pub const DEFAULT_STR: &str = include_str!("./default_config.toml");
 
+    /// Get the resolved validator signing key.
+    ///
+    /// `Config::from_env` always populates `secret_key` (or returns an error),
+    /// so this is infallible after a successful `from_env`.
+    pub fn signer(&self) -> &PeerIdSigner {
+        self.secret_key
+            .as_ref()
+            .expect("secret_key must be resolved by Config::from_env")
+    }
+
     /// Load a [`Config`] from a file and environment
     ///
     /// `config_path` doesn't need to point to an actual file
@@ -112,11 +127,28 @@ impl Config {
             let mut file = File::open(secret_key_path)?;
             let mut key = String::new();
             file.read_to_string(&mut key)?;
-            config.secret_key = PeerIdSigner::from_str(&key)?;
+            config.secret_key = Some(PeerIdSigner::from_str(key.trim())?);
         }
 
         if let Some(secret_key) = args.secret_key {
-            config.secret_key = secret_key;
+            config.secret_key = Some(secret_key);
+        }
+
+        if args.keystore.is_set() {
+            let unlocked = args.keystore.unlock()?;
+            // web3's signing::SecretKey wraps secp256k1@0.27, so convert via raw bytes
+            // to the workspace's secp256k1@0.28 SecretKey that PeerIdSigner expects.
+            let bytes = unlocked.secret_bytes();
+            let secret_key = SecretKey::from_slice(&bytes)
+                .map_err(|e| eyre!("decrypted keystore is not a valid secp256k1 key: {e}"))?;
+            config.secret_key = Some(PeerIdSigner::new(secret_key));
+        }
+
+        if config.secret_key.is_none() {
+            return Err(eyre!(
+                "no signing key configured: pass --keystore-path (with a password file/env, \
+                 or be prompted interactively), --secret-key, or --secret-key-path"
+            ));
         }
 
         if let Some(rpc_laddr) = args.rpc_laddr {
@@ -169,9 +201,96 @@ mod tests {
 
     use super::*;
 
+    /// Create a geth-format keystore file in `dir` containing `key_bytes`
+    /// encrypted with `password`. Returns the full path to the keystore file.
+    fn make_keystore(dir: &tempdir::TempDir, password: &str) -> PathBuf {
+        let mut rng = rand::thread_rng();
+        let (_, filename) = eth_keystore::new(dir.path(), &mut rng, password, None)
+            .expect("failed to create test keystore");
+        dir.path().join(filename)
+    }
+
     #[test]
-    fn can_parse_from_empty() {
-        let args = CliArgs::try_parse_from(["node"]).unwrap();
+    fn can_parse_with_secret_key() {
+        let args = CliArgs::try_parse_from([
+            "node",
+            "--secret-key",
+            "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80",
+        ])
+        .unwrap();
         Config::from_env(args).unwrap();
+    }
+
+    #[test]
+    fn errors_when_no_signing_key_provided() {
+        let args = CliArgs::try_parse_from(["node"]).unwrap();
+        let err = Config::from_env(args).unwrap_err();
+        assert!(
+            err.to_string().contains("no signing key configured"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn can_load_keystore_with_password_file() {
+        let dir = tempdir::TempDir::new("keystore-test").unwrap();
+        let keystore_path = make_keystore(&dir, "hunter2");
+
+        let pass_file = dir.path().join("password.txt");
+        std::fs::write(&pass_file, "hunter2").unwrap();
+
+        let _ = CliArgs::try_parse_from([
+            "node",
+            "--keystore-path",
+            keystore_path.to_str().unwrap(),
+            "--keystore-password-file",
+            pass_file.to_str().unwrap(),
+        ])
+        .unwrap();
+    }
+
+    #[test]
+    fn keystore_wrong_password_returns_error() {
+        let dir = tempdir::TempDir::new("keystore-test").unwrap();
+        let keystore_path = make_keystore(&dir, "correct-password");
+
+        let pass_file = dir.path().join("password.txt");
+        std::fs::write(&pass_file, "wrong-password").unwrap();
+
+        let args = CliArgs::try_parse_from([
+            "node",
+            "--keystore-path",
+            keystore_path.to_str().unwrap(),
+            "--keystore-password-file",
+            pass_file.to_str().unwrap(),
+        ])
+        .unwrap();
+
+        let err = Config::from_env(args).unwrap_err();
+        assert!(
+            err.to_string().contains("decrypting keystore"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn keystore_takes_precedence_over_secret_key_flag() {
+        let dir = tempdir::TempDir::new("keystore-test").unwrap();
+        let keystore_path = make_keystore(&dir, "pass");
+
+        let pass_file = dir.path().join("password.txt");
+        std::fs::write(&pass_file, "pass").unwrap();
+
+        // Supply a different key via --secret-key; the keystore should win.
+        let _ = CliArgs::try_parse_from([
+            "node",
+            "--secret-key",
+            "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80",
+            "--keystore-path",
+            keystore_path.to_str().unwrap(),
+            "--keystore-password-file",
+            pass_file.to_str().unwrap(),
+        ])
+        .unwrap();
     }
 }

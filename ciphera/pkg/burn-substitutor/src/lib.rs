@@ -135,11 +135,11 @@ impl BurnSubstitutor {
 
                     if burn_value > token_balance {
                         info!(
-                        ?txn.proof.public_inputs,
-                        %burn_value,
-                        %token_balance,
-                        "Skipping burn: value exceeds substitutor balance"
-                    );
+                            ?txn.proof.public_inputs,
+                            %burn_value,
+                            %token_balance,
+                            "Skipping burn: value exceeds substitutor balance"
+                        );
                         continue;
                     }
 
@@ -197,7 +197,10 @@ impl BurnSubstitutor {
         let client = reqwest::Client::new();
         let swaps_url = format!("{}/swaps", self.offramp_url);
 
-        info!("looking into swaps for burner {:x}", self.substitutor_address);
+        info!(
+            "looking into swaps for burner {:x}",
+            self.substitutor_address
+        );
 
         let swap = retry_until_some(MAX_ATTEMPTS, RETRY_DELAY, |attempt| {
             let client = client.clone();
@@ -236,7 +239,10 @@ impl BurnSubstitutor {
                         s.state,
                         0 | -1 // 0 - CREATED in all types of swaps, -1 - QUOTE_SOFT_EXPIRED
                     );
-                    debug!("Received swap {:?} {:?} - {:?}", addr_match, amount_match, state_match);
+                    debug!(
+                        "Received swap {:?} {:?} - {:?}",
+                        addr_match, amount_match, state_match
+                    );
                     addr_match && amount_match && state_match
                 });
 
@@ -310,10 +316,8 @@ impl BurnSubstitutor {
                     0 | -1 // -1 QUOTE_SOFT_EXPIRED to BTC swaps
                 ) && !offramp_resp.commit_txs.is_empty();
 
-                let claimed_with_preimage = matches!(
-                    offramp_resp.state,
-                    2 | 3
-                ) && offramp_resp.preimage.is_some();
+                let claimed_with_preimage =
+                    matches!(offramp_resp.state, 2 | 3) && offramp_resp.preimage.is_some();
 
                 if !commit_ready && !claimed_with_preimage {
                     info!(
@@ -359,16 +363,16 @@ impl BurnSubstitutor {
         let web3_client = self.rollup_contract.client.client().clone();
 
         for commit_tx in &offramp_resp.commit_txs {
-            let to: Address = commit_tx.to.parse().context("Failed to parse commitTx.to")?;
+            let to: Address = commit_tx
+                .to
+                .parse()
+                .context("Failed to parse commitTx.to")?;
 
-            let data_bytes =
-                hex::decode(commit_tx.data.trim_start_matches("0x"))
-                    .context("Failed to decode commitTx.data")?;
+            let data_bytes = hex::decode(commit_tx.data.trim_start_matches("0x"))
+                .context("Failed to decode commitTx.data")?;
 
             let Ok(escrow) = EscrowData::from_transaction_calldata(&data_bytes) else {
-                tracing::warn!(
-                    "Failed to decode EscrowData from commitTx.data; skipping"
-                );
+                tracing::warn!("Failed to decode EscrowData from commitTx.data; skipping");
                 return Ok(());
             };
 
@@ -396,7 +400,7 @@ impl BurnSubstitutor {
             let gas = commit_tx
                 .gas_limit
                 .as_deref()
-                .map(|s| web3::types::U256::from_dec_str(s))
+                .map(web3::types::U256::from_dec_str)
                 .transpose()
                 .context("Failed to parse commitTx.gasLimit")?
                 .unwrap_or_else(|| web3::types::U256::from(1_000_000u64));
@@ -404,14 +408,14 @@ impl BurnSubstitutor {
             let max_fee_per_gas = commit_tx
                 .max_fee_per_gas
                 .as_deref()
-                .map(|s| web3::types::U256::from_dec_str(s))
+                .map(web3::types::U256::from_dec_str)
                 .transpose()
                 .context("Failed to parse commitTx.maxFeePerGas")?;
 
             let max_priority_fee_per_gas = commit_tx
                 .max_priority_fee_per_gas
                 .as_deref()
-                .map(|s| web3::types::U256::from_dec_str(s))
+                .map(web3::types::U256::from_dec_str)
                 .transpose()
                 .context("Failed to parse commitTx.maxPriorityFeePerGas")?;
 
@@ -519,6 +523,7 @@ struct SwapEntry {
     state: i32,
     #[serde(rename = "inputAddress")]
     input_address: String,
+    #[allow(dead_code)]
     #[serde(rename = "outputAddress")]
     output_address: String,
     amount: String,
@@ -559,4 +564,3 @@ struct OfframpResponse {
     #[serde(default)]
     preimage: Option<String>,
 }
-

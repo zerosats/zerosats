@@ -201,7 +201,7 @@ impl Wallet {
         let opt_balance = self.avail.get_mut(ticker).and_then(|notes| {
             let pos = notes.iter().position(|n| n.note == note.note)?;
             let removed_note = notes.remove(pos);
-            println!("{:?}", removed_note);
+            println!("{removed_note:?}");
             let note_amount = removed_note
                 .note
                 .value
@@ -352,7 +352,7 @@ impl Wallet {
 
     fn spend_to(&mut self, note: &Note) -> Result<Utxo, WalletError> {
         let ticker = citrea_ticker_from_contract(note.contract);
-        let amount = self.get_note_amount(&note)?;
+        let amount = self.get_note_amount(note)?;
 
         if amount > self.balance {
             let name = self.name.clone().unwrap_or("Noname".to_string());
@@ -392,7 +392,7 @@ impl Wallet {
     fn mint(&mut self, amount: u64, ticker: &str) -> Result<Utxo, WalletError> {
         let received_note: InputNote = self.receive_note(amount, ticker);
 
-        let b = self.push_to_avail(&ticker, received_note.clone())?;
+        let b = self.push_to_avail(ticker, received_note.clone())?;
         debug!(balance = b, "updated wallet balance");
 
         Ok(Utxo::new_mint([
@@ -472,8 +472,10 @@ impl Wallet {
 
                 debug!(ticker = ticker, amount = amount, "importing note");
 
-                let b =
-                    self.push_to_avail(&ticker, InputNote::new(note.clone(), pending_note.secret_key))?;
+                let b = self.push_to_avail(
+                    &ticker,
+                    InputNote::new(note.clone(), pending_note.secret_key),
+                )?;
 
                 debug!(balance = b, "updated wallet balance");
 
@@ -495,10 +497,7 @@ impl Wallet {
         self.push_to_avail(&ticker, input_note).map(|_| ())
     }
 
-    pub fn prepare_add_to_avail(
-        &self,
-        input_note: InputNote,
-    ) -> Result<(Self, ()), WalletError> {
+    pub fn prepare_add_to_avail(&self, input_note: InputNote) -> Result<(Self, ()), WalletError> {
         self.stage(|wallet| wallet.add_to_avail(input_note))
     }
 
@@ -534,7 +533,7 @@ impl Wallet {
                     // not a padding note
                     let mut new_notes = vec![];
 
-                    for (_, asset_notes) in &mut self.pending {
+                    for asset_notes in self.pending.values_mut() {
                         let mut idx = vec![];
                         for (i, p) in asset_notes.iter().enumerate() {
                             if c == p.note.commitment() {
@@ -1373,7 +1372,9 @@ mod wallet_tests {
         wallet.mint(1000, "WCBTC").unwrap();
         let burner_note = wallet.avail["WCBTC"][0].clone();
 
-        wallet.burn(&burner_note, &Element::from(42u64), false).unwrap();
+        wallet
+            .burn(&burner_note, &Element::from(42u64), false)
+            .unwrap();
 
         assert_eq!(wallet.avail["WCBTC"].len(), 0);
     }
@@ -1384,7 +1385,9 @@ mod wallet_tests {
         wallet.mint(1000, "WCBTC").unwrap();
         let burner_note = wallet.avail["WCBTC"][0].clone();
 
-        wallet.burn(&burner_note, &Element::from(42u64), false).unwrap();
+        wallet
+            .burn(&burner_note, &Element::from(42u64), false)
+            .unwrap();
 
         assert_eq!(wallet.balance, 0);
     }
@@ -1395,7 +1398,9 @@ mod wallet_tests {
         wallet.mint(1000, "WCBTC").unwrap();
         let burner_note = wallet.avail["WCBTC"][0].clone();
 
-        let utxo = wallet.burn(&burner_note, &Element::from(42u64), false).unwrap();
+        let utxo = wallet
+            .burn(&burner_note, &Element::from(42u64), true)
+            .unwrap();
 
         assert_eq!(utxo.kind, UtxoKind::Burn);
     }
@@ -1428,7 +1433,9 @@ mod wallet_tests {
         wallet.mint(500, "WCBTC").unwrap();
         let burner_note = wallet.avail["WCBTC"][0].clone();
 
-        wallet.burn(&burner_note, &Element::from(42u64), false).unwrap();
+        wallet
+            .burn(&burner_note, &Element::from(42u64), false)
+            .unwrap();
 
         assert_eq!(wallet.avail["WCBTC"].len(), 1);
         assert_eq!(wallet.balance, 500);
@@ -1667,7 +1674,7 @@ mod wallet_tests {
         let mut wallet = Wallet::random(5115, Some("test".to_string()));
         add_pending_note(&mut wallet, 1000);
 
-        wallet.sync(&vec![]).unwrap();
+        wallet.sync(&[]).unwrap();
 
         assert_eq!(wallet.pending["WCBTC"].len(), 1);
         assert_eq!(wallet.balance, 0);

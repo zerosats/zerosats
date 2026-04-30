@@ -40,7 +40,7 @@ impl Flags {
         let flag_bits = U256::from(
             (if self.pay_out { FLAG_PAY_OUT } else { 0 })
                 | (if self.pay_in { FLAG_PAY_IN } else { 0 })
-                | (if self.reputation { FLAG_REPUTATION } else { 0 })
+                | (if self.reputation { FLAG_REPUTATION } else { 0 }),
         );
         sequence_bits | flag_bits
     }
@@ -85,6 +85,7 @@ pub struct EscrowData {
 
 impl EscrowData {
     /// Create a new EscrowData instance
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         offerer: Address,
         claimer: Address,
@@ -404,9 +405,9 @@ mod tests {
         );
 
         assert_eq!(escrow.amount, U256::from(1_000_000u64));
-        assert_eq!(escrow.flags.pay_out, true);
-        assert_eq!(escrow.flags.pay_in, false);
-        assert_eq!(escrow.flags.reputation, true);
+        assert!(escrow.flags.pay_out);
+        assert!(!escrow.flags.pay_in);
+        assert!(escrow.flags.reputation);
         assert_eq!(escrow.flags.sequence, 42);
     }
 
@@ -559,7 +560,8 @@ mod tests {
         // lntb21u1p57w7ujpp5w9vzr5f5rg426l6pmtumg5kmahw53u985pd4a38k9dn6ycy3hz3sdq2f38xy6t5wvcqzzsxqrrsssp5c5gmwupuu4vhh7gmvlxh32gw6n7a6wf9s9hzx59nrw96sjnf3vas9qxpqysgqyxx5qhuwywdul8z8dkum3qgy6l5rqfanqcpvzwcwek2va2x3c5ej83v2k526g5p4upqztr4gnkvzkaheecvj3u42lfm26ylg60qr5dcqatw2xz
 
         let mut data = vec![0u8; 676];
-        let tx_bytes = hex::decode("07dd7a29000000000000000000000000ba7633f36a86a4f572a918350574c1a\
+        let tx_bytes = hex::decode(
+            "07dd7a29000000000000000000000000ba7633f36a86a4f572a918350574c1a\
         44b924ebf000000000000000000000000110caeb55493b119f208b73245464ef5d9a1c39e000000000000000000\
         000000000000000000000000000000000013ac20776c00000000000000000000000000000000000000000000000\
         0000000000000000000000000000000000000000000000000009222e8d83b4d9225000000000000000600000000\
@@ -574,28 +576,37 @@ mod tests {
         000000000000000000000000000000416546c65d2624fba2d98ce98fa149f43856a0c6f892b24e03774c1da0ed8\
         90c427798d9351b293e7d3e4b6cac34779bcba1d3c1a58f0a3dc042247018a53c28a31c00000000000000000000\
         0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000\
-        000000000000000").unwrap();
+        000000000000000",
+        )
+        .unwrap();
         data.copy_from_slice(&tx_bytes);
-
 
         let result = EscrowData::from_transaction_calldata(&data);
         assert!(result.is_ok());
         let escrow = result.unwrap();
 
         assert_eq!(
-            escrow.offerer, "0xba7633f36a86a4f572a918350574c1a44b924ebf".parse().unwrap(),
+            escrow.offerer,
+            "0xba7633f36a86a4f572a918350574c1a44b924ebf"
+                .parse()
+                .unwrap(),
             "Offerer mismatch"
         );
         assert_eq!(
-            escrow.claimer, "0x110caeb55493b119f208b73245464ef5d9a1c39e".parse().unwrap(),
+            escrow.claimer,
+            "0x110caeb55493b119f208b73245464ef5d9a1c39e"
+                .parse()
+                .unwrap(),
             "Claimer mismatch"
         );
         assert_eq!(
-            escrow.amount, U256::from(21630000000000_u64),
+            escrow.amount,
+            U256::from(21630000000000_u64),
             "Amount must be equal"
         );
         assert_eq!(
-            escrow.token, Address::zero(),
+            escrow.token,
+            Address::zero(),
             "Destination token is native token"
         );
         assert!(
@@ -616,13 +627,14 @@ mod tests {
         );
 
         let payment_hash = H256::from(escrow.claim_data);
-        let payment_hash_arr: [u8; 32] = payment_hash.try_into().unwrap();
+        let payment_hash_arr: [u8; 32] = payment_hash.into();
 
-        let hex_formatted = format!("{:#x}", payment_hash);
+        let hex_formatted = format!("{payment_hash:#x}");
         assert_eq!(
             hex_formatted,
             "0x7158_21d1_341a_2aad_7f41_daf9_b452_dbed_dd48_f0a7_a05b_5ec4_f62b_67a2_6091_b8a3"
-                .replace('_', "").to_lowercase()
+                .replace('_', "")
+                .to_lowercase()
         );
 
         let preimage = "373cbb0a28b180d9f9171480f7f73df4d554620a73cccb05d6c6ce0af6a8d8a4";
@@ -632,6 +644,9 @@ mod tests {
         sha256.update(&preimage_bytes);
         let hash: [u8; 32] = sha256.finalize().into();
 
-        assert_eq!(hash, payment_hash_arr, "Hash must be equal to given preimage");
+        assert_eq!(
+            hash, payment_hash_arr,
+            "Hash must be equal to given preimage"
+        );
     }
 }
