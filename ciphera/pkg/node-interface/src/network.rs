@@ -11,8 +11,4 @@ pub struct NetworkResponse {
     pub escrow_manager: String,
     /// Node software version (semver)
     pub node_version: String,
-    /// Required Noir (`nargo`) version for the circuits
-    pub circuits_nargo_version: String,
-    /// Required Barretenberg (`bb`) version for the circuits
-    pub circuits_bb_version: String,
 }
