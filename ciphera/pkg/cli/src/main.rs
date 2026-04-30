@@ -640,8 +640,9 @@ async fn handle_depo_ln(
 
         match response.state {
             2 => {
-                // The onramp API returns the settled amount in satoshis; convert to wei
-                // (the on-chain ERC-20 base unit) before minting the note.
+                // `OnrampResponse.amount` is the settled amount in **satoshis** as specified
+                // by the onramp API contract (field name `amount`, unit: sat).
+                // Convert to wei (the on-chain ERC-20 base unit) before minting the note.
                 amount_out_wei = units::sats_to_wei(response.amount);
                 break;
             }
