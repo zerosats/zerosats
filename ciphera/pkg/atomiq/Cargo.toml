@@ -1,0 +1,12 @@
+[package]
+name = "atomiq"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+ethereum-types = { workspace = true }
+web3 = { workspace = true }
+
+[dev-dependencies]
+hex = { workspace = true }
+sha2 = { workspace = true }
