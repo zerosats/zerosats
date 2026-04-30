@@ -1,4 +1,3 @@
-use atomiq::EscrowData;
 use contracts::{Address, ConfirmationType, ERC20Contract, RollupContract};
 use element::Element;
 use eth_util::Eth;
