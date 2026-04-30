@@ -4514,6 +4514,7 @@ dependencies = [
  "dotenvy",
  "either",
  "element",
+ "eth-keystore",
  "eth-util",
  "ethereum-types",
  "expect-test",
