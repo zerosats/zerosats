@@ -18,3 +18,9 @@ pub const NOTE_RCM_EXT: u8 = 0;
 
 /// The key for the noir Utxo circuit
 pub const UTXO_KEY_BYTES: &[u8] = include_bytes!("../../../fixtures/keys/utxo_key");
+
+/// The required Noir (`nargo`) version for the circuits
+pub const CIRCUITS_NARGO_VERSION: &str = "1.0.0-beta.9";
+
+/// The required Barretenberg (`bb`) version for the circuits
+pub const CIRCUITS_BB_VERSION: &str = "1.0.0-nightly.20250723";

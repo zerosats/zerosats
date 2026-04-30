@@ -15,4 +15,7 @@ async fn network_info() {
     assert_eq!(resp.chain_id, 5655);
     assert!(resp.escrow_manager.starts_with("0x"));
     assert_eq!(resp.escrow_manager.len(), 42);
+    assert!(!resp.node_version.is_empty());
+    assert_eq!(resp.circuits_nargo_version, constants::CIRCUITS_NARGO_VERSION);
+    assert_eq!(resp.circuits_bb_version, constants::CIRCUITS_BB_VERSION);
 }

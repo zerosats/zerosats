@@ -54,6 +54,9 @@ pub struct NetworkResp {
     pub rollup_contract: String,
     pub chain_id: u64,
     pub escrow_manager: String,
+    pub node_version: String,
+    pub circuits_nargo_version: String,
+    pub circuits_bb_version: String,
 }
 
 #[derive(Debug, Deserialize)]
