@@ -400,7 +400,7 @@ impl BurnSubstitutor {
             let gas = commit_tx
                 .gas_limit
                 .as_deref()
-                .map(|s| web3::types::U256::from_dec_str(s))
+                .map(web3::types::U256::from_dec_str)
                 .transpose()
                 .context("Failed to parse commitTx.gasLimit")?
                 .unwrap_or_else(|| web3::types::U256::from(1_000_000u64));
@@ -408,14 +408,14 @@ impl BurnSubstitutor {
             let max_fee_per_gas = commit_tx
                 .max_fee_per_gas
                 .as_deref()
-                .map(|s| web3::types::U256::from_dec_str(s))
+                .map(web3::types::U256::from_dec_str)
                 .transpose()
                 .context("Failed to parse commitTx.maxFeePerGas")?;
 
             let max_priority_fee_per_gas = commit_tx
                 .max_priority_fee_per_gas
                 .as_deref()
-                .map(|s| web3::types::U256::from_dec_str(s))
+                .map(web3::types::U256::from_dec_str)
                 .transpose()
                 .context("Failed to parse commitTx.maxPriorityFeePerGas")?;
 
