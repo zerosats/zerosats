@@ -7,7 +7,7 @@ use web3::signing::SecretKey;
 ///
 /// The password is resolved in this order: a file (`--keystore-password-file`),
 /// an environment variable (`--keystore-password-env`), then an interactive
-/// prompt on the controlling TTY.
+/// prompt on the controlling TTY if (`--allow_password_input`) is set true.
 #[derive(Debug, Clone, Default, clap::Args)]
 pub struct KeystoreOpts {
     /// Path to a geth-format encrypted JSON keystore file
