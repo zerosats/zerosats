@@ -15,6 +15,7 @@ opt-level = 1
 opt-level = 3
 
 [workspace.dependencies]
+atomiq = { path = "./pkg/atomiq" }
 barretenberg = { path = "./pkg/barretenberg" }
 block-store = { path = "./pkg/block-store" }
 burn-substitutor = { path = "./pkg/burn-substitutor" }
