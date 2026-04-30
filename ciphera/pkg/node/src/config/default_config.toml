@@ -21,7 +21,9 @@ mode = "validator"
 
 run-prover = false
 
-secret-key = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
+# Validator signing key: pass `--keystore-path` (and `--keystore-password-file`,
+# `--keystore-password-env`, or be prompted on the TTY) to unlock from a
+# geth-format keystore. For tests/dev, `--secret-key` accepts a raw hex key.
 
 rpc-laddr = "0.0.0.0:8091"
 

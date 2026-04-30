@@ -118,7 +118,7 @@ impl Client {
         let base_fee = current_base_fee.max(projected_next_base_fee);
 
         // Extract priority fee from rewards
-        let priority_fee = fee_history
+        let priority_fee = *fee_history
             .reward
             .ok_or_else(|| {
                 web3::Error::InvalidResponse(
@@ -132,8 +132,7 @@ impl Client {
                     "fee_history.reward was empty or lacked a first entry for the requested percentile"
                         .to_string(),
                 )
-            })?
-            .clone();
+            })?;
 
         // Calculate max fee with a strategy-specific buffer on top of the
         // stricter base fee floor so the transaction remains admissible.

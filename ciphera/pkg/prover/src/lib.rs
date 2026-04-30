@@ -224,6 +224,7 @@ impl Prover {
                          will declare dropped if still absent in 15s"
                     );
                 }
+                #[allow(clippy::expect_used)]
                 if std::time::Instant::now() > unknown_deadline.expect("just set above") {
                     return Err(Error::RollupTransactionDropped(tx));
                 }

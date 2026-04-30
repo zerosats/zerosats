@@ -9,6 +9,7 @@ contracts = { workspace = true }
 constants = { workspace = true }
 doomslug = { workspace = true }
 element = { workspace = true }
+eth-util = { workspace = true }
 node-interface = { workspace = true }
 p2p2 = { workspace = true }
 primitives = { workspace = true }
@@ -72,6 +73,7 @@ scopeguard = { workspace = true }
 [dev-dependencies]
 contracts = { workspace = true, features = ["test-helpers"] }
 dotenvy = { workspace = true }
+eth-keystore = { workspace = true }
 reqwest = { workspace = true }
 tempdir = { workspace = true }
 serial_test = { workspace = true }

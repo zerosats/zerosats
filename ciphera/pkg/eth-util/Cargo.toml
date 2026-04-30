@@ -10,3 +10,8 @@ secp256k1 = { workspace = true }
 ethereum-types = { workspace = true }
 thiserror = { workspace = true }
 chrono = { workspace = true }
+clap = { workspace = true }
+eth-keystore = { workspace = true }
+eyre = { workspace = true }
+rpassword = { workspace = true }
+web3 = { workspace = true }

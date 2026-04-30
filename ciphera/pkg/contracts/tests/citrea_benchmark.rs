@@ -545,7 +545,7 @@ async fn provision_load_senders(
         let sender_erc20 = ERC20Contract::load(
             sender_client.clone(),
             &format!("{:#x}", erc20.address()),
-            sender_secret.clone(),
+            sender_secret,
         )
         .await
         .wrap_err_with(|| {
@@ -682,7 +682,7 @@ async fn run_load_profile(
 
             LoadWorkerResult {
                 sender: format!("{:#x}", sender.address),
-                recipient: format!("{:#x}", recipient),
+                recipient: format!("{recipient:#x}"),
                 successes,
                 latencies_ms,
                 failures,
@@ -862,8 +862,8 @@ async fn citrea_benchmark() -> Result<()> {
     let funder_secret = SecretKey::from_str(ACCOUNT_1_SK)?;
     let funder_address = address_for_secret(&funder_secret);
     let client = Client::from_eth_node(&eth_node);
-    let rollup = RollupContract::from_eth_node(&eth_node, funder_secret.clone()).await?;
-    let erc20 = ERC20Contract::from_eth_node(&eth_node, funder_secret.clone()).await?;
+    let rollup = RollupContract::from_eth_node(&eth_node, funder_secret).await?;
+    let erc20 = ERC20Contract::from_eth_node(&eth_node, funder_secret).await?;
 
     let latest_block = client
         .client()
@@ -971,7 +971,7 @@ async fn citrea_benchmark() -> Result<()> {
         run_case("type2_native_transfer_naive_gaslimit", || {
             let client = client.clone();
             let raw_rpc = RawRpcClient::new(rpc_url.clone());
-            let funder_secret = funder_secret.clone();
+            let funder_secret = funder_secret;
             async move {
                 let recipient = address_for_secret(&random_secret_key());
                 let call = type2_transfer_request(funder_address, recipient, U256::from(1_u64));
@@ -1003,7 +1003,7 @@ async fn citrea_benchmark() -> Result<()> {
         run_case("type2_native_transfer_precise_gaslimit", || {
             let client = client.clone();
             let raw_rpc = RawRpcClient::new(rpc_url.clone());
-            let funder_secret = funder_secret.clone();
+            let funder_secret = funder_secret;
             async move {
                 let recipient = address_for_secret(&random_secret_key());
                 let call = type2_transfer_request(funder_address, recipient, U256::from(1_u64));
@@ -1036,7 +1036,7 @@ async fn citrea_benchmark() -> Result<()> {
         run_case("legacy_native_transfer", || {
             let client = client.clone();
             let raw_rpc = RawRpcClient::new(rpc_url.clone());
-            let funder_secret = funder_secret.clone();
+            let funder_secret = funder_secret;
             async move {
                 let recipient = address_for_secret(&random_secret_key());
                 let call = native_transfer_request(funder_address, recipient, U256::from(1_u64));
@@ -1119,7 +1119,7 @@ async fn citrea_benchmark() -> Result<()> {
     let load_sender_pool_setup_ms = load_sender_pool_started.elapsed().as_millis();
 
     for &target_tps in LOAD_SWEEP_TPS {
-        let case_name = format!("native_type2_load_{}_tps", target_tps);
+        let case_name = format!("native_type2_load_{target_tps}_tps");
         cases.push(
             run_case(&case_name, || {
                 let load_senders = load_senders.clone();
@@ -1138,7 +1138,7 @@ async fn citrea_benchmark() -> Result<()> {
     }
 
     for &target_tps in LOAD_SWEEP_TPS {
-        let case_name = format!("erc20_transfer_load_{}_tps", target_tps);
+        let case_name = format!("erc20_transfer_load_{target_tps}_tps");
         cases.push(
             run_case(&case_name, || {
                 let load_senders = load_senders.clone();

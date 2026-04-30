@@ -1,9 +1,11 @@
 use clap::Parser;
 use contracts::{ConfirmationType, RollupContract, U256};
-use eyre::ContextCompat;
+use eth_util::KeystoreOpts;
+use eyre::{ContextCompat, eyre};
 use rpc::tracing::{LogFormat, LogLevel};
 use serde::{Deserialize, Serialize};
-use std::{str::FromStr, time::Duration};
+use std::str::FromStr;
+use std::time::Duration;
 
 #[derive(Parser, Debug, Serialize, Deserialize, Clone)]
 #[clap(name = "Polybase Burn Subsitutor")]
@@ -36,12 +38,12 @@ pub struct Config {
     )]
     erc20_contract_addr: String,
 
-    #[arg(
-        long,
-        env = "SECRET_KEY",
-        default_value = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
-    )]
-    secret_key: String,
+    #[command(flatten)]
+    #[serde(skip)]
+    keystore: KeystoreOpts,
+
+    #[arg(long, env = "SECRET_KEY")]
+    secret_key: Option<String>,
 
     #[arg(long, env = "EVM_RPC_URL", default_value = "http://localhost:8545")]
     evm_rpc_url: String,
@@ -79,12 +81,17 @@ async fn main() -> Result<(), eyre::Error> {
         std::env::var("ENV_NAME").unwrap_or_else(|_| "dev".to_owned()),
     )?;
 
-    let secret_key = contracts::SecretKey::from_str(
-        config
-            .secret_key
-            .strip_prefix("0x")
-            .context("Secret key must start with 0x")?,
-    )?;
+    let secret_key = if config.keystore.is_set() {
+        config.keystore.unlock()?
+    } else if let Some(key_arg) = config.secret_key {
+        contracts::SecretKey::from_str(
+            key_arg
+                .strip_prefix("0x")
+                .context("Secret key must start with 0x")?,
+        )?
+    } else {
+        return Err(eyre!("no signing key or keystore path provided"));
+    };
 
     let client = contracts::Client::new(&config.evm_rpc_url, config.minimum_gas_price_gwei);
     let rollup_contract = RollupContract::load(
@@ -105,16 +112,40 @@ async fn main() -> Result<(), eyre::Error> {
         .await?
         != U256::MAX
     {
-        let approve_txn = erc20_contract
-            .approve_max(rollup_contract.address())
-            .await?;
-        client
-            .wait_for_confirm(
-                approve_txn,
-                Duration::from_secs(1),
-                ConfirmationType::Latest,
-            )
-            .await?;
+        const MAX_APPROVE_RETRIES: u32 = 10;
+        let mut retries = 0u32;
+        loop {
+            match erc20_contract.approve_max(rollup_contract.address()).await {
+                Ok(approve_txn) => {
+                    client
+                        .wait_for_confirm(
+                            approve_txn,
+                            Duration::from_secs(1),
+                            ConfirmationType::Latest,
+                        )
+                        .await?;
+                    break;
+                }
+                Err(e) => {
+                    let is_transient = e.to_string().to_lowercase().contains("insufficient funds");
+                    retries += 1;
+                    if !is_transient || retries >= MAX_APPROVE_RETRIES {
+                        return Err(eyre!(
+                            "Failed to approve ERC20 spending after {} attempt(s): {}",
+                            retries,
+                            e
+                        ));
+                    }
+                    tracing::error!(
+                        wallet = %format!("{:#x}", wallet_address),
+                        error = %e,
+                        attempt = retries,
+                        "Failed to approve ERC20 spending — wallet likely has insufficient funds for gas. Retrying in 10s",
+                    );
+                    tokio::time::sleep(Duration::from_secs(10)).await;
+                }
+            }
+        }
     }
 
     let mut substitutor = burn_substitutor::BurnSubstitutor::new(
@@ -126,7 +157,10 @@ async fn main() -> Result<(), eyre::Error> {
         wallet_address,
     );
 
-    tracing::info!("Starting burn substitutor with wallet {:#x}", wallet_address);
+    tracing::info!(
+        "Starting burn substitutor with wallet {:#x}",
+        wallet_address
+    );
 
     loop {
         let substitutions = substitutor.tick().await?;

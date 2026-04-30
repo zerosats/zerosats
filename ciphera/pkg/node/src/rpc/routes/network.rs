@@ -12,5 +12,6 @@ pub async fn get_network_info(state: web::Data<State>) -> HttpResult<web::Json<N
         rollup_contract: state.node.rollup_contract(),
         chain_id: state.node.chain_id(),
         escrow_manager,
+        node_version: env!("CARGO_PKG_VERSION").to_string(),
     }))
 }

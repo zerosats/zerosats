@@ -42,7 +42,7 @@ pub async fn run_prover(config: &Config, node: Arc<NodeShared>) -> Result<()> {
     };
 
     let secret_key =
-        web3::signing::SecretKey::from_slice(&config.secret_key.secret_key().secret_bytes()[..])
+        web3::signing::SecretKey::from_slice(&config.signer().secret_key().secret_bytes()[..])
             .unwrap();
 
     let contracts_client =
@@ -408,6 +408,7 @@ fn is_retryable_rollup_error(err: &prover::Error) -> bool {
 }
 
 fn is_transport_rollup_error(err: &prover::Error) -> bool {
+    #[allow(clippy::match_like_matches_macro)]
     match err {
         prover::Error::Web3(web3::Error::Transport(_)) => true,
         prover::Error::Web3Contract(web3::contract::Error::Api(web3::Error::Transport(_))) => true,

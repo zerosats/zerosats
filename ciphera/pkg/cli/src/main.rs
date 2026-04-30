@@ -1,10 +1,11 @@
 use clap::{Parser, Subcommand};
-use cli::address::citrea_ticker_from_contract;
-use cli::address::decode_address;
-use cli::note_url::{decode_url, CipheraURL};
-use cli::units;
+
 use cli::NodeClient;
 use cli::Wallet;
+use cli::address::citrea_ticker_from_contract;
+use cli::address::decode_address;
+use cli::note_url::{CipheraURL, decode_url};
+use cli::units;
 
 use color_eyre::Result;
 use tracing::{debug, error};
@@ -13,7 +14,7 @@ use web3::types::{H160, H256, U256};
 use barretenberg::Prove;
 use contracts::util::{convert_element_to_h256, convert_h160_to_element};
 use hash::hash_merge;
-use rand::{rngs::OsRng, RngCore};
+use rand::{RngCore, rngs::OsRng};
 use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::Path;
@@ -551,7 +552,7 @@ async fn handle_depo_ln(
 
     // 4. Init swap: GET /onramp/{amount}/{payment_hash}
     let http = reqwest::Client::new();
-    let init_url = format!("{}/onramp/{}/{}", onramp_uri, amount_sat, payment_hash_hex);
+    let init_url = format!("{onramp_uri}/onramp/{amount_sat}/{payment_hash_hex}");
     let init_resp = http
         .get(&init_url)
         .send()
@@ -600,7 +601,7 @@ async fn handle_depo_ln(
     const POLL_INTERVAL_SECS: u64 = 4;
 
     // 7. Poll for payment
-    let status_url = format!("{}/onramp/{}", onramp_uri, swap_id);
+    let status_url = format!("{onramp_uri}/onramp/{swap_id}");
 
     let amount_out_wei;
     let mut attempts = 0u32;
@@ -719,6 +720,7 @@ async fn handle_depo_ln(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn handle_withdraw_ln(
     name: &str,
     host: &str,
@@ -730,20 +732,20 @@ async fn handle_withdraw_ln(
     address: &str,
     offramp_uri: &str,
 ) -> Result<()> {
-/*    let client = NodeClient::builder()
-        .name(name)
-        .host(host)
-        .port(port)
-        .timeout_secs(timeout_secs)
-        .build(chain, false)?;
+    /*    let client = NodeClient::builder()
+            .name(name)
+            .host(host)
+            .port(port)
+            .timeout_secs(timeout_secs)
+            .build(chain, false)?;
 
-    let b = client.get_wallet().balance;
-    TODO: balance check before everything even starts
-*/
+        let b = client.get_wallet().balance;
+        TODO: balance check before everything even starts
+    */
     // Step 1 — GET /offramp/{lnInvoice}/{substitutorAddress}
     // Returns the swap quote: swap ID and the cBTC amount the user must burn.
     let http = reqwest::Client::new();
-    let quote_url = format!("{}/offramp/{}/{}", offramp_uri, invoice, substitutor);
+    let quote_url = format!("{offramp_uri}/offramp/{invoice}/{substitutor}");
 
     println!("\n⚡ Requesting offramp quote...");
 
@@ -838,7 +840,7 @@ async fn handle_withdraw_ln(
     const MAX_POLL_ATTEMPTS: u32 = 150; // ~10 minutes at 4 s intervals
     const POLL_INTERVAL_SECS: u64 = 4;
 
-    let status_url = format!("{}/offramp/{}", offramp_uri, swap_id);
+    let status_url = format!("{offramp_uri}/offramp/{swap_id}");
     let mut attempts = 0u32;
     loop {
         tokio::time::sleep(std::time::Duration::from_secs(POLL_INTERVAL_SECS)).await;
@@ -894,6 +896,7 @@ async fn handle_withdraw_ln(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn handle_mint(
     name: &str,
     host: &str,
@@ -951,6 +954,7 @@ async fn handle_mint(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn handle_burn(
     name: &str,
     host: &str,
@@ -960,7 +964,7 @@ async fn handle_burn(
     address: &str,
     amount_wei: u64,
     ticker: &str,
-    natively_substitute: bool
+    natively_substitute: bool,
 ) -> Result<(), AppError> {
     // Build client with fluent API
     let mut client = NodeClient::builder()
@@ -992,8 +996,9 @@ async fn handle_burn(
         }
     }
 
-    let (wallet_with_burner_note, _) =
-        client.get_wallet().prepare_add_to_avail(burner_note.clone())?;
+    let (wallet_with_burner_note, _) = client
+        .get_wallet()
+        .prepare_add_to_avail(burner_note.clone())?;
     wallet_with_burner_note.save()?;
     client.replace_wallet(wallet_with_burner_note);
 
@@ -1002,9 +1007,10 @@ async fn handle_burn(
         Err(e) => return Err(AppError::InvalidAddress(e.to_string())),
     };
 
-    let (wallet_after_burn, burner_utxo) = client
-        .get_wallet()
-        .prepare_burn(&burner_note, &evm_address, natively_substitute)?;
+    let (wallet_after_burn, burner_utxo) =
+        client
+            .get_wallet()
+            .prepare_burn(&burner_note, &evm_address, natively_substitute)?;
 
     let snark = burner_utxo.prove().unwrap();
 
@@ -1053,23 +1059,15 @@ async fn handle_rollup(geth_rpc: &str, chain: u64, rollup: &str) -> Result<()> {
     // Enumerate zkVerifierKeys array and look up each entry in the zkVerifiers mapping
     println!("\nZK Verifiers\n");
     let mut index = 0u64;
-    loop {
-        match rollup.zk_verifier_keys(U256::from(index)).await {
-            Ok(key_hash) => {
-                match rollup.zk_verifiers(key_hash).await {
-                    Ok((address, circuit_id, enabled)) => {
-                        println!(
-                            "\t[{index}]\n\tkey={key_hash:#x}\n\taddress={address:#x}\n\t\
-                            circuit_id={circuit_id}  enabled={enabled}"
-                        );
-                    }
-                    Err(_) => {}
-                }
-                index += 1;
-            }
-            Err(_) => break,
+    while let Ok(key_hash) = rollup.zk_verifier_keys(U256::from(index)).await {
+        if let Ok((address, circuit_id, enabled)) = rollup.zk_verifiers(key_hash).await {
+            println!(
+                "\t[{index}]\n\tkey={key_hash:#x}\n\taddress={address:#x}\n\t\
+                        circuit_id={circuit_id}  enabled={enabled}"
+            );
         }
-    }
+        index += 1;
+    };
     if index == 0 {
         println!("\tNo ZK verifiers found.");
     }
@@ -1082,8 +1080,8 @@ async fn handle_rollup(geth_rpc: &str, chain: u64, rollup: &str) -> Result<()> {
         println!("\tNo mints found.");
     } else {
         println!(
-            "\t{:<66}  {:>20}  {:<66}  {}",
-            "Mint Hash", "Value", "Note Kind", "Block"
+            "\t{:<66}  {:>20}  {:<66}  Block",
+            "Mint Hash", "Value", "Note Kind"
         );
         for event in &mint_events {
             println!(
@@ -1110,8 +1108,8 @@ async fn handle_mints(geth_rpc: &str, chain: u64, rollup: &str) -> Result<()> {
         println!("\tNo mints found.");
     } else {
         println!(
-            "\t{:<66}  {:>20}  {:<66}  {}",
-            "Mint Hash", "Value", "Note Kind", "Block"
+            "\t{:<66}  {:>20}  {:<66}  Block",
+            "Mint Hash", "Value", "Note Kind"
         );
         println!("\t{}", "-".repeat(160));
         for event in &events {
@@ -1157,14 +1155,7 @@ async fn main() -> Result<()> {
             handle_create(cli.chain, &cli.name).await?;
         }
         Commands::Sync {} => {
-            handle_sync(
-                cli.chain,
-                &cli.name,
-                &cli.host,
-                cli.port,
-                cli.timeout,
-            )
-            .await?;
+            handle_sync(cli.chain, &cli.name, &cli.host, cli.port, cli.timeout).await?;
         }
         Commands::Address { amount_sat, ticker } => {
             let ticker_normalized = ticker.to_uppercase();
@@ -1251,7 +1242,7 @@ async fn main() -> Result<()> {
                 &address,
                 amount_wei,
                 &ticker_normalized,
-                true
+                true,
             )
             .await?;
         }
