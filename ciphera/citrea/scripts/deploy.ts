@@ -29,8 +29,8 @@ const PROXY_ADMIN_ABI = parseAbi([
   "function transferOwnership(address newOwner)",
 ]);
 
-const ONE_DAY_SECONDS = 86_400n;
-const SEVEN_DAYS_SECONDS = 7n * ONE_DAY_SECONDS;
+const ONE_HOUR_SECONDS = 3_600n;
+const SEVEN_DAYS_SECONDS = 7n * 24n * ONE_HOUR_SECONDS;
 const DEFAULT_PER_MINT_CAP_WEI = 1_000_000_000_000_000n; // 0.001 token
 const DEFAULT_GLOBAL_TVL_CAP_WEI = 10_000_000_000_000_000_000n; // 10 token
 const SATS_TO_WEI = 10_000_000_000n; // 18-dec BTC wrappers
@@ -163,7 +163,7 @@ async function main() {
     (process.env.V2_FEE_SINK as `0x${string}` | undefined) ?? ownerAddress;
   const v2TimelockMinDelay = parseBigIntEnv(
     "V2_TIMELOCK_MIN_DELAY_SECONDS",
-    ONE_DAY_SECONDS,
+    ONE_HOUR_SECONDS,
   );
   const v2TimelockProposers = parseAddressListEnv(
     "V2_TIMELOCK_PROPOSERS",

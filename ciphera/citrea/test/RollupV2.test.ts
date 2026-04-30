@@ -38,7 +38,7 @@ const VK_HASH =
 // Seven days in seconds — the contract's enforced floor for openProvingDelay.
 const SEVEN_DAYS = 604800n;
 // One day in seconds — the contract's floor for the timelock minDelay.
-const ONE_DAY = 86400n;
+const ONE_HOUR = 3_600n;
 const BURN_FEE_300_SATS = 3_000_000_000_000n;
 const BURN_FEE_MAX = 30_000_000_000_000n;
 const ZERO_BYTES32 =
@@ -120,7 +120,7 @@ async function deployRollupV2() {
     SEVEN_DAYS,
     BURN_FEE_300_SATS,
     sink.account.address,
-    ONE_DAY,
+    ONE_HOUR,
     [deployer.account.address] as readonly `0x${string}`[],
     [deployer.account.address] as readonly `0x${string}`[],
   ]);
@@ -238,7 +238,7 @@ describe("RollupV1 V2 upgrade", () => {
           6n * 86400n,
           2000n,
           sink.account.address,
-          ONE_DAY,
+          ONE_HOUR,
           [deployer.account.address] as readonly `0x${string}`[],
           [deployer.account.address] as readonly `0x${string}`[],
         ]),
@@ -297,7 +297,7 @@ describe("RollupV1 V2 upgrade", () => {
             SEVEN_DAYS,
             BURN_FEE_MAX + 1n,
             sink.account.address,
-            ONE_DAY,
+            ONE_HOUR,
             [deployer.account.address] as readonly `0x${string}`[],
             [deployer.account.address] as readonly `0x${string}`[],
           ],
@@ -346,7 +346,7 @@ describe("RollupV1 V2 upgrade", () => {
             SEVEN_DAYS,
             2000n,
             attacker.account.address, // attacker tries to seize fee sink
-            ONE_DAY,
+            ONE_HOUR,
             [attacker.account.address] as readonly `0x${string}`[],
             [attacker.account.address] as readonly `0x${string}`[],
           ],
@@ -362,7 +362,7 @@ describe("RollupV1 V2 upgrade", () => {
           SEVEN_DAYS,
           2000n,
           sink.account.address,
-          ONE_DAY,
+          ONE_HOUR,
           [deployer.account.address] as readonly `0x${string}`[],
           [deployer.account.address] as readonly `0x${string}`[],
         ],
@@ -441,7 +441,7 @@ describe("RollupV1 V2 upgrade", () => {
           SEVEN_DAYS,
           0n, // zero fee so no fee-path interference
           sink.account.address,
-          ONE_DAY,
+          ONE_HOUR,
           [deployer.account.address] as readonly `0x${string}`[],
           [deployer.account.address] as readonly `0x${string}`[],
         ],
@@ -552,7 +552,7 @@ describe("RollupV1 V2 upgrade", () => {
           SEVEN_DAYS,
           0n,
           sink.account.address,
-          ONE_DAY,
+          ONE_HOUR,
           [deployer.account.address] as readonly `0x${string}`[],
           [deployer.account.address] as readonly `0x${string}`[],
         ],
@@ -668,7 +668,7 @@ describe("RollupV1 V2 upgrade", () => {
           SEVEN_DAYS,
           FEE,
           sink.account.address,
-          ONE_DAY,
+          ONE_HOUR,
           [deployer.account.address] as readonly `0x${string}`[],
           [deployer.account.address] as readonly `0x${string}`[],
         ],
@@ -888,7 +888,7 @@ describe("RollupV1 V2 upgrade", () => {
               SEVEN_DAYS,
               2000n,
               sink.account.address,
-              ONE_DAY,
+              ONE_HOUR,
               [deployer.account.address] as readonly `0x${string}`[],
               [] as readonly `0x${string}`[],
             ],
@@ -908,7 +908,7 @@ describe("RollupV1 V2 upgrade", () => {
               SEVEN_DAYS,
               2000n,
               sink.account.address,
-              ONE_DAY,
+              ONE_HOUR,
               [] as readonly `0x${string}`[],
               [deployer.account.address] as readonly `0x${string}`[],
             ],
@@ -928,7 +928,7 @@ describe("RollupV1 V2 upgrade", () => {
               SEVEN_DAYS,
               2000n,
               sink.account.address,
-              ONE_DAY,
+              ONE_HOUR,
               [ZERO_ADDR] as readonly `0x${string}`[],
               [deployer.account.address] as readonly `0x${string}`[],
             ],
@@ -947,7 +947,7 @@ describe("RollupV1 V2 upgrade", () => {
             SEVEN_DAYS,
             2000n,
             sink.account.address,
-            ONE_DAY,
+            ONE_HOUR,
             [deployer.account.address] as readonly `0x${string}`[],
             [ZERO_ADDR] as readonly `0x${string}`[],
           ],
@@ -1034,7 +1034,7 @@ describe("RollupV1 V2 upgrade", () => {
           SEVEN_DAYS,
           20_000_000_000_000n,
           sink.account.address,
-          ONE_DAY,
+          ONE_HOUR,
           [deployer.account.address] as readonly `0x${string}`[],
           [deployer.account.address] as readonly `0x${string}`[],
         ],
@@ -1071,7 +1071,7 @@ describe("RollupV1 V2 upgrade", () => {
         client: { public: publicClient, wallet: deployer },
       });
       const minDelay = await timelock.read.getMinDelay();
-      assert.equal(minDelay, ONE_DAY);
+      assert.equal(minDelay, ONE_HOUR);
 
       const upgradeCalldata = encodeFunctionData({
         abi: PROXY_ADMIN_ABI,
@@ -1087,7 +1087,7 @@ describe("RollupV1 V2 upgrade", () => {
         upgradeCalldata,
         ZERO_BYTES32,
         salt,
-        ONE_DAY,
+        ONE_HOUR,
       ]);
       await assert.rejects(
         timelock.write.execute([
@@ -1099,7 +1099,7 @@ describe("RollupV1 V2 upgrade", () => {
         ]),
       );
 
-      await networkHelpers.time.increase(Number(ONE_DAY) + 1);
+      await networkHelpers.time.increase(Number(ONE_HOUR) + 1);
       await networkHelpers.mine(1);
 
       await timelock.write.execute([
