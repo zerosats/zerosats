@@ -233,7 +233,7 @@ contract RollupV1 is
      * @param burnFee_ Flat fee per burn (wei). Zero disables fee.
      * @param feeSink_ Destination for collected fees.
      * @param timelockMinDelay_ Minimum delay the deployed timelock
-     *        enforces for every scheduled operation. Must be >= 1 day.
+     *        enforces for every scheduled operation. Must be >= 1 hour.
      * @param timelockProposers_ Addresses allowed to schedule ops.
      * @param timelockExecutors_ Addresses allowed to execute scheduled
      *        ops. Use `[address(0)]` for "anyone can execute once
