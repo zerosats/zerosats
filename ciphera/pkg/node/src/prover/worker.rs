@@ -408,6 +408,7 @@ fn is_retryable_rollup_error(err: &prover::Error) -> bool {
 }
 
 fn is_transport_rollup_error(err: &prover::Error) -> bool {
+    #[allow(clippy::match_like_matches_macro)]
     match err {
         prover::Error::Web3(web3::Error::Transport(_)) => true,
         prover::Error::Web3Contract(web3::contract::Error::Api(web3::Error::Transport(_))) => true,

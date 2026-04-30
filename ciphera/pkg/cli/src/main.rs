@@ -709,6 +709,7 @@ async fn handle_depo_ln(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn handle_withdraw_ln(
     name: &str,
     host: &str,
@@ -877,6 +878,7 @@ async fn handle_withdraw_ln(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn handle_mint(
     name: &str,
     host: &str,
@@ -934,6 +936,7 @@ async fn handle_mint(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn handle_burn(
     name: &str,
     host: &str,
@@ -1038,20 +1041,15 @@ async fn handle_rollup(geth_rpc: &str, chain: u64, rollup: &str) -> Result<()> {
     // Enumerate zkVerifierKeys array and look up each entry in the zkVerifiers mapping
     println!("\nZK Verifiers\n");
     let mut index = 0u64;
-    loop {
-        match rollup.zk_verifier_keys(U256::from(index)).await {
-            Ok(key_hash) => {
-                if let Ok((address, circuit_id, enabled)) = rollup.zk_verifiers(key_hash).await {
-                    println!(
-                        "\t[{index}]\n\tkey={key_hash:#x}\n\taddress={address:#x}\n\t\
+    while let Ok(key_hash) = rollup.zk_verifier_keys(U256::from(index)).await {
+        if let Ok((address, circuit_id, enabled)) = rollup.zk_verifiers(key_hash).await {
+            println!(
+                "\t[{index}]\n\tkey={key_hash:#x}\n\taddress={address:#x}\n\t\
                         circuit_id={circuit_id}  enabled={enabled}"
-                    );
-                }
-                index += 1;
-            }
-            Err(_) => break,
+            );
         }
-    }
+        index += 1;
+    };
     if index == 0 {
         println!("\tNo ZK verifiers found.");
     }

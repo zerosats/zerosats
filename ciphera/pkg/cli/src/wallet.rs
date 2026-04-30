@@ -1674,7 +1674,7 @@ mod wallet_tests {
         let mut wallet = Wallet::random(5115, Some("test".to_string()));
         add_pending_note(&mut wallet, 1000);
 
-        wallet.sync(&vec![]).unwrap();
+        wallet.sync(&[]).unwrap();
 
         assert_eq!(wallet.pending["WCBTC"].len(), 1);
         assert_eq!(wallet.balance, 0);
