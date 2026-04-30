@@ -1,9 +1,11 @@
 use clap::{Parser, Subcommand};
+
 use cli::NodeClient;
 use cli::Wallet;
 use cli::address::citrea_ticker_from_contract;
 use cli::address::decode_address;
 use cli::note_url::{CipheraURL, decode_url};
+use cli::units;
 
 use color_eyre::Result;
 use tracing::{debug, error};
@@ -63,8 +65,9 @@ enum Commands {
     /// Connect to a Ciphera node and check its health
     Sync {},
     Address {
+        /// Amount in satoshis
         #[arg(required = true, short, long)]
-        amount: u64,
+        amount_sat: u64,
 
         #[arg(short, long, default_value = "WCBTC")]
         ticker: String,
@@ -76,8 +79,9 @@ enum Commands {
         #[arg(required = true, long, short)]
         secret: String,
 
+        /// Amount in satoshis
         #[arg(required = true, short, long)]
-        amount: u64,
+        amount_sat: u64,
 
         #[arg(short, long, default_value = "WCBTC")]
         ticker: String,
@@ -89,16 +93,17 @@ enum Commands {
         #[arg(required = true, long)]
         address: String,
 
+        /// Amount in satoshis
         #[arg(required = true, short, long)]
-        amount: u64,
+        amount_sat: u64,
 
         #[arg(short, long, default_value = "WCBTC")]
         ticker: String,
     },
     Spend {
-        /// Request amount to spend
+        /// Amount in satoshis
         #[arg(required = true, short, long)]
-        amount: u64,
+        amount_sat: u64,
 
         #[arg(short, long, default_value = "WCBTC")]
         ticker: String,
@@ -199,7 +204,7 @@ async fn handle_create(chain: u64, name: &str) -> Result<(), AppError> {
     println!("   Name: {name}");
     println!("   File: {wallet_file}");
     println!("   Private Key: {}", wallet.pk);
-    println!("   Balance: {} sats", wallet.balance);
+    println!("   Balance: {} sats", units::wei_to_sats(wallet.balance));
 
     println!("\n⚠️  IMPORTANT: Keep your private key safe!");
     println!("   Your private key is stored in {wallet_file}");
@@ -282,14 +287,14 @@ async fn handle_sync(
     Ok(())
 }
 
-async fn handle_address(name: &str, amount: u64, ticker: &str) -> Result<()> {
+async fn handle_address(name: &str, amount_wei: u64, ticker: &str) -> Result<()> {
     let wallet = Wallet::load(name)?;
     let b = wallet.balance;
-    let (wallet, a) = wallet.prepare_get_address(amount, ticker);
+    let (wallet, a) = wallet.prepare_get_address(amount_wei, ticker);
     wallet.save()?;
 
     println!("\nWallet {name} has been found:");
-    println!("\tBalance: {b:?}");
+    println!("\tBalance: {} sats", units::wei_to_sats(b));
     println!("\tAddress: {a:?}");
 
     let encoded = a.encode_address();
@@ -305,7 +310,7 @@ async fn handle_note_spend(
     host: &str,
     port: u16,
     timeout_secs: u64,
-    amount: u64,
+    amount_wei: u64,
     ticker: &str,
 ) -> Result<()> {
     // Build client with fluent API
@@ -318,7 +323,7 @@ async fn handle_note_spend(
 
     // Prepare transfer. A case, when wallet already has exactly matching note, will be ignored
     let (wallet_with_transfer_note, transfer_note) =
-        client.get_wallet().prepare_receive_note(amount, ticker);
+        client.get_wallet().prepare_receive_note(amount_wei, ticker);
     let (prepared_wallet, transfer_utxo) =
         wallet_with_transfer_note.prepare_spend_to(&transfer_note.note)?;
     let snark = transfer_utxo.prove().unwrap();
@@ -344,7 +349,7 @@ async fn handle_note_spend(
             println!("\nEncoded: {encoded}");
 
             let b = client.get_wallet().balance;
-            println!("\nBalance {b} {ticker}");
+            println!("\nBalance {} sats {ticker}", units::wei_to_sats(b));
             Ok(())
         }
         Err(e) => {
@@ -400,7 +405,7 @@ async fn handle_spend_to(
             println!("\nSaved {recipient_note:?}");
 
             let b = client.get_wallet().balance;
-            println!("\nBalance {b} {ticker}");
+            println!("\nBalance {} sats {ticker}", units::wei_to_sats(b));
             Ok(())
         }
         Err(e) => {
@@ -495,7 +500,7 @@ async fn handle_receive(
             client.replace_wallet(prepared_wallet);
 
             let b = client.get_wallet().balance;
-            println!("\nBalance {b} {ticker}");
+            println!("\nBalance {} sats {ticker}", units::wei_to_sats(b));
             Ok(())
         }
         Err(e) => {
@@ -590,8 +595,6 @@ async fn handle_depo_ln(
         state_description: String,
     }
 
-    // Conversion factor: 1 sat = 10^10 token base units (WCBTC has 10 decimals).
-    const SATS_TO_TOKEN_UNITS: u64 = 10_000_000_000;
     // Maximum number of status-poll attempts before giving up (~10 minutes).
     const MAX_POLL_ATTEMPTS: u32 = 150;
     // Seconds between each status poll.
@@ -600,7 +603,7 @@ async fn handle_depo_ln(
     // 7. Poll for payment
     let status_url = format!("{onramp_uri}/onramp/{swap_id}");
 
-    let amount_out;
+    let amount_out_wei;
     let mut attempts = 0u32;
     loop {
         tokio::time::sleep(std::time::Duration::from_secs(POLL_INTERVAL_SECS)).await;
@@ -638,7 +641,10 @@ async fn handle_depo_ln(
 
         match response.state {
             2 => {
-                amount_out = response.amount.saturating_mul(SATS_TO_TOKEN_UNITS);
+                // `OnrampResponse.amount` is the settled amount in **satoshis** as specified
+                // by the onramp API contract (field name `amount`, unit: sat).
+                // Convert to wei (the on-chain ERC-20 base unit) before minting the note.
+                amount_out_wei = units::sats_to_wei(response.amount);
                 break;
             }
             // States > 2 are terminal failure states (e.g. refunded, expired, failed).
@@ -653,7 +659,7 @@ async fn handle_depo_ln(
         }
     }
 
-    let (prepared_wallet, utxo) = client.get_wallet().prepare_mint(amount_out, "WCBTC")?;
+    let (prepared_wallet, utxo) = client.get_wallet().prepare_mint(amount_out_wei, "WCBTC")?;
 
     let note = &utxo.output_notes[0];
     let mint_hash = hash_merge([note.psi, Note::padding_note().psi]);
@@ -662,7 +668,12 @@ async fn handle_depo_ln(
     let mint_hash_h256 = convert_element_to_h256(&mint_hash);
     let note_kind_h256 = convert_element_to_h256(&note_kind);
 
-    println!("Note amount: {}, {:x}", amount_out, note.value);
+    println!(
+        "Note amount: {} sats ({} wei), {:x}",
+        units::wei_to_sats(amount_out_wei),
+        amount_out_wei,
+        note.value,
+    );
 
     println!("Generating zero-knowledge proof...");
     let snark = utxo.prove().unwrap();
@@ -699,7 +710,7 @@ async fn handle_depo_ln(
             client.replace_wallet(prepared_wallet);
 
             let b = client.get_wallet().balance;
-            println!("\nBalance {b} WCBTC");
+            println!("\nBalance {} sats WCBTC", units::wei_to_sats(b));
             Ok(())
         }
         Err(e) => {
@@ -764,8 +775,8 @@ async fn handle_withdraw_ln(
         .ok_or_else(|| color_eyre::eyre::eyre!("Missing 'id' in offramp quote"))?
         .to_string();
 
-    // inputAmountWei is the burn amount in ERC-20 wei (cBTC has 18 decimals).
-    // Convert to satoshis: 1 sat = 1e10 wei  (1 BTC = 1e8 sats = 1e18 wei).
+    // inputAmountWei is the burn amount in ERC-20 wei (WCBTC has 18 decimals).
+    // 1 sat = 10^10 wei  (1 BTC = 10^8 sats = 10^18 wei).
     // Use u128 for the intermediate wei value: amounts above ~18 BTC overflow u64.
     // The API may return this field as a decimal string or as a JSON number.
     let input_amount_wei: u128 = {
@@ -782,18 +793,25 @@ async fn handle_withdraw_ln(
         }
     };
 
-    let input_amount: u64 = u64::try_from(input_amount_wei)
-        .map_err(|_| color_eyre::eyre::eyre!("Converted Wei amount exceeds u64 maximum"))?;
+    let input_amount_wei_u64: u64 = u64::try_from(input_amount_wei)
+        .map_err(|_| color_eyre::eyre::eyre!("inputAmountWei exceeds u64 maximum"))?;
 
     let quote_expiry = quote["quoteExpiry"].as_u64().unwrap_or(0);
 
     println!("\n✅ Offramp quote received!");
     println!("   Swap ID:      {swap_id}");
-    println!("   Burn amount:  {input_amount} wei");
+    println!(
+        "   Burn amount:  {} sats ({} wei)",
+        units::wei_to_sats_u128(input_amount_wei),
+        input_amount_wei,
+    );
     println!("   Quote expiry: {quote_expiry} (unix timestamp)");
-    println!("\n   Burning {input_amount} cBTC to substitutor {substitutor}...");
+    println!(
+        "\n   Burning {} sats to substitutor {substitutor}...",
+        units::wei_to_sats(input_amount_wei_u64),
+    );
 
-    // Step 2 — Create a burn note for inputAmount and submit it to the Ciphera node.
+    // Step 2 — Create a burn note for inputAmountWei and submit it to the Ciphera node.
     // The user address is the burn target for refunds. The offramp service claims the burned
     // cBTC on the EVM side and settles the Lightning invoice.
     handle_burn(
@@ -803,7 +821,7 @@ async fn handle_withdraw_ln(
         timeout_secs,
         chain,
         address, // refund address
-        input_amount,
+        input_amount_wei_u64,
         "WCBTC",
         false,
     )
@@ -888,7 +906,7 @@ async fn handle_mint(
     chain: u64,
     rollup: &str,
     secret: &str,
-    amount: u64,
+    amount_wei: u64,
     ticker: &str,
     only_snark: bool,
 ) -> Result<()> {
@@ -900,7 +918,7 @@ async fn handle_mint(
         .timeout_secs(timeout_secs)
         .build(chain, false)?;
 
-    let (prepared_wallet, utxo) = client.get_wallet().prepare_mint(amount, ticker)?;
+    let (prepared_wallet, utxo) = client.get_wallet().prepare_mint(amount_wei, ticker)?;
     let snark = utxo.prove().unwrap();
 
     if !only_snark {
@@ -926,7 +944,7 @@ async fn handle_mint(
             client.replace_wallet(prepared_wallet);
 
             let b = client.get_wallet().balance;
-            println!("\nBalance {b} {ticker}");
+            println!("\nBalance {} sats {ticker}", units::wei_to_sats(b));
             Ok(())
         }
         Err(e) => {
@@ -944,7 +962,7 @@ async fn handle_burn(
     timeout_secs: u64,
     chain: u64,
     address: &str,
-    amount: u64,
+    amount_wei: u64,
     ticker: &str,
     natively_substitute: bool,
 ) -> Result<(), AppError> {
@@ -958,7 +976,7 @@ async fn handle_burn(
 
     // Prepare burn
     let (wallet_with_burner_key, burner_note) =
-        client.get_wallet().prepare_receive_note(amount, ticker);
+        client.get_wallet().prepare_receive_note(amount_wei, ticker);
     let (wallet_after_burner_transfer, burner_utxo) =
         wallet_with_burner_key.prepare_spend_to(&burner_note.note)?;
     let snark = burner_utxo.prove().unwrap();
@@ -1139,19 +1157,21 @@ async fn main() -> Result<()> {
         Commands::Sync {} => {
             handle_sync(cli.chain, &cli.name, &cli.host, cli.port, cli.timeout).await?;
         }
-        Commands::Address { amount, ticker } => {
+        Commands::Address { amount_sat, ticker } => {
             let ticker_normalized = ticker.to_uppercase();
-            handle_address(&cli.name, amount, &ticker_normalized).await?;
+            let amount_wei = units::sats_to_wei(amount_sat);
+            handle_address(&cli.name, amount_wei, &ticker_normalized).await?;
         }
-        Commands::Spend { amount, ticker } => {
+        Commands::Spend { amount_sat, ticker } => {
             let ticker_normalized = ticker.to_uppercase();
+            let amount_wei = units::sats_to_wei(amount_sat);
             handle_note_spend(
                 cli.chain,
                 &cli.name,
                 &cli.host,
                 cli.port,
                 cli.timeout,
-                amount,
+                amount_wei,
                 &ticker_normalized,
             )
             .await?;
@@ -1185,11 +1205,12 @@ async fn main() -> Result<()> {
         Commands::Mint {
             geth_rpc,
             secret,
-            amount,
+            amount_sat,
             ticker,
             only_snark,
         } => {
             let ticker_normalized = ticker.to_uppercase();
+            let amount_wei = units::sats_to_wei(amount_sat);
             handle_mint(
                 &cli.name,
                 &cli.host,
@@ -1199,7 +1220,7 @@ async fn main() -> Result<()> {
                 cli.chain,
                 &cli.rollup,
                 &secret,
-                amount,
+                amount_wei,
                 &ticker_normalized,
                 only_snark,
             )
@@ -1207,10 +1228,11 @@ async fn main() -> Result<()> {
         }
         Commands::Burn {
             address,
-            amount,
+            amount_sat,
             ticker,
         } => {
             let ticker_normalized = ticker.to_uppercase();
+            let amount_wei = units::sats_to_wei(amount_sat);
             handle_burn(
                 &cli.name,
                 &cli.host,
@@ -1218,7 +1240,7 @@ async fn main() -> Result<()> {
                 cli.timeout,
                 cli.chain,
                 &address,
-                amount,
+                amount_wei,
                 &ticker_normalized,
                 true,
             )

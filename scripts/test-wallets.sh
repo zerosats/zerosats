@@ -126,7 +126,7 @@ test_same_amounts_flow() {
     if $CLI_BIN mint \
         --geth-rpc "$GETH_RPC" \
         --secret "$SECRET" \
-        --amount "$MINT_AMOUNT" \
+        --amount-sat "$MINT_AMOUNT" \
         --host "$HOST" \
         --port "$PORT" \
         --name alice; then
@@ -141,7 +141,7 @@ test_same_amounts_flow() {
     if $CLI_BIN spend \
         --host "$HOST" \
         --port "$PORT" \
-        --amount "$TRANSFER_AMOUNT" \
+        --amount-sat "$TRANSFER_AMOUNT" \
         --name alice; then
         log_success "Alice created spend note"
         [ -f alice-note.json ] && log_success "Spend note created: alice-note.json"
@@ -168,7 +168,7 @@ test_same_amounts_flow() {
     if $CLI_BIN spend \
         --host "$HOST" \
         --port "$PORT" \
-        --amount "$TRANSFER_AMOUNT" \
+        --amount-sat "$TRANSFER_AMOUNT" \
         --name bob; then
         log_success "Bob created spend note"
         [ -f bob-note.json ] && log_success "Spend note created: bob-note.json"
@@ -214,7 +214,7 @@ test_varying_amounts_flow_a() {
     if $CLI_BIN mint \
         --geth-rpc "$GETH_RPC" \
         --secret "$SECRET" \
-        --amount "$MINT_AMOUNT" \
+        --amount-sat "$MINT_AMOUNT" \
         --host "$HOST" \
         --port "$PORT" \
         --name alice; then
@@ -229,7 +229,7 @@ test_varying_amounts_flow_a() {
     if $CLI_BIN spend \
         --host "$HOST" \
         --port "$PORT" \
-        --amount "$TRANSFER_1" \
+        --amount-sat "$TRANSFER_1" \
         --name alice; then
         log_success "Alice created spend note for $TRANSFER_1"
     else
@@ -255,7 +255,7 @@ test_varying_amounts_flow_a() {
     if $CLI_BIN spend \
         --host "$HOST" \
         --port "$PORT" \
-        --amount "$TRANSFER_2" \
+        --amount-sat "$TRANSFER_2" \
         --name bob; then
         log_success "Bob created spend note for $TRANSFER_2"
     else
@@ -307,7 +307,7 @@ test_multi_transfer_consolidation() {
         if $CLI_BIN mint \
             --geth-rpc "$GETH_RPC" \
             --secret "$SECRET" \
-            --amount "$TRANSFER_1" \
+            --amount-sat "$TRANSFER_1" \
             --host "$HOST" \
             --port "$PORT" \
             --name "$wallet" &> /dev/null; then
@@ -323,7 +323,7 @@ test_multi_transfer_consolidation() {
     if $CLI_BIN mint \
         --geth-rpc "$GETH_RPC" \
         --secret "$SECRET" \
-        --amount "$INITIAL_MINT" \
+        --amount-sat "$INITIAL_MINT" \
         --host "$HOST" \
         --port "$PORT" \
         --name alice; then
@@ -344,7 +344,7 @@ test_multi_transfer_consolidation() {
         if $CLI_BIN spend \
             --host "$HOST" \
             --port "$PORT" \
-            --amount "$amount" \
+            --amount-sat "$amount" \
             --name "$sender" &> /dev/null; then
 
             if $CLI_BIN receive \
@@ -370,7 +370,7 @@ test_multi_transfer_consolidation() {
     if $CLI_BIN spend \
         --host "$HOST" \
         --port "$PORT" \
-        --amount "$FINAL_SPEND" \
+        --amount-sat "$FINAL_SPEND" \
         --name alice; then
         log_success "Alice created consolidated spend note"
     else
@@ -398,7 +398,7 @@ test_burn_flow() {
     # Use existing alice wallet
     log_info "[1/2] Burning $BURN_AMOUNT tokens..."
     if $CLI_BIN burn \
-        --amount "$BURN_AMOUNT" \
+        --amount-sat "$BURN_AMOUNT" \
         --host "$HOST" \
         --port "$PORT" \
         --name alice \

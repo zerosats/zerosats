@@ -1,4 +1,5 @@
 pub mod client;
+pub mod units;
 pub mod wallet;
 
 pub mod address;
