@@ -37,6 +37,8 @@ const SATS_TO_WEI = 10_000_000_000n; // 18-dec BTC wrappers
 const DEFAULT_BURN_FEE_WEI = 300n * SATS_TO_WEI; // 300 sats
 const MAX_BURN_FEE_WEI = 3_000n * SATS_TO_WEI; // 3000 sats
 
+const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
+
 function parseBigIntEnv(name: string, fallback: bigint): bigint {
   const value = process.env[name];
   if (!value || value.trim() === "") return fallback;
@@ -145,41 +147,41 @@ async function main() {
   let ownerAddress = account.address;
   console.log("    Owner - ", ownerAddress);
 
-  // V2 config: secure defaults can be overridden via env vars.
-  const v2PerMintCap = parseBigIntEnv(
-    "V2_PER_MINT_CAP_WEI",
+  // Init config: secure defaults overridable via env vars.
+  const perMintCap = parseBigIntEnv(
+    "PER_MINT_CAP_WEI",
     DEFAULT_PER_MINT_CAP_WEI,
   );
-  const v2GlobalTvlCap = parseBigIntEnv(
-    "V2_GLOBAL_TVL_CAP_WEI",
+  const globalTvlCap = parseBigIntEnv(
+    "GLOBAL_TVL_CAP_WEI",
     DEFAULT_GLOBAL_TVL_CAP_WEI,
   );
-  const v2OpenProvingDelay = parseBigIntEnv(
-    "V2_OPEN_PROVING_DELAY_SECONDS",
+  const openProvingDelay = parseBigIntEnv(
+    "OPEN_PROVING_DELAY_SECONDS",
     SEVEN_DAYS_SECONDS,
   );
-  const v2BurnFee = parseBigIntEnv("V2_BURN_FEE_WEI", DEFAULT_BURN_FEE_WEI);
-  const v2FeeSink =
-    (process.env.V2_FEE_SINK as `0x${string}` | undefined) ?? ownerAddress;
-  const v2TimelockMinDelay = parseBigIntEnv(
-    "V2_TIMELOCK_MIN_DELAY_SECONDS",
+  const burnFee = parseBigIntEnv("BURN_FEE_WEI", DEFAULT_BURN_FEE_WEI);
+  const feeSink =
+    (process.env.FEE_SINK as `0x${string}` | undefined) ?? ownerAddress;
+  const timelockMinDelay = parseBigIntEnv(
+    "TIMELOCK_MIN_DELAY_SECONDS",
     ONE_HOUR_SECONDS,
   );
-  const v2TimelockProposers = parseAddressListEnv(
-    "V2_TIMELOCK_PROPOSERS",
+  const timelockProposers = parseAddressListEnv(
+    "TIMELOCK_PROPOSERS",
     [ownerAddress],
   );
-  const v2TimelockExecutors = parseAddressListEnv(
-    "V2_TIMELOCK_EXECUTORS",
+  const timelockExecutors = parseAddressListEnv(
+    "TIMELOCK_EXECUTORS",
     [ownerAddress],
   );
 
-  if (v2FeeSink === "0x0000000000000000000000000000000000000000") {
-    throw new Error("V2_FEE_SINK cannot be zero address");
+  if (feeSink === ZERO_ADDRESS) {
+    throw new Error("FEE_SINK cannot be zero address");
   }
-  if (v2BurnFee > MAX_BURN_FEE_WEI) {
+  if (burnFee > MAX_BURN_FEE_WEI) {
     throw new Error(
-      `V2_BURN_FEE_WEI exceeds max (${MAX_BURN_FEE_WEI.toString()} wei = 3000 sats)`,
+      `BURN_FEE_WEI exceeds max (${MAX_BURN_FEE_WEI.toString()} wei = 3000 sats)`,
     );
   }
 
@@ -295,17 +297,33 @@ async function main() {
 
   console.log(`✅ Rollup Contract (Implementation): ${rollupAddress}`);
 
+  console.log(
+    `\n🔍 Init params: perMintCap=${perMintCap} globalTvlCap=${globalTvlCap} openProvingDelay=${openProvingDelay}s burnFee=${burnFee} wei`,
+  );
+  console.log(`    feeSink=${feeSink}`);
+  console.log(
+    `    timelockDelay=${timelockMinDelay}s proposers=${timelockProposers.join(",")} executors=${timelockExecutors.join(",")}`,
+  );
+
   const rollupInitializeCalldata = encodeFunctionData({
     abi: rollupV1Artifact.abi,
     functionName: "initialize",
     args: [
       ownerAddress,
-      ownerAddress, // escrowManager must be set later
+      ownerAddress, // escrowManager — overridable later via setEscrowManager
       erc20Address,
       aggregateVerifierAddr,
       proverAddress,
       validators,
       AGG_AGG_VERIFICATION_KEY_HASH,
+      perMintCap,
+      globalTvlCap,
+      openProvingDelay,
+      burnFee,
+      feeSink,
+      timelockMinDelay,
+      timelockProposers,
+      timelockExecutors,
     ],
   });
 
@@ -364,41 +382,11 @@ async function main() {
   }
   console.log(`✅ Approved maxUint256 to ${rollupProxyAddr}: ${hash}`);
 
-  console.log("\n🔍 Initializing Rollup V2...");
-  console.log(
-    `    perMintCap=${v2PerMintCap} globalTvlCap=${v2GlobalTvlCap} openProvingDelay=${v2OpenProvingDelay}s burnFee=${v2BurnFee} wei`,
-  );
-  console.log(`    feeSink=${v2FeeSink}`);
-  console.log(
-    `    timelockDelay=${v2TimelockMinDelay}s proposers=${v2TimelockProposers.join(",")} executors=${v2TimelockExecutors.join(",")}`,
-  );
-
-  hash = await rollup.write.initializeV2(
-    [
-      v2PerMintCap,
-      v2GlobalTvlCap,
-      v2OpenProvingDelay,
-      v2BurnFee,
-      v2FeeSink,
-      v2TimelockMinDelay,
-      v2TimelockProposers,
-      v2TimelockExecutors,
-    ],
-    {
-      gas: 5_000_000n,
-    },
-  );
-  receipt = await publicClient.waitForTransactionReceipt({ hash });
-  if (receipt.status !== "success") {
-    throw new Error("Rollup V2 initialize reverted");
-  }
-  console.log(`✅ Rollup V2 initialized: ${hash}`);
-
   const timelockAddress = (await rollup.read.timelock()) as `0x${string}`;
   const rollupOwner = (await rollup.read.owner()) as `0x${string}`;
   if (rollupOwner.toLowerCase() !== timelockAddress.toLowerCase()) {
     throw new Error(
-      `Rollup owner mismatch after V2 init. owner=${rollupOwner} timelock=${timelockAddress}`,
+      `Rollup owner mismatch after init. owner=${rollupOwner} timelock=${timelockAddress}`,
     );
   }
   console.log(`✅ Rollup owner now timelock: ${timelockAddress}`);
@@ -451,11 +439,11 @@ async function main() {
       timelock: timelockAddress,
       proxyAdmin: proxyAdminAddress,
       proxyAdminOwner: proxyAdminOwnerAfter,
-      perMintCap: v2PerMintCap.toString(),
-      globalTvlCap: v2GlobalTvlCap.toString(),
-      openProvingDelaySeconds: v2OpenProvingDelay.toString(),
-      burnFeeWei: v2BurnFee.toString(),
-      feeSink: v2FeeSink,
+      perMintCap: perMintCap.toString(),
+      globalTvlCap: globalTvlCap.toString(),
+      openProvingDelaySeconds: openProvingDelay.toString(),
+      burnFeeWei: burnFee.toString(),
+      feeSink,
       erc20: erc20Address,
       verifier: aggregateVerifierAddr,
     })}`,

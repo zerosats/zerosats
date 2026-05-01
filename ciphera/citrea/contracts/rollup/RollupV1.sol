@@ -85,9 +85,6 @@ contract RollupV1 is
     event RootHashUpdated(bytes32 indexed oldRoot, bytes32 indexed newRoot);
     event EscrowManagerUpdated(address indexed old_escrow, address indexed new_escrow);
 
-    // Since the Initializable._initialized version number is private, we need to keep track of it ourselves
-    uint8 public version;
-
     // Verifiers
     mapping(bytes32 => Verifier) public zkVerifiers;
     bytes32[] public zkVerifierKeys;
@@ -99,18 +96,21 @@ contract RollupV1 is
     uint256 public blockHeight;
     bytes32 public rootHash;
 
-    // Mint - mints are removed after the rollup validates them. Mint hash is hash of commitments.
+    // Mints - removed after the rollup validates them. Mint hash is hash of commitments.
     mapping(bytes32 => Mint) public mints;
 
-    // Burn Substitutor - stores a mapping of paid out substituted burns, so they can be refunded
-    // once the rollup completes the original burn
-    // Composite key (hash + burnAddress + noteKind + amount) => substitute address
+    // Burn Substitutor - mapping of paid out substituted burns, refunded
+    // once the rollup completes the original burn.
+    // Composite key (hash + burnAddress + noteKind + amount + height) => substitute address.
     mapping(bytes32 => address) public substitutedBurns;
+
+    // Slow burn (kind==4) release timestamps, keyed by the same
+    // composite key as substitutedBurns. Set on first sighting in
+    // verifyBurn; consumed in releaseSlowBurn.
     mapping(bytes32 => uint256) public delays;
 
-    // Legacy note-kind -> token registry.
-    // V2 policy is effectively single-token: this map is seeded in initialize()
-    // and intentionally immutable afterward (addToken is disabled).
+    // Single-token policy: seeded in initialize() and immutable
+    // afterward (addToken is disabled).
     mapping(bytes32 => address) tokens;
 
     // Actors
@@ -125,24 +125,15 @@ contract RollupV1 is
 
     address public escrowManager;
 
-    // =====================================================================
-    // V2 STORAGE (APPENDED — DO NOT REORDER OR INSERT ABOVE THIS LINE)
-    //
-    // This contract has no __gap, so any storage added or reordered
-    // above this block would shift slot assignments and corrupt
-    // state in the proxy. All V2 additions must be appended here.
-    // =====================================================================
-
-    // Idea 2: deposit caps. `currentTvl` is a running counter
-    // incremented on mint() / mintClaimed() and decremented on
-    // successful burns in verifyBurn(). Seeded at V2 init from
-    // the live token balance.
+    // Deposit caps. `currentTvl` is a running counter incremented on
+    // mint() / mintClaimed() and decremented on successful burns.
+    // Seeded at init from the live token balance.
     uint256 public perMintCap;
     uint256 public globalTvlCap;
     uint256 public currentTvl;
 
-    // Idea 3: open proving. `lastVerifiedAt` is set to block.timestamp
-    // on every successful verifyRollup. If `openProvingDelay` elapses
+    // Open proving. `lastVerifiedAt` is set to block.timestamp on
+    // every successful verifyRollup. If `openProvingDelay` elapses
     // without a proof, `isProvingOpen()` flips true and (a) admits
     // anyone via onlyProverOrOpen, (b) short-circuits validator
     // signature verification. The ZK proof remains the sole safety
@@ -150,22 +141,16 @@ contract RollupV1 is
     uint256 public lastVerifiedAt;
     uint256 public openProvingDelay;
 
-    // Idea 9: flat burn fee (in wei of the primary token). Shaved
-    // out of payout in verifyBurn, routed to feeSink. No bps rate —
-    // single flat value only, matching the original ~$0.20 target.
+    // Flat burn fee (in wei of the primary token). Shaved out of
+    // payout in verifyBurn, routed to feeSink.
     uint256 public burnFee;
     address public feeSink;
 
-    // Timelock deployed at V2 init. Stored for observability; the
-    // actual owner check uses OZ Ownable's owner(), which is set to
-    // this address at the end of initializeV2.
+    // Timelock deployed at init. Stored for observability; the
+    // owner check uses OZ Ownable's owner(), which is set to this
+    // address at the end of initialize.
     TimelockController public timelock;
 
-    // =====================================================================
-    // END V2 STORAGE
-    // =====================================================================
-
-    // V2 events
     event PerMintCapUpdated(uint256 oldCap, uint256 newCap);
     event GlobalTvlCapUpdated(uint256 oldCap, uint256 newCap);
     event OpenProvingDelayUpdated(uint256 oldDelay, uint256 newDelay);
@@ -176,7 +161,7 @@ contract RollupV1 is
     // recipient). Fee stays in contract; governance addresses via
     // follow-up.
     event FeeStuck(address indexed token, uint256 amount);
-    // Emitted when V2 init completes and ownership transfers to the
+    // Emitted when init completes and ownership transfers to the
     // newly-deployed timelock.
     event TimelockInstalled(address indexed timelock, uint256 minDelay);
 
@@ -200,48 +185,24 @@ contract RollupV1 is
         _disableInitializers();
     }
 
-    function initialize(
-        address owner,
-        address _escrowManager,
-        address _tokenAddress,
-        address _verifierAddress,
-        address prover,
-        address[] calldata initialValidators,
-        bytes32 verifierKeyHash
-    ) public initializer {
-        version = 1;
-
-        __Ownable_init(owner);
-
-        token = IERC20(_tokenAddress);
-
-        // Set the init aggregate verifier
-        _setZkVerifierProperties(verifierKeyHash, _verifierAddress, 6 * 5);
-        zkVerifierKeys.push(verifierKeyHash);
-
-        provers[prover] = 1;
-
-        _setValidators(0, initialValidators);
-
-        // Empty merkle tree root hash constant (from pkg/contracts/src/empty_merkle_tree_root_hash.txt)
-        _setRootHash(
-            0x0577b5b4aa3eaba75b2a919d5d7c63b7258aa507d38e346bf2ff1d48790379ff
-        );
-        tokens[
-            0x000200000000000013fb8d0c9d1c17ae5e40fff9be350f57840e9e66cd930000
-        ] = _tokenAddress;
-        burnSubstitutors[owner] = true;
-
-        escrowManager = _escrowManager;
-    }
-
     /**
-     * @notice V2 initializer. One-shot — deploys a TimelockController
-     * with caller-provided (minDelay, proposers, executors) and
-     * transfers contract ownership to it atomically. After this runs,
-     * no EOA can call onlyOwner functions; all such calls must go
-     * through the timelock's propose+execute flow.
+     * @notice One-shot initializer. Wires up verifiers, validators,
+     * deposit caps, fee config, and atomically deploys a
+     * TimelockController to which contract ownership is transferred.
+     * After this runs, no EOA can call onlyOwner functions; all such
+     * calls must go through the timelock's propose+execute flow.
      *
+     * @param owner_ EOA that owns the contract during the brief
+     *        window inside this call (used by `_transferOwnership`).
+     *        Also seeded as a default burn substitutor.
+     * @param escrowManager_ Address authorised to call mintClaimed /
+     *        burnClaimed on behalf of off-chain settlement.
+     * @param tokenAddress_ Primary ERC20 (single-token policy).
+     * @param verifierAddress_ Aggregate ZK verifier contract.
+     * @param prover_ Initial prover address.
+     * @param initialValidators_ Initial validator set (validFrom = 0).
+     * @param verifierKeyHash_ Verification key hash for the
+     *        aggregate verifier.
      * @param perMintCap_ Max single deposit (wei of primary token).
      * @param globalTvlCap_ Max total value held (wei of primary token).
      * @param openProvingDelay_ Seconds of prover inactivity before
@@ -255,7 +216,14 @@ contract RollupV1 is
      *        ops. Use `[address(0)]` for "anyone can execute once
      *        delay elapses."
      */
-    function initializeV2(
+    function initialize(
+        address owner_,
+        address escrowManager_,
+        address tokenAddress_,
+        address verifierAddress_,
+        address prover_,
+        address[] calldata initialValidators_,
+        bytes32 verifierKeyHash_,
         uint256 perMintCap_,
         uint256 globalTvlCap_,
         uint256 openProvingDelay_,
@@ -264,7 +232,7 @@ contract RollupV1 is
         uint256 timelockMinDelay_,
         address[] calldata timelockProposers_,
         address[] calldata timelockExecutors_
-    ) external onlyOwner reinitializer(2) {
+    ) public initializer {
         require(feeSink_ != address(0), "RollupV1: invalid fee sink");
         require(burnFee_ <= MAX_BURN_FEE, "RollupV1: burn fee too high");
         require(
@@ -309,7 +277,24 @@ contract RollupV1 is
             "RollupV1: at least one non-zero proposer required"
         );
 
+        __Ownable_init(owner_);
         __ReentrancyGuard_init();
+
+        token = IERC20(tokenAddress_);
+        _setZkVerifierProperties(verifierKeyHash_, verifierAddress_, 6 * 5);
+        zkVerifierKeys.push(verifierKeyHash_);
+        provers[prover_] = 1;
+        _setValidators(0, initialValidators_);
+
+        // Empty merkle tree root hash constant (from pkg/contracts/src/empty_merkle_tree_root_hash.txt).
+        _setRootHash(
+            0x0577b5b4aa3eaba75b2a919d5d7c63b7258aa507d38e346bf2ff1d48790379ff
+        );
+        tokens[
+            0x000200000000000013fb8d0c9d1c17ae5e40fff9be350f57840e9e66cd930000
+        ] = tokenAddress_;
+        burnSubstitutors[owner_] = true;
+        escrowManager = escrowManager_;
 
         perMintCap = perMintCap_;
         globalTvlCap = globalTvlCap_;
@@ -333,10 +318,8 @@ contract RollupV1 is
         );
         timelock = tl;
 
-        version = 2;
-
-        // Transfer ownership AFTER all state writes so the init
-        // itself doesn't trip onlyOwner halfway through.
+        // Transfer ownership AFTER all state writes so init itself
+        // doesn't trip onlyOwner halfway through.
         _transferOwnership(address(tl));
 
         emit TimelockInstalled(address(tl), timelockMinDelay_);
@@ -348,7 +331,7 @@ contract RollupV1 is
     }
 
     function isProvingOpen() public view returns (bool) {
-        // Pre-init guard for V2 config window; see docs.
+        // Pre-init guard: zero delay means escape mode is disabled.
         if (openProvingDelay == 0) return false;
         return block.timestamp >= lastVerifiedAt + openProvingDelay;
     }
@@ -481,13 +464,9 @@ contract RollupV1 is
         revert("RollupV1: addToken disabled");
     }
 
-    // =====================================================================
-    // V2 setters — all `onlyOwner`. After initializeV2, the owner is
-    // the TimelockController deployed inline, so every setter here
-    // must be invoked via timelock propose+execute.
-    // =====================================================================
+    // Owner-gated setters. After init, owner() is the timelock, so
+    // every setter must be invoked via timelock propose+execute.
 
-    // --- Idea 2: Deposit caps -------------------------------------------
     function setPerMintCap(uint256 newCap) external onlyOwner {
         require(newCap > 0, "RollupV1: per-mint cap must be nonzero");
         require(newCap <= globalTvlCap, "RollupV1: per-mint cap > TVL cap");
@@ -495,23 +474,19 @@ contract RollupV1 is
         perMintCap = newCap;
     }
 
-    // Intentionally allows cap < currentTvl to freeze growth; see docs.
+    // Intentionally allows cap < currentTvl to freeze growth.
     function setGlobalTvlCap(uint256 newCap) external onlyOwner {
         require(newCap >= perMintCap, "RollupV1: TVL cap < per-mint cap");
         emit GlobalTvlCapUpdated(globalTvlCap, newCap);
         globalTvlCap = newCap;
     }
 
-    // --- Idea 3: Open proving delay -------------------------------------
     function setOpenProvingDelay(uint256 newDelay) external onlyOwner {
-        // 7-day floor matches the initializeV2 floor and the original
-        // "1 week of prover inactivity" plan.
         require(newDelay >= 7 days, "RollupV1: open proving delay too short");
         emit OpenProvingDelayUpdated(openProvingDelay, newDelay);
         openProvingDelay = newDelay;
     }
 
-    // --- Idea 9: Burn fee -----------------------------------------------
     function setBurnFee(uint256 newFee) external onlyOwner {
         require(newFee <= MAX_BURN_FEE, "RollupV1: burn fee too high");
         emit BurnFeeUpdated(burnFee, newFee);
@@ -524,7 +499,6 @@ contract RollupV1 is
         feeSink = newSink;
     }
 
-    // --- Idea 9: fee computation ----------------------------------------
     /**
      * @dev Flat burn fee clamped to `value`. If the configured fee
      * exceeds the burn amount, the payout is zero but the whole
@@ -562,7 +536,6 @@ contract RollupV1 is
     //
     ///////////
 
-    // V2 liveness escape + reentrancy hardening; see docs.
     function verifyRollup(
         uint256 height,
         bytes32 verificationKeyHash,
@@ -621,10 +594,9 @@ contract RollupV1 is
         );
         blockHeight = height;
 
-        // V2: reset the "last activity" timer so `isProvingOpen()`
-        // returns false again. This is what keeps escape mode from
-        // staying open during normal operation — every successful
-        // proof closes the window for another `openProvingDelay`.
+        // Reset the activity timer so `isProvingOpen()` returns false
+        // again. Every successful proof closes the escape-mode window
+        // for another `openProvingDelay`.
         lastVerifiedAt = block.timestamp;
 
         emit RollupVerified(height, newRoot);
@@ -767,7 +739,8 @@ contract RollupV1 is
                 }
             }
 
-            // Clamp handles legacy pre-V2 accounting edge cases.
+            // Clamp guards against accounting drift if currentTvl
+            // ever falls below the outgoing amount.
             if (currentTvl >= tokensLeavingContract) {
                 currentTvl -= tokensLeavingContract;
             } else {
@@ -974,7 +947,7 @@ contract RollupV1 is
         address _token = tokens[note_kind];
         require(_token != address(0), "RollupV1: Token not found for note kind");
 
-        // V2 (Idea 9): burn-fee accounting for substituted burns.
+        // Burn-fee accounting for substituted burns.
         //
         // Keeping token balance math balanced while a burn is
         // substituted requires the substitutor to pre-pay only the
@@ -1028,13 +1001,12 @@ contract RollupV1 is
             revert("RollupV1: Mint already exists");
         }
 
-        // V2 (Idea 2): deposit caps. Applied here AS WELL AS in mint()
-        // because `mintClaimed` is the escrow-manager path that does
-        // not go through safeTransferFrom — the funds were already
-        // collected off-chain by the EscrowManager. Without a cap
-        // here, a compromised (or buggy) EscrowManager could mint
-        // arbitrarily large amounts onto L2 regardless of how the
-        // user-facing `mint()` is gated.
+        // Deposit caps applied here as well as in mint() because
+        // mintClaimed is the escrow-manager path that does not go
+        // through safeTransferFrom — funds were already collected
+        // off-chain. Without a cap here, a compromised or buggy
+        // EscrowManager could mint arbitrarily large amounts onto
+        // L2 regardless of how the user-facing mint() is gated.
         require(value <= perMintCap, "RollupV1: exceeds per-mint cap");
         require(
             currentTvl + value <= globalTvlCap,
@@ -1058,7 +1030,7 @@ contract RollupV1 is
 
     /**
      * @notice Record an off-chain substitution from the escrow manager.
-     * @dev In V2, settlement returns `value - fee` on this path (see docs).
+     * @dev Settlement returns `value - fee` on this path.
      */
     function burnClaimed(
         address substituteAddress,
@@ -1076,9 +1048,9 @@ contract RollupV1 is
             revert("RollupV1: Mint already exists");
         }
 
-        // V2 (Idea 2): deposit caps.
-        // Check BEFORE the safeTransferFrom so a capped-out deposit
-        // doesn't cost the caller any token transfers or approvals.
+        // Deposit caps. Check BEFORE the safeTransferFrom so a
+        // capped-out deposit doesn't cost the caller any token
+        // transfers or approvals.
         uint256 v = uint256(value);
         require(v <= perMintCap, "RollupV1: exceeds per-mint cap");
         require(currentTvl + v <= globalTvlCap, "RollupV1: TVL cap reached");
@@ -1121,19 +1093,19 @@ contract RollupV1 is
         bytes32 otherHashFromBlockHash,
         Signature[] calldata signatures
     ) internal {
-        // V2 (Idea 3): escape mode short-circuit.
+        // Escape mode short-circuit.
         //
-        // If the prover-inactivity timer has expired, we skip the
-        // signature requirement entirely. Rationale: opening the
-        // modifier `onlyProverOrOpen` without also skipping the sig
-        // check would be security theater, because a user without
-        // access to the (presumed-dead) validator set could never
-        // collect enough signatures to pass the (2/3)+1 threshold.
+        // If the prover-inactivity timer has expired, skip the
+        // signature requirement entirely. Opening `onlyProverOrOpen`
+        // without also skipping the sig check would be security
+        // theater — a user without access to the (presumed-dead)
+        // validator set could never collect enough signatures to
+        // pass the (2/3)+1 threshold.
         //
-        // This is safe because validator signatures provide
-        // *coordination*, not *safety*. The ZK verifier below this
-        // function is what actually proves the state transition is
-        // valid. As long as that succeeds, the new root is correct.
+        // Safe because validator signatures provide *coordination*,
+        // not *safety*. The ZK verifier below is what actually proves
+        // the state transition is valid; as long as that succeeds,
+        // the new root is correct.
         if (isProvingOpen()) {
             return;
         }
