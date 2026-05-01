@@ -180,6 +180,21 @@ contract RollupV1 is
     // newly-deployed timelock.
     event TimelockInstalled(address indexed timelock, uint256 minDelay);
 
+    // Slow burn (kind==4) lifecycle events.
+    event SlowBurnQueued(
+        bytes32 indexed key,
+        bytes32 indexed hash,
+        address indexed burnAddr,
+        uint256 amount,
+        uint256 readyAt
+    );
+    event SlowBurnReleased(
+        bytes32 indexed key,
+        address indexed recipient,
+        bool substituted,
+        bool success
+    );
+
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
         _disableInitializers();
@@ -706,14 +721,20 @@ contract RollupV1 is
             value,
             height
         );
-        address substitutor = substitutedBurns[substituteBurnKey];
-
+        
         if (utxo_kind == 4) {
-            // queued at first sighting above; settlement happens in releaseSlowBurn
-            delays[substituteBurnKey] = block.timestamp + 15 minutes;
-            // do nothing
+            // Queued at first sighting; settlement happens in releaseSlowBurn.
+            // Merkle uniqueness already guarantees one sighting per hash, but
+            // assert it explicitly so a future re-entry is a loud revert
+            // instead of a silent timer reset.
+            require(delays[substituteBurnKey] == 0, "RollupV1: slow burn already queued");
+            uint256 readyAt = block.timestamp + 15 minutes;
+            delays[substituteBurnKey] = readyAt;
+            emit SlowBurnQueued(substituteBurnKey, hash, burn_addr, value, readyAt);
             return i + 5;
         }
+
+        address substitutor = substitutedBurns[substituteBurnKey];
 
         // Same fee schedule for substituted and direct burns.
         uint256 fee = computeBurnFee(value);
@@ -779,11 +800,16 @@ contract RollupV1 is
         address _token = tokens[noteKind];
         require(_token != address(0), "RollupV1: Unsupported token");
 
+        // Fee is read at release time, not snapshotted at queue. A
+        // governance `setBurnFee` inside the 15-minute window will
+        // therefore shift this user's payout. Acceptable trade-off
+        // for keeping slow-burn state in a single mapping.
         uint256 fee = computeBurnFee(amount);
         uint256 payout = amount - fee;
-        address recipient = substitutor != address(0) ? substitutor : burnAddr;
+        bool substituted = substitutor != address(0);
+        address recipient = substituted ? substitutor : burnAddr;
 
-        bool success = executeBurn(_token, recipient, hash, payout, substitutor != address(0));
+        bool success = executeBurn(_token, recipient, hash, payout, substituted);
         if (success) {
             uint256 tokensLeavingContract = payout;
             if (fee > 0) {
@@ -801,6 +827,7 @@ contract RollupV1 is
             if (currentTvl >= tokensLeavingContract) currentTvl -= tokensLeavingContract;
             else currentTvl = 0;
         }
+        emit SlowBurnReleased(key, recipient, substituted, success);
     }
 
     function bytes32ToAddress(
