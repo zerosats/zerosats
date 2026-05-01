@@ -72,7 +72,7 @@ impl Utxo {
     #[must_use]
     pub fn new_burn_no_sub(input_notes: [InputNote; 2], evm_address: Element) -> Self {
         Self {
-            kind: UtxoKind::NoSub,
+            kind: UtxoKind::SlowBurn,
             input_notes,
             output_notes: [Note::padding_note(), Note::padding_note()],
             burn_address: Some(evm_address),
@@ -127,7 +127,7 @@ impl Utxo {
                 self.burn_hash(),
                 self.burn_address.unwrap(),
             ],
-            UtxoKind::NoSub => [
+            UtxoKind::SlowBurn => [
                 Element::new(4),
                 self.input_notes[0].note.contract,
                 self.input_value() - self.output_value(),
@@ -217,7 +217,7 @@ pub enum UtxoKind {
     /// A burn transaction (burning on Ciphera Network)
     Burn,
     /// A burn transaction, no native burn substitution
-    NoSub,
+    SlowBurn,
 }
 
 impl UtxoKind {
@@ -234,7 +234,7 @@ impl From<u8> for UtxoKind {
             1 => UtxoKind::Send,
             2 => UtxoKind::Mint,
             3 => UtxoKind::Burn,
-            4 => UtxoKind::NoSub,
+            4 => UtxoKind::SlowBurn,
             _ => UtxoKind::Null,
         }
     }
@@ -246,7 +246,7 @@ impl From<UtxoKind> for u8 {
             UtxoKind::Send => 1,
             UtxoKind::Mint => 2,
             UtxoKind::Burn => 3,
-            UtxoKind::NoSub => 4,
+            UtxoKind::SlowBurn => 4,
             UtxoKind::Null => 0,
         }
     }
@@ -386,7 +386,7 @@ impl UtxoPublicInput {
                 value: self.messages[2],
                 mint_hash: self.messages[3],
             }),
-            UtxoKind::Burn | UtxoKind::NoSub => UtxoKindMessages::Burn(UtxoKindBurnMessages {
+            UtxoKind::Burn | UtxoKind::SlowBurn => UtxoKindMessages::Burn(UtxoKindBurnMessages {
                 utxo_kind: self.messages[0],
                 note_kind: self.messages[1],
                 value: self.messages[2],

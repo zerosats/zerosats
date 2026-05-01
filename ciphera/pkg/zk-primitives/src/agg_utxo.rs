@@ -53,7 +53,7 @@ impl AggUtxo {
             let proof_messages = match proof.utxo_proof.kind() {
                 UtxoKind::Null | UtxoKind::Send => &[][..],
                 UtxoKind::Mint => &proof.utxo_proof.public_inputs.messages[..4],
-                UtxoKind::Burn | UtxoKind::NoSub => &proof.utxo_proof.public_inputs.messages[..],
+                UtxoKind::Burn | UtxoKind::SlowBurn => &proof.utxo_proof.public_inputs.messages[..],
             };
 
             for &message in proof_messages {

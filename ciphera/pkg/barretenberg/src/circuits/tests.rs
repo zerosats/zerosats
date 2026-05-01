@@ -348,19 +348,19 @@ fn test_alt_agg_utxo() {
     let (secret_key, address) = get_keypair(202);
     let mut tree = smirk::Tree::<161, ()>::new();
 
-    // Pre-insert NoSub input notes so they exist before the aggregate's old_root
-    let nosub_input_note1 = InputNote {
+    // Pre-insert SlowBurn input notes so they exist before the aggregate's old_root
+    let slow_input_note1 = InputNote {
         note: send_note(25, address, 12),
         secret_key,
     };
-    tree.insert(nosub_input_note1.note.commitment(), ())
+    tree.insert(slow_input_note1.note.commitment(), ())
         .unwrap();
 
-    let nosub_input_note2 = InputNote {
+    let slow_input_note2 = InputNote {
         note: send_note(15, address, 13),
         secret_key,
     };
-    tree.insert(nosub_input_note2.note.commitment(), ())
+    tree.insert(slow_input_note2.note.commitment(), ())
         .unwrap();
 
     let old_root = tree.root_hash();
@@ -394,21 +394,21 @@ fn test_alt_agg_utxo() {
         process_utxo_for_agg_generic(&mut tree, &burn_utxo).unwrap();
     verify_proof(&burn_proof);
 
-    // --- UTXO 3: NoSub (pre-inserted inputs, padding outputs) ---
-    let nosub_utxo = Utxo::new_burn_no_sub(
-        [nosub_input_note1.clone(), nosub_input_note2.clone()],
+    // --- UTXO 3: SlowBurn (pre-inserted inputs, padding outputs) ---
+    let slow_utxo = Utxo::new_burn_no_sub(
+        [slow_input_note1.clone(), slow_input_note2.clone()],
         burn_address,
     );
 
-    let (nosub_proof, np1, np2, np3, np4, new_root) =
-        process_utxo_for_agg_generic(&mut tree, &nosub_utxo).unwrap();
-    verify_proof(&nosub_proof);
+    let (slow_proof, np1, np2, np3, np4, new_root) =
+        process_utxo_for_agg_generic(&mut tree, &slow_utxo).unwrap();
+    verify_proof(&slow_proof);
 
     let agg_utxo = AggUtxo::new(
         [
             UtxoProofBundleWithMerkleProofs::new(mint_proof, &[mp1, mp2, mp3, mp4]),
             UtxoProofBundleWithMerkleProofs::new(burn_proof, &[bp1, bp2, bp3, bp4]),
-            UtxoProofBundleWithMerkleProofs::new(nosub_proof, &[np1, np2, np3, np4]),
+            UtxoProofBundleWithMerkleProofs::new(slow_proof, &[np1, np2, np3, np4]),
         ],
         old_root,
         new_root,

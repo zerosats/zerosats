@@ -106,6 +106,7 @@ contract RollupV1 is
     // once the rollup completes the original burn
     // Composite key (hash + burnAddress + noteKind + amount) => substitute address
     mapping(bytes32 => address) public substitutedBurns;
+    mapping(bytes32 => uint256) public delays;
 
     // Legacy note-kind -> token registry.
     // V2 policy is effectively single-token: this map is seeded in initialize()
@@ -652,7 +653,7 @@ contract RollupV1 is
             // Mint
             return verifyMint(index, publicInputs);
         } else if (kind == 3 || kind == 4) {
-            // Burn
+            // Burn and Slow Burn
             return verifyBurn(index, publicInputs, height);
         } else {
             // Not allowed
@@ -689,6 +690,7 @@ contract RollupV1 is
         bytes32[] calldata messages,
         uint256 height
     ) internal returns (uint) {
+        uint256 utxo_kind = uint256(messages[i]);
         bytes32 note_kind = messages[i + 1];
         uint256 value = uint256(messages[i + 2]);
         bytes32 hash = messages[i + 3];
@@ -705,6 +707,13 @@ contract RollupV1 is
             height
         );
         address substitutor = substitutedBurns[substituteBurnKey];
+
+        if (utxo_kind == 4) {
+            // queued at first sighting above; settlement happens in releaseSlowBurn
+            delays[substituteBurnKey] = block.timestamp + 15 minutes;
+            // do nothing
+            return i + 5;
+        }
 
         // Same fee schedule for substituted and direct burns.
         uint256 fee = computeBurnFee(value);
@@ -746,6 +755,52 @@ contract RollupV1 is
         }
 
         return i + 5;
+    }
+
+    function releaseSlowBurn(
+        bytes32 hash,
+        address burnAddr,
+        bytes32 noteKind,
+        uint256 amount,
+        uint256 height
+    ) external nonReentrant {
+        bytes32 key = getSubstituteBurnKey(hash, burnAddr, noteKind, amount, height);
+        uint256 readyAt = delays[key];
+        require(readyAt != 0, "RollupV1: not a queued slow burn");
+
+        address substitutor = substitutedBurns[key];
+        require(
+            substitutor != address(0) || block.timestamp > readyAt,
+            "RollupV1: still cooling"
+        );
+
+        delete delays[key]; // replay guard
+
+        address _token = tokens[noteKind];
+        require(_token != address(0), "RollupV1: Unsupported token");
+
+        uint256 fee = computeBurnFee(amount);
+        uint256 payout = amount - fee;
+        address recipient = substitutor != address(0) ? substitutor : burnAddr;
+
+        bool success = executeBurn(_token, recipient, hash, payout, substitutor != address(0));
+        if (success) {
+            uint256 tokensLeavingContract = payout;
+            if (fee > 0) {
+                if (feeSink != address(0)) {
+                    if (_tryTransferFee(_token, feeSink, fee)) {
+                        tokensLeavingContract = amount;
+                        emit FeePaid(_token, feeSink, fee);
+                    } else {
+                        emit FeeStuck(_token, fee);
+                    }
+                } else {
+                    emit FeeStuck(_token, fee);
+                }
+            }
+            if (currentTvl >= tokensLeavingContract) currentTvl -= tokensLeavingContract;
+            else currentTvl = 0;
+        }
     }
 
     function bytes32ToAddress(

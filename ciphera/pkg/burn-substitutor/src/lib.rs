@@ -169,8 +169,8 @@ impl BurnSubstitutor {
 
                     substituted_burns.push(hash);
                 } else {
-                    info!("Transaction of NoSubstitution kind");
-                    self.handle_nosub_burn(amount, hash).await?;
+                    info!("Skipping transaction of slow burn kind");
+                    self.handle_slow_burn(amount, hash).await?;
                     other_burns.push(hash);
                 }
             }
@@ -185,7 +185,7 @@ impl BurnSubstitutor {
         Ok(substituted_burns)
     }
 
-    async fn handle_nosub_burn(
+    async fn handle_slow_burn(
         &mut self,
         amount: Element,
         burn_hash: Element,
@@ -270,7 +270,7 @@ impl BurnSubstitutor {
         };
 
         let swap_id = swap.id.clone();
-        info!(?burn_hash, %swap_id, "Matched NoSub burn to swap");
+        info!(?burn_hash, %swap_id, "Matched SlowBurn burn to swap");
 
         // Step C — Query /offramp/:swapId (with retry)
         // We can't rely on swap status since it may soft-expire before burner picks it;
