@@ -299,8 +299,7 @@ where
                     let proof_messages = match proof.kind() {
                         UtxoKind::Null | UtxoKind::Send => &[][..],
                         UtxoKind::Mint => &proof.public_inputs.messages[..4],
-                        UtxoKind::Burn => &proof.public_inputs.messages[..],
-                        UtxoKind::NoSub => &proof.public_inputs.messages[..],
+                        UtxoKind::Burn | UtxoKind::SlowBurn => &proof.public_inputs.messages[..],
                     };
 
                     for &message in proof_messages {

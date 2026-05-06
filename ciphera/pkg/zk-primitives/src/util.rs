@@ -150,6 +150,40 @@ pub fn bridged_polygon_usdc_note_kind() -> Element {
     generate_note_kind_bridge_evm(chain, address)
 }
 
+/// Generates a note kind element for WCBTC on Citrea Testnet.
+///
+/// # Returns
+///
+/// An Element representing the note kind for Wrapped CBTC on Citrea with:
+/// - note_kind_format: 2
+/// - chain: 5115 (Citrea Testnet)
+/// - address: 0x4370e27F7d91D9341bFf232d7Ee8bdfE3a9933a0
+#[must_use]
+pub fn citrea_wcbtc_note_kind() -> Element {
+    let chain = 5115u64; // Citrea testnet
+    let address =
+        H160::from_slice(&hex::decode("4370e27F7d91D9341bFf232d7Ee8bdfE3a9933a0").unwrap());
+
+    generate_note_kind_bridge_evm(chain, address)
+}
+
+/// Generates a note kind element for USDC on Citrea Testnet.
+///
+/// # Returns
+///
+/// An Element representing the note kind for USDC on Citrea with:
+/// - note_kind_format: 2
+/// - chain: 5115 (Citrea Testnet)
+/// - address: 0x52f74a8f9bdd29f77a5efd7f6cb44dcf6906a4b6 (not checked, used only for tests)
+#[must_use]
+pub fn citrea_usdc_note_kind() -> Element {
+    let chain = 5115u64; // Citrea testnet
+    let address =
+        H160::from_slice(&hex::decode("52f74a8f9bdd29f77a5efd7f6cb44dcf6906a4b6").unwrap());
+
+    generate_note_kind_bridge_evm(chain, address)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -289,7 +323,7 @@ mod tests {
     fn test_wrapped_citrea_testnet_note_kind() {
         let chain = 5115_u64; // Citrea chain
         let token =
-            H160::from_slice(&hex::decode("8d0c9d1c17aE5e40ffF9bE350f57840E9E66Cd93").unwrap()); // Token Contract
+            H160::from_slice(&hex::decode("4370e27F7d91D9341bFf232d7Ee8bdfE3a9933a0").unwrap()); // Token Contract
         let result = generate_note_kind_bridge_evm(chain, token);
 
         let result_bytes = result.to_be_bytes();
@@ -306,7 +340,7 @@ mod tests {
 
         // Check address is in bytes 10-30
         let expected_address_bytes =
-            hex::decode("8d0c9d1c17aE5e40ffF9bE350f57840E9E66Cd93").unwrap();
+            hex::decode("4370e27F7d91D9341bFf232d7Ee8bdfE3a9933a0").unwrap();
         assert_eq!(&result_bytes[10..30], &expected_address_bytes[..]);
 
         // Check last 2 bytes are zero (padding)

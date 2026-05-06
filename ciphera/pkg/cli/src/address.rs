@@ -2,8 +2,7 @@ use element::Element;
 use rand::RngCore;
 use rand::rngs::OsRng;
 use serde::{Deserialize, Serialize};
-use web3::types::H160;
-use zk_primitives::{Note, generate_note_kind_bridge_evm};
+use zk_primitives::{Note, citrea_usdc_note_kind, citrea_wcbtc_note_kind};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct CipheraAddress {
@@ -18,24 +17,6 @@ pub fn random_element() -> Element {
     let mut bytes = [0u8; 32];
     OsRng.fill_bytes(&mut bytes);
     Element::from_be_bytes(bytes)
-}
-
-#[must_use]
-pub fn citrea_wcbtc_note_kind() -> Element {
-    let chain = 5115u64; // Citrea testnet
-    let address =
-        H160::from_slice(&hex::decode("8d0c9d1c17aE5e40ffF9bE350f57840E9E66Cd93").unwrap());
-
-    generate_note_kind_bridge_evm(chain, address)
-}
-
-#[must_use]
-pub fn citrea_usdc_note_kind() -> Element {
-    let chain = 5115u64; // Citrea testnet
-    let address =
-        H160::from_slice(&hex::decode("52f74a8f9bdd29f77a5efd7f6cb44dcf6906a4b6").unwrap());
-
-    generate_note_kind_bridge_evm(chain, address)
 }
 
 pub fn citrea_token_data(ticker: &str) -> (Element, Element) {

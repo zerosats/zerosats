@@ -15,7 +15,9 @@ pub use client::{Client, ConfirmationType};
 pub use erc20::ERC20Contract;
 pub use error::{Error, Result};
 pub use fees::{Eip1559Fees, FeeStrategy};
-pub use rollup::{ReadonlyRollupContract, SignedRollupContract};
+pub use rollup::{
+    ReadonlyRollupContract, SignedRollupContract, SlowBurnQueuedEvent, SlowBurnReleasedEvent,
+};
 pub type RollupContract = SignedRollupContract;
 
 pub use web3::{

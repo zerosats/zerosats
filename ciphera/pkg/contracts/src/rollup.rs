@@ -94,6 +94,35 @@ impl Detokenize for Mint {
     }
 }
 
+/// Represents a SlowBurnQueued event from the contract.
+///
+/// Emitted by `verifyBurns` the first time a slow-burn (utxo_kind == 4) is
+/// observed. Carries everything needed to identify the queued burn except
+/// `note_kind` and the rollup `height`, which the CLI must rederive when
+/// constructing a `releaseSlowBurn` call.
+#[derive(Debug, Clone)]
+pub struct SlowBurnQueuedEvent {
+    /// keccak256(abi.encode(hash, burn_addr, note_kind, value, height))
+    pub key: H256,
+    pub hash: H256,
+    pub burn_addr: H160,
+    pub amount: U256,
+    pub ready_at: U256,
+    pub transaction_hash: H256,
+    pub block_number: u64,
+}
+
+/// Represents a SlowBurnReleased event from the contract.
+#[derive(Debug, Clone)]
+pub struct SlowBurnReleasedEvent {
+    pub key: H256,
+    pub recipient: H160,
+    pub substituted: bool,
+    pub success: bool,
+    pub transaction_hash: H256,
+    pub block_number: u64,
+}
+
 /// Represents a MintAdded event from the contract
 #[derive(Debug, Clone)]
 pub struct MintAddedEvent {
@@ -664,27 +693,60 @@ impl ReadonlyRollupContract {
         Ok(events)
     }
 
-    /// Gets MintAdded events from the contract within the last `MAX_SCAN_DEPTH` blocks.
-    ///
-    /// Note: Due to the Citrea RPC API 1000-block scan limit, only events from the
-    /// most recent `MAX_SCAN_DEPTH` blocks are returned, not from the chain's genesis.
+    /// Internal: fetch logs for `event_signature` over the last
+    /// `depth_blocks`, paginated in `MAX_SCAN_DEPTH`-block chunks to stay
+    /// under Citrea RPC's 1000-block `getLogs` cap.
+    async fn paginated_logs(
+        &self,
+        event_signature: H256,
+        depth_blocks: u64,
+    ) -> Result<Vec<web3::types::Log>> {
+        let latest = self.client.client().eth().block_number().await?;
+        let depth = depth_blocks.max(1);
+        let from_block_num = latest.saturating_sub(U64::from(depth - 1));
+
+        let mut all = Vec::new();
+        let mut chunk_start = from_block_num;
+        loop {
+            let chunk_end_candidate = chunk_start + U64::from(MAX_SCAN_DEPTH - 1);
+            let chunk_end = if chunk_end_candidate > latest {
+                latest
+            } else {
+                chunk_end_candidate
+            };
+
+            let filter = FilterBuilder::default()
+                .address(vec![self.contract.address()])
+                .from_block(BlockNumber::Number(chunk_start))
+                .to_block(BlockNumber::Number(chunk_end))
+                .topics(Some(vec![event_signature]), None, None, None)
+                .build();
+
+            let logs = self.client.client().eth().logs(filter).await?;
+            all.extend(logs);
+
+            if chunk_end >= latest {
+                break;
+            }
+            chunk_start = chunk_end + U64::from(1u64);
+        }
+        Ok(all)
+    }
+
+    /// Gets MintAdded events from the contract within the last
+    /// `depth_blocks` blocks. The scan paginates in `MAX_SCAN_DEPTH`-sized
+    /// chunks under the hood, so callers may pass arbitrarily large depths
+    /// at the cost of more RPC round-trips.
     #[tracing::instrument(err, ret, skip(self))]
-    pub async fn get_all_mint_added_events(&self) -> Result<Vec<MintAddedEvent>> {
+    pub async fn get_all_mint_added_events(
+        &self,
+        depth_blocks: u64,
+    ) -> Result<Vec<MintAddedEvent>> {
         let event_signature = H256::from_slice(
             &Keccak256::digest(b"MintAdded(bytes32,uint256,bytes32)").as_slice()[0..32],
         );
 
-        let latest = self.client.client().eth().block_number().await?;
-        let from_block_num = latest.saturating_sub(U64::from(MAX_SCAN_DEPTH - 1));
-
-        let filter = FilterBuilder::default()
-            .address(vec![self.contract.address()])
-            .from_block(BlockNumber::Number(from_block_num))
-            .to_block(BlockNumber::Number(latest))
-            .topics(Some(vec![event_signature]), None, None, None)
-            .build();
-
-        let logs = self.client.client().eth().logs(filter).await?;
+        let logs = self.paginated_logs(event_signature, depth_blocks).await?;
 
         let mut events = Vec::new();
         for log in logs {
@@ -713,9 +775,148 @@ impl ReadonlyRollupContract {
 
         Ok(events)
     }
+
+    /// Scan the last `depth_blocks` blocks for `SlowBurnQueued` events,
+    /// paginating in `MAX_SCAN_DEPTH`-sized chunks.
+    #[tracing::instrument(err, skip(self))]
+    pub async fn get_all_slow_burn_queued_events(
+        &self,
+        depth_blocks: u64,
+    ) -> Result<Vec<SlowBurnQueuedEvent>> {
+        let event_signature = H256::from_slice(
+            &Keccak256::digest(b"SlowBurnQueued(bytes32,bytes32,address,uint256,uint256)")
+                .as_slice()[0..32],
+        );
+
+        let logs = self.paginated_logs(event_signature, depth_blocks).await?;
+
+        let mut events = Vec::new();
+        for log in logs {
+            // topics: [sig, key, hash, burnAddr]; data: amount(32) | readyAt(32)
+            if log.topics.len() >= 4
+                && log.data.0.len() >= 64
+                && log.transaction_hash.is_some()
+                && log.block_number.is_some()
+            {
+                let key = log.topics[1];
+                let hash = log.topics[2];
+                let burn_addr = H160::from_slice(&log.topics[3].as_bytes()[12..32]);
+                let amount = U256::from_big_endian(&log.data.0[0..32]);
+                let ready_at = U256::from_big_endian(&log.data.0[32..64]);
+
+                events.push(SlowBurnQueuedEvent {
+                    key,
+                    hash,
+                    burn_addr,
+                    amount,
+                    ready_at,
+                    transaction_hash: log.transaction_hash.unwrap(),
+                    block_number: log.block_number.unwrap().as_u64(),
+                });
+            }
+        }
+
+        Ok(events)
+    }
+
+    /// Scan the last `depth_blocks` blocks for `SlowBurnReleased` events,
+    /// paginating in `MAX_SCAN_DEPTH`-sized chunks.
+    #[tracing::instrument(err, skip(self))]
+    pub async fn get_all_slow_burn_released_events(
+        &self,
+        depth_blocks: u64,
+    ) -> Result<Vec<SlowBurnReleasedEvent>> {
+        let event_signature = H256::from_slice(
+            &Keccak256::digest(b"SlowBurnReleased(bytes32,address,bool,bool)").as_slice()[0..32],
+        );
+
+        let logs = self.paginated_logs(event_signature, depth_blocks).await?;
+
+        let mut events = Vec::new();
+        for log in logs {
+            // topics: [sig, key, recipient]; data: substituted(32) | success(32)
+            if log.topics.len() >= 3
+                && log.data.0.len() >= 64
+                && log.transaction_hash.is_some()
+                && log.block_number.is_some()
+            {
+                let key = log.topics[1];
+                let recipient = H160::from_slice(&log.topics[2].as_bytes()[12..32]);
+                let substituted = !log.data.0[31..32].iter().all(|&b| b == 0);
+                let success = !log.data.0[63..64].iter().all(|&b| b == 0);
+
+                events.push(SlowBurnReleasedEvent {
+                    key,
+                    recipient,
+                    substituted,
+                    success,
+                    transaction_hash: log.transaction_hash.unwrap(),
+                    block_number: log.block_number.unwrap().as_u64(),
+                });
+            }
+        }
+
+        Ok(events)
+    }
+
+    /// Returns the rollup `height` recorded by the `RollupVerified` event
+    /// emitted in the same transaction as `tx_hash`. `verifyBurns` runs as
+    /// part of `verifyBlock`, which always emits exactly one
+    /// `RollupVerified(height, root)` — so locating that log gives us the
+    /// `height` argument that fed into `getSubstituteBurnKey` for any
+    /// `SlowBurnQueued` in the same tx.
+    #[tracing::instrument(err, skip(self))]
+    pub async fn rollup_verified_height_in_tx(&self, tx_hash: H256) -> Result<Option<U256>> {
+        let event_signature = H256::from_slice(
+            &Keccak256::digest(b"RollupVerified(uint256,bytes32)").as_slice()[0..32],
+        );
+
+        let receipt = self
+            .client
+            .client()
+            .eth()
+            .transaction_receipt(tx_hash)
+            .await?;
+        let Some(receipt) = receipt else {
+            return Ok(None);
+        };
+
+        for log in receipt.logs {
+            if log.address == self.contract.address()
+                && log.topics.len() >= 2
+                && log.topics[0] == event_signature
+            {
+                return Ok(Some(U256::from_big_endian(log.topics[1].as_bytes())));
+            }
+        }
+
+        Ok(None)
+    }
 }
 
 impl SignedRollupContract {
+    /// Calls `releaseSlowBurn(hash, burnAddr, noteKind, amount, height)` on
+    /// the rollup contract. The contract recomputes the substitute-burn key
+    /// from these inputs; mismatched arguments revert with
+    /// "RollupV1: not a queued slow burn".
+    #[tracing::instrument(err, ret, skip(self))]
+    pub async fn release_slow_burn(
+        &self,
+        hash: H256,
+        burn_addr: H160,
+        note_kind: H256,
+        amount: U256,
+        height: U256,
+    ) -> Result<H256> {
+        let call_tx = self
+            .call(
+                "releaseSlowBurn",
+                (hash, burn_addr, note_kind, amount, height),
+            )
+            .await?;
+        Ok(call_tx)
+    }
+
     #[tracing::instrument(err, ret, skip(self))]
     pub async fn substitute_burn(
         &self,
