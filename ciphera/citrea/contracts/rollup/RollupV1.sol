@@ -764,7 +764,7 @@ contract RollupV1 is
 
         address substitutor = substitutedBurns[key];
         require(
-            substitutor != address(0) || block.timestamp > readyAt,
+            substitutor != address(0) || block.timestamp >= readyAt,
             "RollupV1: still cooling"
         );
 

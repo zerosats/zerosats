@@ -169,7 +169,7 @@ impl BurnSubstitutor {
 
                     substituted_burns.push(hash);
                 } else {
-                    info!("Skipping transaction of slow burn kind");
+                    info!("Handling transaction of slow burn kind");
                     self.handle_slow_burn(amount, hash).await?;
                     other_burns.push(hash);
                 }

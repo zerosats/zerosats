@@ -68,7 +68,7 @@ impl Utxo {
         }
     }
 
-    /// Create a new burn transaction without substitution
+    /// Create a new burn transaction of slow burn type (not picked up by substitutor, delayed)
     #[must_use]
     pub fn new_burn_no_sub(input_notes: [InputNote; 2], evm_address: Element) -> Self {
         Self {
