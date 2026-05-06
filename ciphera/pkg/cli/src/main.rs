@@ -4,6 +4,7 @@ use cli::NodeClient;
 use cli::Wallet;
 use cli::address::citrea_ticker_from_contract;
 use cli::address::decode_address;
+use cli::address::{citrea_usdc_note_kind, citrea_wcbtc_note_kind};
 use cli::note_url::{CipheraURL, decode_url};
 use cli::units;
 
@@ -126,11 +127,42 @@ enum Commands {
     Contract {
         #[arg(required = true, long, short)]
         geth_rpc: String,
+
+        /// Number of past blocks to scan for events (mints + slow burns).
+        /// Paginated in 1000-block chunks under the hood.
+        #[arg(long, short, default_value = "1000")]
+        blocks: u64,
     },
     /// List all mint hashes stored in the rollup contract with their values
     Mints {
         #[arg(required = true, long, short)]
         geth_rpc: String,
+
+        /// Number of past blocks to scan for MintAdded events.
+        /// Paginated in 1000-block chunks under the hood.
+        #[arg(long, short, default_value = "1000")]
+        blocks: u64,
+    },
+    /// Release a queued slow burn by reading metadata from the
+    /// SlowBurnQueued event and calling releaseSlowBurn on the rollup
+    /// contract.
+    ReleaseSlowBurn {
+        #[arg(required = true, long, short)]
+        geth_rpc: String,
+
+        /// Private key used to send the releaseSlowBurn transaction.
+        #[arg(required = true, long, short)]
+        secret: String,
+
+        /// `key` (indexed topic) of the SlowBurnQueued event to release.
+        /// 0x-prefixed 32-byte hex.
+        #[arg(required = true, long, short)]
+        key: String,
+
+        /// Number of past blocks to scan for the SlowBurnQueued event.
+        /// Paginated in 1000-block chunks under the hood.
+        #[arg(long, short, default_value = "1000")]
+        blocks: u64,
     },
     /// Deposit via Lightning Network using an external onramp service
     DepoLn {
@@ -1030,13 +1062,113 @@ async fn handle_burn(
     Ok(())
 }
 
-async fn handle_rollup(geth_rpc: &str, chain: u64, rollup: &str) -> Result<()> {
+async fn handle_release_slow_burn(
+    geth_rpc: &str,
+    chain: u64,
+    rollup: &str,
+    secret: &str,
+    key_hex: &str,
+    blocks: u64,
+) -> Result<()> {
+    use web3::ethabi::{Token, encode};
+    use web3::signing::{SecretKey, keccak256};
+
+    let key_bytes = hex::decode(key_hex.trim_start_matches("0x"))
+        .map_err(|e| color_eyre::eyre::eyre!("invalid --key hex: {e}"))?;
+    if key_bytes.len() != 32 {
+        return Err(color_eyre::eyre::eyre!("--key must be 32 bytes").into());
+    }
+    let target_key = H256::from_slice(&key_bytes);
+
+    let client = contracts::Client::new(geth_rpc, None);
+    let readonly = contracts::ReadonlyRollupContract::load(client.clone(), rollup).await?;
+
+    let queued = readonly.get_all_slow_burn_queued_events(blocks).await?;
+    let event = queued
+        .into_iter()
+        .find(|e| e.key == target_key)
+        .ok_or_else(|| {
+            color_eyre::eyre::eyre!(
+                "no SlowBurnQueued event found with key {target_key:#x} in the last scan window"
+            )
+        })?;
+
+    println!("\nFound SlowBurnQueued");
+    println!("\tKey         : {:#x}", event.key);
+    println!("\tHash        : {:#x}", event.hash);
+    println!("\tBurn Addr   : {:#x}", event.burn_addr);
+    println!("\tAmount      : {} wei", event.amount);
+    println!("\tReady At    : {} (unix)", event.ready_at);
+    println!("\tEmitted Tx  : {:#x}", event.transaction_hash);
+
+    let height = readonly
+        .rollup_verified_height_in_tx(event.transaction_hash)
+        .await?
+        .ok_or_else(|| {
+            color_eyre::eyre::eyre!(
+                "no RollupVerified event in tx {:#x}; cannot recover rollup height",
+                event.transaction_hash
+            )
+        })?;
+    println!("\tRollup Height (from RollupVerified): {height}");
+
+    // The contract's `getSubstituteBurnKey` is
+    //   keccak256(abi.encode(hash, burnAddr, noteKind, amount, height))
+    // The event only carries hash, burnAddr, amount; brute-force the
+    // remaining note_kind across the supported tokens by recomputing the
+    // key and matching it against the indexed `key` topic.
+    let candidate_kinds: Vec<(&str, H256)> = vec![
+        (
+            "WCBTC",
+            convert_element_to_h256(&citrea_wcbtc_note_kind()),
+        ),
+        ("USDC", convert_element_to_h256(&citrea_usdc_note_kind())),
+    ];
+
+    let mut matched: Option<(&str, H256)> = None;
+    for (ticker, kind) in &candidate_kinds {
+        let encoded = encode(&[
+            Token::FixedBytes(event.hash.as_bytes().to_vec()),
+            Token::Address(event.burn_addr),
+            Token::FixedBytes(kind.as_bytes().to_vec()),
+            Token::Uint(event.amount),
+            Token::Uint(height),
+        ]);
+        let computed = H256::from(keccak256(&encoded));
+        if computed == event.key {
+            matched = Some((ticker, *kind));
+            break;
+        }
+    }
+    let (ticker, note_kind) = matched.ok_or_else(|| {
+        color_eyre::eyre::eyre!(
+            "could not match any known note_kind (WCBTC/USDC) against event key {:#x}; \
+             contract may be using an unsupported token",
+            event.key
+        )
+    })?;
+    println!("\tNote Kind   : {note_kind:#x} ({ticker})");
+
+    let sk = SecretKey::from_str(secret)
+        .map_err(|e| color_eyre::eyre::eyre!("invalid --secret: {e}"))?;
+    let signed =
+        contracts::SignedRollupContract::load(client, &chain, rollup, sk).await?;
+
+    println!("\nCalling releaseSlowBurn ...");
+    let tx = signed
+        .release_slow_burn(event.hash, event.burn_addr, note_kind, event.amount, height)
+        .await?;
+    println!("\nSubmitted releaseSlowBurn tx {tx:#x}");
+
+    Ok(())
+}
+
+async fn handle_rollup(geth_rpc: &str, chain: u64, rollup: &str, blocks: u64) -> Result<()> {
     let client = contracts::Client::new(geth_rpc, None);
     let rollup = contracts::ReadonlyRollupContract::load(client, rollup).await?;
 
     let rh = rollup.root_hash().await?;
     let b = rollup.block_height().await?;
-    let version = rollup.version().await?;
     let kind_wcbtc = H256::from_slice(
         &hex::decode("000200000000000013fb8d0c9d1c17ae5e40fff9be350f57840e9e66cd930000").unwrap(),
     );
@@ -1050,7 +1182,6 @@ async fn handle_rollup(geth_rpc: &str, chain: u64, rollup: &str) -> Result<()> {
 
     println!("\nRollup State Info\n");
     println!("\tChain                :{chain} ");
-    println!("\tVersion              :{version} ");
     println!("\tToken kind WBTC      :{token_wbtc:#x} ");
     println!("\tToken kind USDC      :{token_usdc:#x} ");
     println!("\tBlock                :{b} ");
@@ -1074,7 +1205,7 @@ async fn handle_rollup(geth_rpc: &str, chain: u64, rollup: &str) -> Result<()> {
 
     // Last mint events
     println!("\nLast Mint Events\n");
-    let mint_events = rollup.get_all_mint_added_events().await?;
+    let mint_events = rollup.get_all_mint_added_events(blocks).await?;
     println!("\tTotal mints: {}\n", mint_events.len());
     if mint_events.is_empty() {
         println!("\tNo mints found.");
@@ -1091,14 +1222,55 @@ async fn handle_rollup(geth_rpc: &str, chain: u64, rollup: &str) -> Result<()> {
         }
     }
 
+    println!("\nSlow Burn Queued\n");
+    let queued = rollup.get_all_slow_burn_queued_events(blocks).await?;
+    println!("\tTotal queued: {}\n", queued.len());
+    if queued.is_empty() {
+        println!("\tNo SlowBurnQueued events found.");
+    } else {
+        println!(
+            "\t{:<66}  {:<66}  {:<42}  {:>20}  {:>12}  Block",
+            "Key", "Hash", "Burn Addr", "Amount (wei)", "Ready At"
+        );
+        for event in &queued {
+            println!(
+                "\t{:#x}  {:#x}  {:#x}  {:>20}  {:>12}  {}",
+                event.key,
+                event.hash,
+                event.burn_addr,
+                event.amount,
+                event.ready_at,
+                event.block_number
+            );
+        }
+    }
+
+    println!("\nSlow Burn Released\n");
+    let released = rollup.get_all_slow_burn_released_events(blocks).await?;
+    println!("\tTotal released: {}\n", released.len());
+    if released.is_empty() {
+        println!("\tNo SlowBurnReleased events found.");
+    } else {
+        println!(
+            "\t{:<66}  {:<42}  {:>11}  {:>8}  Block",
+            "Key", "Recipient", "Substituted", "Success"
+        );
+        for event in &released {
+            println!(
+                "\t{:#x}  {:#x}  {:>11}  {:>8}  {}",
+                event.key, event.recipient, event.substituted, event.success, event.block_number
+            );
+        }
+    }
+
     Ok(())
 }
 
-async fn handle_mints(geth_rpc: &str, chain: u64, rollup: &str) -> Result<()> {
+async fn handle_mints(geth_rpc: &str, chain: u64, rollup: &str, blocks: u64) -> Result<()> {
     let client = contracts::Client::new(geth_rpc, None);
     let rollup = contracts::ReadonlyRollupContract::load(client, rollup).await?;
 
-    let events = rollup.get_all_mint_added_events().await?;
+    let events = rollup.get_all_mint_added_events(blocks).await?;
 
     println!("\nMint Hashes in Contract\n");
     println!("\tChain: {chain}");
@@ -1142,12 +1314,19 @@ async fn main() -> Result<()> {
     init_error_handling()?;
 
     // Parse CLI arguments
-    let cli = Cli::parse();
+    let mut cli = Cli::parse();
 
     // Initialize logging
     init_logging(cli.verbose);
 
     debug!("Starting Ciphera CLI");
+
+    // An empty `--rollup=` on the command line overrides clap's default
+    // with the empty string and then blows up downstream in hex parsing.
+    // Treat empty as "fall back to the default address".
+    if cli.rollup.trim().is_empty() {
+        cli.rollup = "0xbd57b7d47d66934509f9ca31248598eb6cb3fafd".to_string();
+    }
 
     // Execute command
     match cli.command {
@@ -1246,11 +1425,20 @@ async fn main() -> Result<()> {
             )
             .await?;
         }
-        Commands::Contract { geth_rpc } => {
-            handle_rollup(&geth_rpc, cli.chain, &cli.rollup).await?;
+        Commands::Contract { geth_rpc, blocks } => {
+            handle_rollup(&geth_rpc, cli.chain, &cli.rollup, blocks).await?;
         }
-        Commands::Mints { geth_rpc } => {
-            handle_mints(&geth_rpc, cli.chain, &cli.rollup).await?;
+        Commands::Mints { geth_rpc, blocks } => {
+            handle_mints(&geth_rpc, cli.chain, &cli.rollup, blocks).await?;
+        }
+        Commands::ReleaseSlowBurn {
+            geth_rpc,
+            secret,
+            key,
+            blocks,
+        } => {
+            handle_release_slow_burn(&geth_rpc, cli.chain, &cli.rollup, &secret, &key, blocks)
+                .await?;
         }
         Commands::DepoLn {
             amount_sat,
