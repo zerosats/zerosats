@@ -89,7 +89,7 @@ See [Getting Started Guide](../../GettingStarted.md) for detailed instructions.
 
 - **Ciphera Node**: `ciphera.satsbridge.com:8091`
 - **Citrea Chain ID**: `5115`
-- **Citrea wcBTC Token**: `0x8d0c9d1c17aE5e40ffF9bE350f57840E9E66Cd93`
+- **Citrea wcBTC Token**: `0x4370e27F7d91D9341bFf232d7Ee8bdfE3a9933a0`
 - **Rollup Contract**: `0x26c698fa720806f93d94432d430415e3d15d3539`
 - **Citrea RPC**: `https://rpc.testnet.citrea.xyz`
 

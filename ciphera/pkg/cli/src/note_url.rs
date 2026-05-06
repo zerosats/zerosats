@@ -1,10 +1,10 @@
 use crate::address::{
-    citrea_currency_from_contract, citrea_usdc_note_kind, citrea_wcbtc_note_kind,
+    citrea_currency_from_contract,
 };
 use element::Element;
 use hash::hash_merge;
 use serde::{Deserialize, Serialize};
-use zk_primitives::{InputNote, Note};
+use zk_primitives::{InputNote, Note, citrea_usdc_note_kind, citrea_wcbtc_note_kind};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct CipheraURL {

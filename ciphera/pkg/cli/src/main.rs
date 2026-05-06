@@ -4,7 +4,6 @@ use cli::NodeClient;
 use cli::Wallet;
 use cli::address::citrea_ticker_from_contract;
 use cli::address::decode_address;
-use cli::address::{citrea_usdc_note_kind, citrea_wcbtc_note_kind};
 use cli::note_url::{CipheraURL, decode_url};
 use cli::units;
 
@@ -20,7 +19,7 @@ use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::Path;
 use std::str::FromStr;
-use zk_primitives::{InputNote, Note};
+use zk_primitives::{InputNote, Note, citrea_usdc_note_kind, citrea_wcbtc_note_kind};
 
 #[derive(Parser, Debug)]
 #[command(name = "ciphera-cli")]
@@ -1170,7 +1169,7 @@ async fn handle_rollup(geth_rpc: &str, chain: u64, rollup: &str, blocks: u64) ->
     let rh = rollup.root_hash().await?;
     let b = rollup.block_height().await?;
     let kind_wcbtc = H256::from_slice(
-        &hex::decode("000200000000000013fb8d0c9d1c17ae5e40fff9be350f57840e9e66cd930000").unwrap(),
+        &hex::decode("000200000000000013fb4370e27F7d91D9341bFf232d7Ee8bdfE3a9933a00000").unwrap(),
     );
 
     let kind_usdc = H256::from_slice(

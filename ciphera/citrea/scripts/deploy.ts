@@ -247,7 +247,7 @@ async function main() {
   let receipt;
 
   if (isTestnet) {
-    erc20Address = "0x8d0c9d1c17aE5e40ffF9bE350f57840E9E66Cd93";
+    erc20Address = process.env.ERC20_ADDRESS || "0x4370e27F7d91D9341bFf232d7Ee8bdfE3a9933a0";
     console.log(`✅ Using wrapped cBTC token`);
   } else {
     console.log("\n🔍 Deploying ERC20. Looking for binary file...");
@@ -376,7 +376,7 @@ async function main() {
     abi: IERC20Artifact.abi,
     client: { public: publicClient, wallet: walletClient },
   });
-  console.log(`✅ Obtained ERC20 contract: ${aliceToken}`);
+  console.log(`✅ Obtained ERC20 contract: ${erc20Address}`);
 
   console.log("\n🔍 Approving ERC20 spending for proxy...");
 

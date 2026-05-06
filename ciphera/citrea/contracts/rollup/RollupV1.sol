@@ -291,7 +291,7 @@ contract RollupV1 is
             0x0577b5b4aa3eaba75b2a919d5d7c63b7258aa507d38e346bf2ff1d48790379ff
         );
         tokens[
-            0x000200000000000013fb8d0c9d1c17ae5e40fff9be350f57840e9e66cd930000
+            0x000200000000000013fb4370e27F7d91D9341bFf232d7Ee8bdfE3a9933a00000
         ] = tokenAddress_;
         burnSubstitutors[owner_] = true;
         escrowManager = escrowManager_;
