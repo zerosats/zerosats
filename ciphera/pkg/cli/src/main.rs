@@ -1075,7 +1075,7 @@ async fn handle_release_slow_burn(
     let key_bytes = hex::decode(key_hex.trim_start_matches("0x"))
         .map_err(|e| color_eyre::eyre::eyre!("invalid --key hex: {e}"))?;
     if key_bytes.len() != 32 {
-        return Err(color_eyre::eyre::eyre!("--key must be 32 bytes").into());
+        return Err(color_eyre::eyre::eyre!("--key must be 32 bytes"));
     }
     let target_key = H256::from_slice(&key_bytes);
 
@@ -1117,10 +1117,7 @@ async fn handle_release_slow_burn(
     // remaining note_kind across the supported tokens by recomputing the
     // key and matching it against the indexed `key` topic.
     let candidate_kinds: Vec<(&str, H256)> = vec![
-        (
-            "WCBTC",
-            convert_element_to_h256(&citrea_wcbtc_note_kind()),
-        ),
+        ("WCBTC", convert_element_to_h256(&citrea_wcbtc_note_kind())),
         ("USDC", convert_element_to_h256(&citrea_usdc_note_kind())),
     ];
 
@@ -1150,8 +1147,7 @@ async fn handle_release_slow_burn(
 
     let sk = SecretKey::from_str(secret)
         .map_err(|e| color_eyre::eyre::eyre!("invalid --secret: {e}"))?;
-    let signed =
-        contracts::SignedRollupContract::load(client, &chain, rollup, sk).await?;
+    let signed = contracts::SignedRollupContract::load(client, &chain, rollup, sk).await?;
 
     println!("\nCalling releaseSlowBurn ...");
     let tx = signed
@@ -1197,7 +1193,7 @@ async fn handle_rollup(geth_rpc: &str, chain: u64, rollup: &str, blocks: u64) ->
             );
         }
         index += 1;
-    };
+    }
     if index == 0 {
         println!("\tNo ZK verifiers found.");
     }

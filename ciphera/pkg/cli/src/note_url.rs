@@ -1,6 +1,4 @@
-use crate::address::{
-    citrea_currency_from_contract,
-};
+use crate::address::citrea_currency_from_contract;
 use element::Element;
 use hash::hash_merge;
 use serde::{Deserialize, Serialize};

@@ -353,15 +353,13 @@ fn test_alt_agg_utxo() {
         note: send_note(25, address, 12),
         secret_key,
     };
-    tree.insert(slow_input_note1.note.commitment(), ())
-        .unwrap();
+    tree.insert(slow_input_note1.note.commitment(), ()).unwrap();
 
     let slow_input_note2 = InputNote {
         note: send_note(15, address, 13),
         secret_key,
     };
-    tree.insert(slow_input_note2.note.commitment(), ())
-        .unwrap();
+    tree.insert(slow_input_note2.note.commitment(), ()).unwrap();
 
     let old_root = tree.root_hash();
 

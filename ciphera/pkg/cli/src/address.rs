@@ -2,7 +2,7 @@ use element::Element;
 use rand::RngCore;
 use rand::rngs::OsRng;
 use serde::{Deserialize, Serialize};
-use zk_primitives::{Note, citrea_wcbtc_note_kind, citrea_usdc_note_kind};
+use zk_primitives::{Note, citrea_usdc_note_kind, citrea_wcbtc_note_kind};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct CipheraAddress {
