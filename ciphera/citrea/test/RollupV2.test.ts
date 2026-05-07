@@ -31,7 +31,7 @@ import {
 import transparentProxyArtifact from "../openzeppelin-contracts/contracts/proxy/transparent/TransparentUpgradeableProxy.sol/TransparentUpgradeableProxy.json";
 
 const NOTE_KIND =
-  "0x000200000000000013fb8d0c9d1c17ae5e40fff9be350f57840e9e66cd930000" as const;
+  "0x000200000000000013fb4370e27F7d91D9341bFf232d7Ee8bdfE3a9933a00000" as const;
 const VK_HASH =
   "0x0000000000000000000000000000000000000000000000000000000000000001" as const;
 

@@ -38,6 +38,9 @@ pub struct Config {
     )]
     erc20_contract_addr: String,
 
+    #[arg(long, env = "CLAIMER_CONTRACT_ADDR")]
+    claimer_contract_addr: String,
+
     #[command(flatten)]
     #[serde(skip)]
     keystore: KeystoreOpts,
@@ -104,6 +107,10 @@ async fn main() -> Result<(), eyre::Error> {
     let erc20_contract =
         contracts::ERC20Contract::load(client.clone(), &config.erc20_contract_addr, secret_key)
             .await?;
+    let claimer_contract = client.load_contract_from_str(
+        &config.claimer_contract_addr,
+        include_str!("../../abi/Claimer.sol/Claimer.json"),
+    )?;
 
     let wallet_address = rollup_contract.signer_address;
 
@@ -151,6 +158,7 @@ async fn main() -> Result<(), eyre::Error> {
     let mut substitutor = burn_substitutor::BurnSubstitutor::new(
         rollup_contract,
         erc20_contract,
+        claimer_contract,
         config.host,
         Duration::from_secs(1),
         config.offramp_url,

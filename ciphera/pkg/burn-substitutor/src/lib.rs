@@ -9,12 +9,17 @@ use primitives::{
 };
 use reqwest::StatusCode;
 use std::time::Duration;
+use web3::contract::Contract;
+use web3::transports::Http;
 use zk_primitives::{UtxoKind, UtxoKindMessages, UtxoProof};
 
 use tracing::{debug, info};
 
 const MAX_ATTEMPTS: u32 = 3;
 const RETRY_DELAY: Duration = Duration::from_secs(5);
+/// Delay between sending the Atomiq commitment tx and calling `verifySwapAndBurn`
+/// on the Claimer contract.
+const VERIFY_SWAP_AND_BURN_DELAY: Duration = Duration::from_secs(600);
 
 /// Call `op` up to `max_attempts` times with `delay` between attempts, returning the first
 /// `Some` result. On `Ok(None)` the helper sleeps and retries; on `Err` it short-circuits.
@@ -42,6 +47,7 @@ where
 pub struct BurnSubstitutor {
     rollup_contract: RollupContract,
     erc20_contract: ERC20Contract,
+    claimer_contract: Contract<Http>,
     node_rpc_url: String,
     eth_txn_confirm_wait_interval: Duration,
     cursor: Option<OpaqueCursorChoice<ListTxnsPosition>>,
@@ -53,6 +59,7 @@ impl BurnSubstitutor {
     pub fn new(
         rollup_contract: RollupContract,
         erc20_contract: ERC20Contract,
+        claimer_contract: Contract<Http>,
         node_rpc_url: String,
         eth_txn_confirm_wait_interval: Duration,
         offramp_url: String,
@@ -61,6 +68,7 @@ impl BurnSubstitutor {
         BurnSubstitutor {
             rollup_contract,
             erc20_contract,
+            claimer_contract,
             node_rpc_url,
             eth_txn_confirm_wait_interval,
             cursor: None,
@@ -456,9 +464,71 @@ impl BurnSubstitutor {
                 )
                 .await
                 .context("Failed to wait for commitTx confirmation")?;
+
+            self.schedule_verify_swap_and_burn(escrow, swap_id.clone(), burn_hash);
         }
 
         Ok(())
+    }
+
+    /// Spawn a background task that, after `VERIFY_SWAP_AND_BURN_DELAY`, calls
+    /// `verifySwapAndBurn(escrow)` on the Claimer contract. Atomiq exposes the
+    /// preimage to the claimer once the BTC side is settled; the substitutor
+    /// gives that flow a window to complete before pushing the swap to the
+    /// Claimer to release funds and mark the burn as substituted.
+    fn schedule_verify_swap_and_burn(
+        &self,
+        escrow: EscrowData,
+        swap_id: String,
+        burn_hash: Element,
+    ) {
+        let client = self.rollup_contract.client.clone();
+        let claimer_contract = self.claimer_contract.clone();
+        let signer = self.rollup_contract.signer;
+        let signer_address = self.rollup_contract.signer_address;
+        let confirm_interval = self.eth_txn_confirm_wait_interval;
+        let escrow_token = escrow.to_token();
+
+        tokio::spawn(async move {
+            tokio::time::sleep(VERIFY_SWAP_AND_BURN_DELAY).await;
+
+            info!(
+                ?burn_hash,
+                %swap_id,
+                "Calling Claimer.verifySwapAndBurn after commitment delay"
+            );
+
+            let tx_hash = match client
+                .call(
+                    &claimer_contract,
+                    "verifySwapAndBurn",
+                    (escrow_token,),
+                    &signer,
+                    signer_address,
+                )
+                .await
+            {
+                Ok(h) => h,
+                Err(e) => {
+                    tracing::warn!(?burn_hash, %swap_id, error = %e, "verifySwapAndBurn call failed");
+                    return;
+                }
+            };
+
+            info!(?burn_hash, %swap_id, "verifySwapAndBurn tx sent {:x}", tx_hash);
+
+            if let Err(e) = client
+                .wait_for_confirm(tx_hash, confirm_interval, ConfirmationType::Latest)
+                .await
+            {
+                tracing::warn!(
+                    ?burn_hash,
+                    %swap_id,
+                    error = %e,
+                    "verifySwapAndBurn confirmation failed",
+                );
+            }
+        });
     }
 
     async fn fetch_last_rollup_block(&mut self) -> Result<BlockHeight, contracts::Error> {
