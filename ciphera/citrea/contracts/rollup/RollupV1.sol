@@ -110,7 +110,6 @@ contract RollupV1 is
     mapping(bytes32 => uint256) public delays;
 
     // Single-token policy: seeded in initialize() and immutable
-    // afterward (addToken is disabled).
     mapping(bytes32 => address) tokens;
 
     // Actors
@@ -458,10 +457,6 @@ contract RollupV1 is
 
     function currentRootHash() public view returns (bytes32) {
         return rootHash;
-    }
-
-    function addToken(bytes32, address) public pure {
-        revert("RollupV1: addToken disabled");
     }
 
     // Owner-gated setters. After init, owner() is the timelock, so

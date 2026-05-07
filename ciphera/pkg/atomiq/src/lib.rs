@@ -1,4 +1,5 @@
 use ethereum_types::{Address, H256, U256};
+use web3::ethabi::Token;
 
 /// Flags used in EscrowData
 const FLAG_PAY_OUT: u64 = 0x01;
@@ -283,6 +284,27 @@ impl EscrowData {
         result.extend_from_slice(&self.success_action_commitment);
 
         result
+    }
+
+    /// ABI-encode this escrow as a `Token::Tuple` matching the Solidity
+    /// `EscrowData` struct, suitable for passing to contract calls such as
+    /// `Claimer.verifySwapAndBurn`.
+    pub fn to_token(&self) -> Token {
+        Token::Tuple(vec![
+            Token::Address(self.offerer),
+            Token::Address(self.claimer),
+            Token::Uint(self.amount),
+            Token::Address(self.token),
+            Token::Uint(self.flags.to_u256()),
+            Token::Address(self.claim_handler),
+            Token::FixedBytes(self.claim_data.to_vec()),
+            Token::Address(self.refund_handler),
+            Token::FixedBytes(self.refund_data.to_vec()),
+            Token::Uint(self.security_deposit),
+            Token::Uint(self.claimer_bounty),
+            Token::Address(self.deposit_token),
+            Token::FixedBytes(self.success_action_commitment.to_vec()),
+        ])
     }
 
     /// Calculate the escrow hash (keccak256 of ABI-encoded data)

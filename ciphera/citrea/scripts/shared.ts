@@ -49,7 +49,7 @@ export const citreaTestChain = {
   },
 } as const;
 
-export const WCBTC_ADDRESS = "0x8d0c9d1c17aE5e40ffF9bE350f57840E9E66Cd93" as const;
+export const WCBTC_ADDRESS = "0x4370e27F7d91D9341bFf232d7Ee8bdfE3a9933a0" as const;
 
 export const WCBTC_ABI = [
   {
