@@ -16,23 +16,20 @@ use noirc_driver::CompiledProgram;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use zk_primitives::{
-    AggAgg, AggAggProof, AggAggProofBytes, AggAggPublicInput, AggUtxoProof, ToBytes,
-    bytes_to_elements,
+    AggAgg, AggAggProof, AggAggProofBytes, AggAggPublicInput, AggUtxoProof, bytes_to_elements,
 };
 
 const PROGRAM: &str = include_str!("../../../../fixtures/programs/agg_agg.json");
 const KEY: &[u8] = include_bytes!("../../../../fixtures/keys/agg_agg_key");
-const KEY_FIELDS: &[u8] = include_bytes!("../../../../fixtures/keys/agg_agg_key_fields.json");
 
 lazy_static! {
     static ref PROGRAM_ARTIFACT: ProgramArtifact = serde_json::from_str(PROGRAM).unwrap();
     static ref PROGRAM_COMPILED: CompiledProgram = CompiledProgram::from(PROGRAM_ARTIFACT.clone());
     static ref PROGRAM_PATH: PathBuf = write_to_temp_file(PROGRAM.as_bytes(), ".json");
     static ref BYTECODE: Vec<u8> = get_bytecode_from_program(PROGRAM);
-    pub static ref AGG_AGG_VERIFICATION_KEY: VerificationKey =
-        VerificationKey(serde_json::from_slice(KEY_FIELDS).unwrap());
+    pub static ref AGG_AGG_VERIFICATION_KEY: VerificationKey = VerificationKey::from_bytes(KEY);
     pub static ref AGG_AGG_VERIFICATION_KEY_HASH: VerificationKeyHash = VerificationKeyHash(
-        bn254_blackbox_solver::poseidon_hash(&AGG_AGG_VERIFICATION_KEY.0, false).unwrap()
+        bn254_blackbox_solver::poseidon_hash(&AGG_AGG_VERIFICATION_KEY.0).unwrap()
     );
 }
 
@@ -69,10 +66,10 @@ impl Prove for AggAgg {
             AGG_AGG_PUBLIC_INPUTS_COUNT,
             "Public inputs must be {AGG_AGG_PUBLIC_INPUTS_COUNT} elements"
         );
-        assert_eq!(
-            raw_proof.len(),
-            508 * 32,
-            "Proof must be 508 elements of 32 bytes"
+        assert!(
+            raw_proof.len() % 32 == 0,
+            "raw proof length {} is not a multiple of 32",
+            raw_proof.len()
         );
 
         let p = AggAggProof {
@@ -91,7 +88,7 @@ impl Prove for AggAgg {
 
 impl Verify for AggAggProof {
     fn verify(&self) -> Result<()> {
-        verify::<DefaultBackend>(KEY, &self.to_bytes(), true)
+        verify::<DefaultBackend>(KEY, &self.public_inputs.to_bytes(), &self.proof.0, true)
     }
 }
 

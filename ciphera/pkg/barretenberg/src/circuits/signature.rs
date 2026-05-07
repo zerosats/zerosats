@@ -14,7 +14,7 @@ use noirc_artifacts::program::ProgramArtifact;
 use noirc_driver::CompiledProgram;
 use std::path::PathBuf;
 use zk_primitives::{
-    Signature, SignatureProof, SignatureProofBytes, SignaturePublicInput, ToBytes,
+    Signature, SignatureProof, SignatureProofBytes, SignaturePublicInput,
     bytes_to_elements, get_address_for_private_key,
 };
 
@@ -75,7 +75,7 @@ impl Prove for Signature {
 
 impl Verify for SignatureProof {
     fn verify(&self) -> Result<()> {
-        verify::<DefaultBackend>(KEY, &self.to_bytes(), false)
+        verify::<DefaultBackend>(KEY, &self.public_inputs.to_bytes(), &self.proof.0, false)
     }
 }
 

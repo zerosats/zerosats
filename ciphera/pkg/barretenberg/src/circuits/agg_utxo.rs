@@ -15,23 +15,21 @@ use noirc_driver::CompiledProgram;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use zk_primitives::{
-    AggUtxo, AggUtxoProof, AggUtxoProofBytes, AggUtxoPublicInput, MerklePath, ToBytes,
+    AggUtxo, AggUtxoProof, AggUtxoProofBytes, AggUtxoPublicInput, MerklePath,
     UtxoProofBundleWithMerkleProofs, bytes_to_elements,
 };
 
 const PROGRAM: &str = include_str!("../../../../fixtures/programs/agg_utxo.json");
 const KEY: &[u8] = include_bytes!("../../../../fixtures/keys/agg_utxo_key");
-const KEY_FIELDS: &[u8] = include_bytes!("../../../../fixtures/keys/agg_utxo_key_fields.json");
 
 lazy_static! {
     static ref PROGRAM_ARTIFACT: ProgramArtifact = serde_json::from_str(PROGRAM).unwrap();
     static ref PROGRAM_COMPILED: CompiledProgram = CompiledProgram::from(PROGRAM_ARTIFACT.clone());
     static ref PROGRAM_PATH: PathBuf = write_to_temp_file(PROGRAM.as_bytes(), ".json");
     static ref BYTECODE: Vec<u8> = get_bytecode_from_program(PROGRAM);
-    pub static ref AGG_UTXO_VERIFICATION_KEY: VerificationKey =
-        VerificationKey(serde_json::from_slice(KEY_FIELDS).unwrap());
+    pub static ref AGG_UTXO_VERIFICATION_KEY: VerificationKey = VerificationKey::from_bytes(KEY);
     pub static ref AGG_UTXO_VERIFICATION_KEY_HASH: VerificationKeyHash = VerificationKeyHash(
-        bn254_blackbox_solver::poseidon_hash(&AGG_UTXO_VERIFICATION_KEY.0, false).unwrap()
+        bn254_blackbox_solver::poseidon_hash(&AGG_UTXO_VERIFICATION_KEY.0).unwrap()
     );
 }
 
@@ -106,7 +104,7 @@ impl Prove for AggUtxo {
 
 impl Verify for AggUtxoProof {
     fn verify(&self) -> Result<()> {
-        verify::<DefaultBackend>(KEY, &self.to_bytes(), false)
+        verify::<DefaultBackend>(KEY, &self.public_inputs.to_bytes(), &self.proof.0, false)
     }
 }
 

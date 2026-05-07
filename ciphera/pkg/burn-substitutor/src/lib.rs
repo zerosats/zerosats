@@ -1,5 +1,5 @@
 use atomiq::EscrowData;
-use contracts::{Address, ConfirmationType, ERC20Contract, RollupContract};
+use contracts::{Address, ConfirmationType, ERC20Contract, RollupContract, U256, util};
 use element::Element;
 use eth_util::Eth;
 use eyre::{Context, ContextCompat};
@@ -10,7 +10,10 @@ use primitives::{
 use reqwest::StatusCode;
 use std::time::Duration;
 use web3::contract::Contract;
+use web3::ethabi::{Token, encode};
+use web3::signing::keccak256;
 use web3::transports::Http;
+use web3::types::H256;
 use zk_primitives::{UtxoKind, UtxoKindMessages, UtxoProof};
 
 use tracing::{debug, info};
@@ -178,7 +181,14 @@ impl BurnSubstitutor {
                     substituted_burns.push(hash);
                 } else {
                     info!("Handling transaction of slow burn kind");
-                    self.handle_slow_burn(amount, hash).await?;
+                    self.handle_slow_burn(
+                        amount,
+                        hash,
+                        burn_address,
+                        note_kind,
+                        txn.block_height.0,
+                    )
+                    .await?;
                     other_burns.push(hash);
                 }
             }
@@ -197,7 +207,18 @@ impl BurnSubstitutor {
         &mut self,
         amount: Element,
         burn_hash: Element,
+        burn_address: Address,
+        note_kind: Element,
+        block_height: u64,
     ) -> Result<(), eyre::Error> {
+        let substitute_burn_key = compute_substitute_burn_key(
+            &burn_hash,
+            &burn_address,
+            &note_kind,
+            &amount,
+            block_height,
+        );
+
         let burn_value = amount.to_eth_u256();
         let burner_addr = format!("{:#x}", self.substitutor_address);
 
@@ -465,6 +486,34 @@ impl BurnSubstitutor {
                 .await
                 .context("Failed to wait for commitTx confirmation")?;
 
+            // Register the slow burn against the swap on the Claimer contract.
+            // `verifySwapAndBurn` reverts with "Claimer: no pending burn" unless
+            // this has been done first.
+            let add_tx = self
+                .rollup_contract
+                .client
+                .call(
+                    &self.claimer_contract,
+                    "addBurnIfSwapCreated",
+                    (escrow.to_token(), Token::FixedBytes(substitute_burn_key.as_bytes().to_vec())),
+                    &self.rollup_contract.signer,
+                    self.rollup_contract.signer_address,
+                )
+                .await
+                .context("Failed to call Claimer.addBurnIfSwapCreated")?;
+
+            info!(?burn_hash, %swap_id, "addBurnIfSwapCreated tx sent {:x}", add_tx);
+
+            self.rollup_contract
+                .client
+                .wait_for_confirm(
+                    add_tx,
+                    self.eth_txn_confirm_wait_interval,
+                    ConfirmationType::Latest,
+                )
+                .await
+                .context("Failed to wait for addBurnIfSwapCreated confirmation")?;
+
             self.schedule_verify_swap_and_burn(escrow, swap_id.clone(), burn_hash);
         }
 
@@ -624,6 +673,26 @@ where
     T: serde::Deserialize<'de>,
 {
     Ok(<Option<Vec<T>> as serde::Deserialize>::deserialize(deserializer)?.unwrap_or_default())
+}
+
+/// Compute the slow-burn key the rollup uses to index queued slow burns and the
+/// Claimer uses as its `pendingBurns` lookup key:
+///   keccak256(abi.encode(hash, burnAddr, noteKind, amount, height))
+fn compute_substitute_burn_key(
+    hash: &Element,
+    burn_addr: &Address,
+    note_kind: &Element,
+    amount: &Element,
+    height: u64,
+) -> H256 {
+    let encoded = encode(&[
+        Token::FixedBytes(util::convert_element_to_h256(hash).as_bytes().to_vec()),
+        Token::Address(*burn_addr),
+        Token::FixedBytes(util::convert_element_to_h256(note_kind).as_bytes().to_vec()),
+        Token::Uint(amount.to_eth_u256()),
+        Token::Uint(U256::from(height)),
+    ]);
+    H256::from(keccak256(&encoded))
 }
 
 #[derive(Debug, serde::Deserialize)]

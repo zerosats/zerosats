@@ -14,7 +14,7 @@ use noirc_artifacts::program::ProgramArtifact;
 use noirc_driver::CompiledProgram;
 use std::path::PathBuf;
 use zk_primitives::{
-    Points, PointsProof, PointsProofBytes, PointsPublicInput, ToBytes, bytes_to_elements,
+    Points, PointsProof, PointsProofBytes, PointsPublicInput, bytes_to_elements,
 };
 
 use super::note::BNote;
@@ -77,7 +77,7 @@ impl Prove for Points {
 
 impl Verify for PointsProof {
     fn verify(&self) -> Result<()> {
-        verify::<DefaultBackend>(KEY, &self.to_bytes(), false)
+        verify::<DefaultBackend>(KEY, &self.public_inputs.to_bytes(), &self.proof.0, false)
     }
 }
 

@@ -14,24 +14,20 @@ use noirc_artifacts::program::ProgramArtifact;
 use noirc_driver::CompiledProgram;
 use std::path::PathBuf;
 use zk_primitives::{
-    Migrate, MigrateProof, MigrateProofBytes, MigratePublicInput, ToBytes, bytes_to_elements,
+    Migrate, MigrateProof, MigrateProofBytes, MigratePublicInput, bytes_to_elements,
 };
 
 const PROGRAM: &str = include_str!("../../../../fixtures/programs/migrate.json");
 const KEY: &[u8] = include_bytes!("../../../../fixtures/keys/migrate_key/vk");
-const KEY_FIELDS: &[u8] = include_bytes!("../../../../fixtures/keys/migrate_key_fields.json");
 
 lazy_static! {
     static ref PROGRAM_ARTIFACT: ProgramArtifact = serde_json::from_str(PROGRAM).unwrap();
     static ref PROGRAM_COMPILED: CompiledProgram = CompiledProgram::from(PROGRAM_ARTIFACT.clone());
     static ref PROGRAM_PATH: PathBuf = write_to_temp_file(PROGRAM.as_bytes(), ".json");
     static ref BYTECODE: Vec<u8> = get_bytecode_from_program(PROGRAM);
-    pub static ref MIGRATE_VERIFICATION_KEY: VerificationKey = {
-        let fields = serde_json::from_slice::<Vec<Base>>(KEY_FIELDS).unwrap();
-        VerificationKey(fields)
-    };
+    pub static ref MIGRATE_VERIFICATION_KEY: VerificationKey = VerificationKey::from_bytes(KEY);
     pub static ref MIGRATE_VERIFICATION_KEY_HASH: VerificationKeyHash = VerificationKeyHash(
-        bn254_blackbox_solver::poseidon_hash(&MIGRATE_VERIFICATION_KEY.0, false).unwrap()
+        bn254_blackbox_solver::poseidon_hash(&MIGRATE_VERIFICATION_KEY.0).unwrap()
     );
 }
 
@@ -107,7 +103,7 @@ impl Prove for Migrate {
 
 impl Verify for MigrateProof {
     fn verify(&self) -> Result<()> {
-        verify::<DefaultBackend>(KEY, &self.to_bytes(), false)
+        verify::<DefaultBackend>(KEY, &self.public_inputs.to_bytes(), &self.proof.0, false)
     }
 }
 

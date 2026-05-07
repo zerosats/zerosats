@@ -66,15 +66,24 @@ impl Backend for BindingBackend {
         Ok(proof)
     }
 
-    fn verify(proof: &[u8], key: &[u8], oracle_hash_keccak: bool) -> Result<()> {
+    fn verify(
+        public_inputs: &[u8],
+        proof: &[u8],
+        key: &[u8],
+        oracle_hash_keccak: bool,
+    ) -> Result<()> {
         let _guard = BB_MUTEX.lock().unwrap();
 
         Self::load_srs();
 
+        let combined = [public_inputs, proof].concat();
+
         let verified = match oracle_hash_keccak {
-            false => unsafe { bb_rs::barretenberg_api::acir::acir_verify_ultra_honk(proof, key) },
+            false => unsafe {
+                bb_rs::barretenberg_api::acir::acir_verify_ultra_honk(&combined, key)
+            },
             true => unsafe {
-                bb_rs::barretenberg_api::acir::acir_verify_ultra_keccak_zk_honk(proof, key)
+                bb_rs::barretenberg_api::acir::acir_verify_ultra_keccak_zk_honk(&combined, key)
             },
         };
 
