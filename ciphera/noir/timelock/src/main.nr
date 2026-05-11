@@ -1,7 +1,7 @@
 use poseidon::poseidon2;
-use sha256::{digest, sha256_var};
+use sha256::digest;
 
-global MAX_CHAIN_LEN: u32 = 3;
+global MAX_CHAIN_LEN: u32 = 2;
 global MIN_ALLTIME_DIFF: u32 = 9;
 global DIFFICULTY_DELTA: u32 = 3;
 
@@ -91,6 +91,7 @@ fn check_pow_chain(
         if active & !chainhash_ok { ok = false; }
 
         // (b) PoW difficulty
+        // Safety: the thing is, it is unsafe at the selected backend version Noir 14, BB 3.0.0
         let h = unsafe { double_sha256_header(header) };
         let block_zeros = count_leading_zero_bits(h);
         let diff_ok = difficulty_within_bounds(anchor_zeros, block_zeros);
@@ -170,6 +171,29 @@ fn header_946922() -> [u8; 80] {
     ]
 }
 
+fn poseidon_commitment(zero_block: [u8; 32], n_blocks: Field) -> Field {
+    let (low, high) = bytes_32_to_field_pair(zero_block);
+    let zero_block_hash = poseidon2::Poseidon2::hash([low, high], 2);
+    poseidon2::Poseidon2::hash([zero_block_hash, n_blocks], 2)
+}
+
+#[test]
+fn test_main_two_blocks() {
+    let zero_block = anchor_zero_block();
+
+    let mut time_headers: [[u8; 80]; MAX_CHAIN_LEN] = [[0; 80]; MAX_CHAIN_LEN];
+    time_headers[0] = header_946921();
+    time_headers[1] = header_946922();
+    // remaining slots left as zero padding
+
+    let n_blocks = 2 as Field;
+    let poseidon_hash = poseidon_commitment(zero_block, n_blocks);
+    println(f"poseidon_hash (n=2) = {poseidon_hash}");
+
+    main(n_blocks, zero_block, time_headers, poseidon_hash);
+}
+
+/*
 fn header_946923() -> [u8; 80] {
     [
         0x00, 0xe0, 0xff, 0x3f,
@@ -187,6 +211,24 @@ fn header_946923() -> [u8; 80] {
     ]
 }
 
+#[test]
+fn test_main_three_blocks() {
+    let zero_block = anchor_zero_block();
+
+    let mut time_headers: [[u8; 80]; MAX_CHAIN_LEN] = [[0; 80]; MAX_CHAIN_LEN];
+    time_headers[0] = header_946921();
+    time_headers[1] = header_946922();
+    time_headers[2] = header_946923();
+
+    let n_blocks = 3 as Field;
+    let poseidon_hash = poseidon_commitment(zero_block, n_blocks);
+    println(f"poseidon_hash (n=3) = {poseidon_hash}");
+
+    main(n_blocks, zero_block, time_headers, poseidon_hash);
+}
+*/
+
+/*
 fn header_946924() -> [u8; 80] {
     [
         0x00, 0x20, 0x7c, 0x27,
@@ -238,45 +280,6 @@ fn header_946926() -> [u8; 80] {
     ]
 }
 
-fn poseidon_commitment(zero_block: [u8; 32], n_blocks: Field) -> Field {
-    let (low, high) = bytes_32_to_field_pair(zero_block);
-    let zero_block_hash = poseidon2::Poseidon2::hash([low, high], 2);
-    poseidon2::Poseidon2::hash([zero_block_hash, n_blocks], 2)
-}
-
-#[test]
-fn test_main_two_blocks() {
-    let zero_block = anchor_zero_block();
-
-    let mut time_headers: [[u8; 80]; MAX_CHAIN_LEN] = [[0; 80]; MAX_CHAIN_LEN];
-    time_headers[0] = header_946921();
-    time_headers[1] = header_946922();
-    // remaining slots left as zero padding
-
-    let n_blocks = 2 as Field;
-    let poseidon_hash = poseidon_commitment(zero_block, n_blocks);
-    println(f"poseidon_hash (n=2) = {poseidon_hash}");
-
-    main(n_blocks, zero_block, time_headers, poseidon_hash);
-}
-
-#[test]
-fn test_main_three_blocks() {
-    let zero_block = anchor_zero_block();
-
-    let mut time_headers: [[u8; 80]; MAX_CHAIN_LEN] = [[0; 80]; MAX_CHAIN_LEN];
-    time_headers[0] = header_946921();
-    time_headers[1] = header_946922();
-    time_headers[2] = header_946923();
-
-    let n_blocks = 3 as Field;
-    let poseidon_hash = poseidon_commitment(zero_block, n_blocks);
-    println(f"poseidon_hash (n=3) = {poseidon_hash}");
-
-    main(n_blocks, zero_block, time_headers, poseidon_hash);
-}
-
-/*
 #[test]
 fn test_main_six_blocks() {
     let zero_block = anchor_zero_block();
