@@ -30,6 +30,7 @@ minimal-poseidon = { path = "./pkg/minimal-poseidon" }
 node = { path = "./pkg/node" }
 node-interface = { path = "./pkg/node-interface" }
 p2p2 = { path = "./pkg/p2p2" }
+payy = { path = "./pkg/payy" }
 primitives = { path = "./pkg/primitives" }
 prover = { path = "./pkg/prover" }
 rpc = { path = "./pkg/rpc" }
