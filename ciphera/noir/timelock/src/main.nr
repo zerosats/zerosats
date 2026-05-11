@@ -1,0 +1,310 @@
+use poseidon::poseidon2;
+use sha256::digest;
+
+global MAX_CHAIN_LEN: u32 = 6;
+global MIN_ALLTIME_DIFF: u32 = 9;
+global DIFFICULTY_DELTA: u32 = 3;
+
+fn count_leading_zero_bits(hash_le: [u8; 32]) -> u32 {
+    // Reverse to big-endian
+    let mut hash_be: [u8; 32] = [0; 32];
+    for i in 0..32 {
+        hash_be[i] = hash_le[31 - i];
+    }
+
+    let mut zeros: u32 = 0;
+    let mut done:  bool = false;
+
+    for i in 0..32 {
+        let byte = hash_be[i];
+        if !done {
+            if byte == 0 {
+                zeros = zeros + 8;
+            } else {
+                if byte < 0x80 { zeros = zeros + 1; }
+                if byte < 0x40 { zeros = zeros + 1; }
+                if byte < 0x20 { zeros = zeros + 1; }
+                if byte < 0x10 { zeros = zeros + 1; }
+                if byte < 0x08 { zeros = zeros + 1; }
+                if byte < 0x04 { zeros = zeros + 1; }
+                if byte < 0x02 { zeros = zeros + 1; }
+                // byte is non-zero so it has at least one '1'
+                done = true;
+            }
+        }
+    }
+    zeros
+}
+
+fn difficulty_within_bounds(anchor_zeros: u32, block_zeros: u32) -> bool {
+    let lower = if anchor_zeros >= DIFFICULTY_DELTA { anchor_zeros - DIFFICULTY_DELTA } else { 0 };
+    let upper = anchor_zeros + DIFFICULTY_DELTA;
+    (block_zeros >= lower) & (block_zeros <= upper)
+}
+
+fn bytes_eq_32(a: [u8; 32], b: [u8; 32]) -> bool {
+    let mut eq: bool = true;
+    for i in 0..32 {
+        if a[i] != b[i] { eq = false; }
+    }
+    eq
+}
+
+fn double_sha256_header(header: [u8; 80]) -> [u8; 32] {
+    let h1 = digest(header);
+    digest(h1)
+}
+
+fn extract_prev_hash(header: [u8; 80]) -> [u8; 32] {
+    let mut out: [u8; 32] = [0; 32];
+    for i in 0..32 {
+        out[i] = header[4 + i];
+    }
+    out
+}
+
+fn check_pow_chain(
+    headers: [[u8; 80]; MAX_CHAIN_LEN],
+    anchor_hash: [u8; 32],
+    n_blocks: Field,
+) -> bool {
+    let anchor_zeros = count_leading_zero_bits(anchor_hash);
+
+    let mut ok: bool = true;
+    let mut active: bool = true;
+    let mut expected_prev: [u8; 32] = anchor_hash;
+
+    for i in 0..MAX_CHAIN_LEN {
+        if (i as Field) == n_blocks { active = false; }
+
+        let header = headers[i];
+
+        println("Prev header:");
+        println(extract_prev_hash(header));
+        println("Expected:");
+        println(expected_prev);
+
+        // (a) chain of hashes
+        let chainhash_ok = bytes_eq_32(extract_prev_hash(header), expected_prev);
+        if active & !chainhash_ok { ok = false; }
+
+        // (b) PoW difficulty
+        let h = double_sha256_header(header);
+        let block_zeros = count_leading_zero_bits(h);
+        let diff_ok = difficulty_within_bounds(anchor_zeros, block_zeros);
+        if active & !diff_ok { ok = false; }
+
+        if active { expected_prev = h; }
+    }
+
+    ok
+}
+
+fn main(n_blocks: Field, zero_block: [u8; 32], time_headers: [[u8; 80]; MAX_CHAIN_LEN], poseidon_hash: pub Field) {
+    let start_difficulty = count_leading_zero_bits(zero_block);
+    assert( MIN_ALLTIME_DIFF <= start_difficulty, "Assertion failed at minimal allowed difficulty" );
+
+    let mut low_bytes = [0u8; 16];
+    let mut high_bytes = [0u8; 16];
+
+    for i in 0..16 {
+        low_bytes[i] = zero_block[i];
+        high_bytes[i] = zero_block[i + 16];
+    }
+
+    let low = Field::from_be_bytes::<16>(low_bytes);
+    let high = Field::from_be_bytes::<16>(high_bytes);
+
+    let zero_block_hash = poseidon2::Poseidon2::hash([low, high], 2);
+    let timechain_commitment = poseidon2::Poseidon2::hash([zero_block_hash, n_blocks], 2);
+    assert( timechain_commitment == poseidon_hash );
+
+    assert(
+        check_pow_chain(time_headers, zero_block, n_blocks)
+    );
+}
+
+// =====================================================================
+// Test fixtures
+// =====================================================================
+//
+// Anchor: block 946920 -- hash (BE display)
+//     00000000000000000000e77cb61854a79b95637fee9dba27ba17ac1ded7ca1f8
+// Headers below are the 80-byte serialized headers for heights
+// 946921..946926, fetched from mempool.space. Each header's prev_block_hash
+// links to the previous block, so all six chain back to the anchor.
+
+fn anchor_zero_block() -> [u8; 32] {
+    [
+        0xf8, 0xa1, 0x7c, 0xed, 0x1d, 0xac, 0x17, 0xba,
+        0x27, 0xba, 0x9d, 0xee, 0x7f, 0x63, 0x95, 0x9b,
+        0xa7, 0x54, 0x18, 0xb6, 0x7c, 0xe7, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    ]
+}
+
+fn header_946921() -> [u8; 80] {
+    [
+        0x00, 0x40, 0x0b, 0x20,
+        0xf8, 0xa1, 0x7c, 0xed, 0x1d, 0xac, 0x17, 0xba,
+        0x27, 0xba, 0x9d, 0xee, 0x7f, 0x63, 0x95, 0x9b,
+        0xa7, 0x54, 0x18, 0xb6, 0x7c, 0xe7, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0xee, 0xa2, 0x39, 0xdc, 0xe3, 0x77, 0x3c, 0x5f,
+        0x61, 0x79, 0xd2, 0xd1, 0x49, 0xb2, 0x5f, 0x1b,
+        0x17, 0xf6, 0x49, 0x33, 0x86, 0x95, 0x5c, 0xf5,
+        0x3f, 0xc7, 0x04, 0x5a, 0x39, 0xb8, 0xc6, 0x00,
+        0x0c, 0xc8, 0xef, 0x69,
+        0x69, 0x13, 0x02, 0x17,
+        0xe3, 0x10, 0xa9, 0x35,
+    ]
+}
+
+fn header_946922() -> [u8; 80] {
+    [
+        0x00, 0x00, 0x07, 0x20,
+        0xcf, 0x51, 0x90, 0x4c, 0xcc, 0x0c, 0xf4, 0x7b,
+        0x6a, 0xab, 0xf0, 0xcc, 0xfe, 0x55, 0x5c, 0x19,
+        0x77, 0x7c, 0xf6, 0x62, 0x06, 0x01, 0x02, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x74, 0x3f, 0xc7, 0xf1, 0xaf, 0xc9, 0x8f, 0x0e,
+        0x2f, 0x4e, 0x20, 0xc4, 0x0c, 0xb2, 0x11, 0x35,
+        0x07, 0x8a, 0x30, 0x5c, 0x01, 0xb9, 0x05, 0xe7,
+        0xc5, 0x26, 0xac, 0x10, 0xb7, 0xb4, 0x25, 0xc9,
+        0xf2, 0xc9, 0xef, 0x69,
+        0x69, 0x13, 0x02, 0x17,
+        0x65, 0xdb, 0x8d, 0x21,
+    ]
+}
+
+fn header_946923() -> [u8; 80] {
+    [
+        0x00, 0xe0, 0xff, 0x3f,
+        0x6c, 0x8d, 0xf9, 0x97, 0x62, 0x1e, 0xb4, 0x1c,
+        0x7b, 0xf2, 0xc7, 0xe1, 0x16, 0x30, 0xdd, 0xea,
+        0x63, 0x0f, 0xcb, 0xd2, 0xd4, 0x7c, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0xda, 0x26, 0x2d, 0xe2, 0x72, 0x34, 0x5b, 0x26,
+        0x2a, 0x3e, 0xd4, 0x50, 0x93, 0xe2, 0x4b, 0x91,
+        0x51, 0x61, 0x65, 0x13, 0x29, 0xa9, 0x05, 0x7a,
+        0xb6, 0x16, 0x79, 0xd4, 0x8f, 0x4e, 0x1e, 0xe9,
+        0xb8, 0xcc, 0xef, 0x69,
+        0x69, 0x13, 0x02, 0x17,
+        0x9d, 0xcc, 0xcd, 0x31,
+    ]
+}
+
+fn header_946924() -> [u8; 80] {
+    [
+        0x00, 0x20, 0x7c, 0x27,
+        0x7a, 0xf6, 0xf0, 0x7e, 0x97, 0xca, 0x87, 0x22,
+        0x18, 0xaf, 0x1e, 0xd7, 0xc2, 0x66, 0x85, 0x5d,
+        0xda, 0x24, 0x0f, 0x66, 0x18, 0x10, 0x02, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0xc9, 0x2b, 0x65, 0x10, 0x38, 0x30, 0xfc, 0x51,
+        0xbc, 0x7e, 0x52, 0x39, 0x51, 0x11, 0xef, 0x62,
+        0xcb, 0x69, 0x6a, 0x9d, 0x43, 0x1d, 0x4c, 0x35,
+        0x39, 0xb4, 0xb9, 0x6b, 0x6c, 0x77, 0x7c, 0x95,
+        0x31, 0xcf, 0xef, 0x69,
+        0x69, 0x13, 0x02, 0x17,
+        0x2a, 0xef, 0xce, 0x8a,
+    ]
+}
+
+fn header_946925() -> [u8; 80] {
+    [
+        0x00, 0xc0, 0x0a, 0x20,
+        0xec, 0xa3, 0xbe, 0x67, 0x71, 0xdb, 0x46, 0x5f,
+        0x92, 0x94, 0xde, 0xf9, 0x33, 0x72, 0xc8, 0xf4,
+        0x2d, 0xb4, 0xf9, 0x79, 0xaa, 0xe1, 0x01, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x77, 0x3a, 0x73, 0x1b, 0xc5, 0xaa, 0xda, 0xfb,
+        0x5f, 0x6f, 0xc1, 0x66, 0xca, 0xa4, 0x11, 0xdc,
+        0x8b, 0xc5, 0xe7, 0x5c, 0x8a, 0x7d, 0x98, 0xd9,
+        0x58, 0xa3, 0x48, 0x77, 0xe8, 0xbf, 0xd2, 0xcc,
+        0xa5, 0xd0, 0xef, 0x69,
+        0x69, 0x13, 0x02, 0x17,
+        0xdb, 0xa9, 0xba, 0xa4,
+    ]
+}
+
+fn header_946926() -> [u8; 80] {
+    [
+        0x00, 0xc0, 0x04, 0x20,
+        0x72, 0xf3, 0x22, 0x82, 0xad, 0xe9, 0x3a, 0xc2,
+        0xe4, 0x56, 0x21, 0x8b, 0x49, 0x31, 0x25, 0xf5,
+        0x65, 0xf0, 0x60, 0xe9, 0x2f, 0x8a, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x9d, 0x59, 0x01, 0xb5, 0xc7, 0xac, 0xa6, 0x6a,
+        0xdc, 0xf8, 0x2a, 0xbf, 0x92, 0x07, 0x57, 0x39,
+        0x76, 0x45, 0x30, 0x27, 0x99, 0xe7, 0x7a, 0xfa,
+        0x22, 0x16, 0x44, 0xe4, 0x6f, 0xff, 0x4a, 0x04,
+        0x20, 0xd2, 0xef, 0x69,
+        0x69, 0x13, 0x02, 0x17,
+        0x80, 0x74, 0x35, 0x04,
+    ]
+}
+
+fn poseidon_commitment(zero_block: [u8; 32], n_blocks: Field) -> Field {
+    let mut low_bytes = [0u8; 16];
+    let mut high_bytes = [0u8; 16];
+    for i in 0..16 {
+        low_bytes[i] = zero_block[i];
+        high_bytes[i] = zero_block[i + 16];
+    }
+    let low = Field::from_be_bytes::<16>(low_bytes);
+    let high = Field::from_be_bytes::<16>(high_bytes);
+    let zero_block_hash = poseidon2::Poseidon2::hash([low, high], 2);
+    poseidon2::Poseidon2::hash([zero_block_hash, n_blocks], 2)
+}
+
+#[test]
+fn test_main_two_blocks() {
+    let zero_block = anchor_zero_block();
+
+    let mut time_headers: [[u8; 80]; MAX_CHAIN_LEN] = [[0; 80]; MAX_CHAIN_LEN];
+    time_headers[0] = header_946921();
+    time_headers[1] = header_946922();
+    // remaining slots left as zero padding
+
+    let n_blocks = 2 as Field;
+    let poseidon_hash = poseidon_commitment(zero_block, n_blocks);
+    println(f"poseidon_hash (n=2) = {poseidon_hash}");
+
+    main(n_blocks, zero_block, time_headers, poseidon_hash);
+}
+
+#[test]
+fn test_main_three_blocks() {
+    let zero_block = anchor_zero_block();
+
+    let mut time_headers: [[u8; 80]; MAX_CHAIN_LEN] = [[0; 80]; MAX_CHAIN_LEN];
+    time_headers[0] = header_946921();
+    time_headers[1] = header_946922();
+    time_headers[2] = header_946923();
+
+    let n_blocks = 3 as Field;
+    let poseidon_hash = poseidon_commitment(zero_block, n_blocks);
+    println(f"poseidon_hash (n=3) = {poseidon_hash}");
+
+    main(n_blocks, zero_block, time_headers, poseidon_hash);
+}
+
+#[test]
+fn test_main_six_blocks() {
+    let zero_block = anchor_zero_block();
+
+    let mut time_headers: [[u8; 80]; MAX_CHAIN_LEN] = [[0; 80]; MAX_CHAIN_LEN];
+    time_headers[0] = header_946921();
+    time_headers[1] = header_946922();
+    time_headers[2] = header_946923();
+    time_headers[3] = header_946924();
+    time_headers[4] = header_946925();
+    time_headers[5] = header_946926();
+
+    let n_blocks = 6 as Field;
+    let poseidon_hash = poseidon_commitment(zero_block, n_blocks);
+    println(f"poseidon_hash (n=6) = {poseidon_hash}");
+
+    main(n_blocks, zero_block, time_headers, poseidon_hash);
+}

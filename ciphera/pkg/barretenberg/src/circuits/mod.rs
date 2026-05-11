@@ -4,6 +4,7 @@ mod migrate;
 mod note;
 mod points;
 mod signature;
+mod signature32;
 #[cfg(test)]
 mod tests;
 mod utxo;

@@ -32,6 +32,7 @@ dirs = { workspace = true}
 [dev-dependencies]
 smirk = { workspace = true }
 temp-env = "0.3.6"
+musig2 = { version="0.3.1", features = ["rand"] }
 
 [[bin]]
 name = "vk_hash"
