@@ -1,9 +1,19 @@
 use poseidon::poseidon2;
 use sha256::digest;
 
-global MAX_CHAIN_LEN: u32 = 6;
+global MAX_CHAIN_LEN: u32 = 3;
 global MIN_ALLTIME_DIFF: u32 = 9;
 global DIFFICULTY_DELTA: u32 = 3;
+
+fn bytes_32_to_field_pair(bytes: [u8; 32]) -> (Field, Field) {
+  let mut low_bytes = [0u8; 16];
+  let mut high_bytes = [0u8; 16];
+  for i in 0..16 {
+      low_bytes[i] = bytes[i];
+      high_bytes[i] = bytes[i + 16];
+  }
+  (Field::from_be_bytes::<16>(low_bytes), Field::from_be_bytes::<16>(high_bytes))
+}
 
 fn count_leading_zero_bits(hash_le: [u8; 32]) -> u32 {
     // Reverse to big-endian
@@ -42,14 +52,6 @@ fn difficulty_within_bounds(anchor_zeros: u32, block_zeros: u32) -> bool {
     (block_zeros >= lower) & (block_zeros <= upper)
 }
 
-fn bytes_eq_32(a: [u8; 32], b: [u8; 32]) -> bool {
-    let mut eq: bool = true;
-    for i in 0..32 {
-        if a[i] != b[i] { eq = false; }
-    }
-    eq
-}
-
 fn double_sha256_header(header: [u8; 80]) -> [u8; 32] {
     let h1 = digest(header);
     digest(h1)
@@ -85,7 +87,7 @@ fn check_pow_chain(
         println(expected_prev);
 
         // (a) chain of hashes
-        let chainhash_ok = bytes_eq_32(extract_prev_hash(header), expected_prev);
+        let chainhash_ok = extract_prev_hash(header) == expected_prev;
         if active & !chainhash_ok { ok = false; }
 
         // (b) PoW difficulty
@@ -104,16 +106,7 @@ fn main(n_blocks: Field, zero_block: [u8; 32], time_headers: [[u8; 80]; MAX_CHAI
     let start_difficulty = count_leading_zero_bits(zero_block);
     assert( MIN_ALLTIME_DIFF <= start_difficulty, "Assertion failed at minimal allowed difficulty" );
 
-    let mut low_bytes = [0u8; 16];
-    let mut high_bytes = [0u8; 16];
-
-    for i in 0..16 {
-        low_bytes[i] = zero_block[i];
-        high_bytes[i] = zero_block[i + 16];
-    }
-
-    let low = Field::from_be_bytes::<16>(low_bytes);
-    let high = Field::from_be_bytes::<16>(high_bytes);
+    let (low, high) = bytes_32_to_field_pair(zero_block);
 
     let zero_block_hash = poseidon2::Poseidon2::hash([low, high], 2);
     let timechain_commitment = poseidon2::Poseidon2::hash([zero_block_hash, n_blocks], 2);
@@ -246,14 +239,7 @@ fn header_946926() -> [u8; 80] {
 }
 
 fn poseidon_commitment(zero_block: [u8; 32], n_blocks: Field) -> Field {
-    let mut low_bytes = [0u8; 16];
-    let mut high_bytes = [0u8; 16];
-    for i in 0..16 {
-        low_bytes[i] = zero_block[i];
-        high_bytes[i] = zero_block[i + 16];
-    }
-    let low = Field::from_be_bytes::<16>(low_bytes);
-    let high = Field::from_be_bytes::<16>(high_bytes);
+    let (low, high) = bytes_32_to_field_pair(zero_block);
     let zero_block_hash = poseidon2::Poseidon2::hash([low, high], 2);
     poseidon2::Poseidon2::hash([zero_block_hash, n_blocks], 2)
 }
