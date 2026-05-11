@@ -1,5 +1,5 @@
 # n_blocks: Field (private)
-n_blocks = "6"
+n_blocks = "3"
 
 # poseidon_hash: pub Field -- commitment over (zero_block, n_blocks)
 poseidon_hash = "0x13904812f5328315c42c13bcc3fc07228ef52248bd2815956b098fcea98e0301"
