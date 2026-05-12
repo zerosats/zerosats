@@ -51,9 +51,9 @@ pub fn get_timelock_commitment(lock: TimeLock) -> Field {
      poseidon2::Poseidon2::hash([zero_block_hash, lock.n_blocks], 2)
 }
 
-pub unconstrained fn check_input_note_ownership(input_note: InputNote) {
+pub fn check_spend_conditions(input_note: InputNote) {
     if input_note.note.value != 0 {
-        if input_note.note.kind as u8 < 5 {
+        if is_one_of(input_note.note.kind, [1, 2, 3, 4]) {
             assert(
                         get_secret_hash(input_note.secret_key) == input_note.note.address,
                         "Input note is not owned by the owner",
@@ -68,7 +68,7 @@ pub unconstrained fn check_input_note_ownership(input_note: InputNote) {
         }
         // signature32sha
         if input_note.note.kind == 6 {
-            let computed_sha_hash = unsafe { sha256::digest(input_note.preimage) };
+            let computed_sha_hash = sha256::digest(input_note.preimage);
             let (low, high) = bytes_32_to_field_pair(computed_sha_hash);
 
             let computed_hash = poseidon2::Poseidon2::hash([low, high], 2);
@@ -87,10 +87,26 @@ pub unconstrained fn check_input_note_ownership(input_note: InputNote) {
         }
         // time- and hashlocked
         if input_note.note.kind == 8 {
-            assert(
-                        get_secret_hash(input_note.secret_key) == input_note.note.address,
-                        "Input note is not owned by the owner",
+            if input_note.preimage != [0; 32] {
+                let computed_sha_hash = sha256::digest(input_note.preimage);
+                let (low, high) = bytes_32_to_field_pair(computed_sha_hash);
+
+                let computed_hash = poseidon2::Poseidon2::hash([low, high], 2);
+                assert(computed_hash == input_note.note.psi, "HTLC: computed hash does not match to SHA preimage");
+            } else {
+                let key_hash = get_secret_hash(input_note.secret_key);
+                let commitment = get_timelock_commitment(input_note.time_proof.lock);
+                let timelocked_address = poseidon2::Poseidon2::hash([key_hash, commitment], 2);
+
+                assert(
+                            timelocked_address == input_note.note.address,
+                            "HTLC: wrong refund commitment",
+                        );
+                assert(
+                    check_pow_chain(input_note.time_proof.headers, input_note.time_proof.lock.zero_block, input_note.time_proof.lock.n_blocks),
+                    "HTLC: timelocked"
                     );
+            }
         }
     }
 }

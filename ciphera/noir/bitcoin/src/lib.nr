@@ -2,7 +2,7 @@ use poseidon::poseidon2;
 use sha256::digest;
 
 global MAX_CHAIN_LEN: u32 = 2;
-global MIN_ALLTIME_DIFF: u32 = 9;
+global MIN_ALLTIME_DIFF: u32 = 35;
 global DIFFICULTY_DELTA: u32 = 3;
 
 pub fn count_leading_zero_bits(hash_le: [u8; 32]) -> u32 {
@@ -42,7 +42,7 @@ fn difficulty_within_bounds(anchor_zeros: u32, block_zeros: u32) -> bool {
     (block_zeros >= lower) & (block_zeros <= upper)
 }
 
-unconstrained fn double_sha256_header(header: [u8; 80]) -> [u8; 32] {
+fn double_sha256_header(header: [u8; 80]) -> [u8; 32] {
     let h1 = digest(header);
     digest(h1)
 }
@@ -60,6 +60,8 @@ pub fn check_pow_chain(
     anchor_hash: [u8; 32],
     n_blocks: Field,
 ) -> bool {
+    assert(n_blocks as u8 < MAX_CHAIN_LEN);
+
     let anchor_zeros = count_leading_zero_bits(anchor_hash);
 
     let mut ok: bool = true;
@@ -81,8 +83,7 @@ pub fn check_pow_chain(
         if active & !chainhash_ok { ok = false; }
 
         // (b) PoW difficulty
-        // Safety: the thing is, it is unsafe at the selected backend version Noir 14, BB 3.0.0
-        let h = unsafe { double_sha256_header(header) };
+        let h = double_sha256_header(header);
         let block_zeros = count_leading_zero_bits(h);
         let diff_ok = difficulty_within_bounds(anchor_zeros, block_zeros);
         if active & !diff_ok { ok = false; }

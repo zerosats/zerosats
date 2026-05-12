@@ -1,5 +1,5 @@
 use common::{
-    check_commitment, check_input_note_ownership, get_note_commitment, get_secret_hash, InputNote,
+    check_commitment, check_spend_conditions, get_note_commitment, get_secret_hash, InputNote,
     Note, TimeLock, TimeProof,
 };
 use poseidon::poseidon2;
@@ -105,10 +105,8 @@ fn main(
     }
 
     // Check the user owns the input notes
-    // Safety: sha lib requires unsafe blocks
-    unsafe { check_input_note_ownership(input_notes[0]) };
-    // Safety: sha lib requires unsafe blocks
-    unsafe { check_input_note_ownership(input_notes[1]) };
+    check_spend_conditions(input_notes[0]);
+    check_spend_conditions(input_notes[1]);
 }
 
 fn is_multiple_kinds(notes: [Note; 4]) -> (bool, Field) {
