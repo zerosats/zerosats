@@ -1,6 +1,6 @@
 use common::{
-    check_commitment, check_spend_conditions, get_note_commitment, get_secret_hash, InputNote,
-    Note, TimeLock, TimeProof,
+    bytes_32_to_field_pair, check_commitment, check_spend_conditions, get_note_commitment,
+    get_secret_hash, InputNote, Note, TimeLock, TimeProof,
 };
 use poseidon::poseidon2;
 
@@ -845,5 +845,372 @@ fn test_msg_value_overflow() {
         0,
         commitments,
         [2, bridged_note_kind(), overflow_value, mint_hash, 0],
+    )
+}
+
+// =====================================================================
+// Test fixtures shared with signature32 / signature32sha.
+//
+// `shared_preimage()` is the 32-byte preimage used by both sibling
+// circuits. `shared_preimage_sha()` is its SHA-256 digest, matching
+// the `sha` array in signature32sha::test_main. The two kindN_address
+// helpers compute the expected `note.address` for each spend path.
+// =====================================================================
+
+fn shared_preimage() -> [u8; 32] {
+    [
+        1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25,
+        26, 27, 28, 29, 30, 31, 32,
+    ]
+}
+
+fn shared_preimage_sha() -> [u8; 32] {
+    [
+        174, 33, 108, 46, 245, 36, 122, 55, 130, 193, 53, 239, 162, 121, 163, 228, 205, 198, 16,
+        148, 39, 15, 93, 43, 229, 140, 98, 4, 183, 166, 18, 201,
+    ]
+}
+
+// kind 5 (signature32): address = Poseidon(field_pair(preimage)).
+// The hex constant is identical to `hash` in signature32::test_main.
+fn kind5_address() -> Field {
+    let (low, high) = bytes_32_to_field_pair(shared_preimage());
+    poseidon2::Poseidon2::hash([low, high], 2)
+}
+
+// kind 6 (signature32sha): address = Poseidon(field_pair(SHA-256(preimage))).
+fn kind6_address() -> Field {
+    let (low, high) = bytes_32_to_field_pair(shared_preimage_sha());
+    poseidon2::Poseidon2::hash([low, high], 2)
+}
+
+fn padding_input() -> InputNote {
+    InputNote {
+        note: Note { kind: 0, value: 0, address: 0, psi: 0 },
+        secret_key: 0,
+        preimage: zeros32,
+        time_proof: zeroTimeProof,
+    }
+}
+
+#[test]
+fn test_send_kind5_preimage_ownership() {
+    // kind 5: ownership proven by preimage whose Poseidon hash matches
+    // the note address. Matches the signature32 fixture.
+    let preimage = shared_preimage();
+    let address = kind5_address();
+
+    let note_1 = Note { kind: 5, value: 10, address, psi: 1 };
+    let input_note_1 = InputNote {
+        note: note_1,
+        secret_key: 0, // not used for kind 5
+        preimage,
+        time_proof: zeroTimeProof,
+    };
+    let input_note_2 = padding_input();
+
+    let note_3 = Note { kind: 5, value: 7, address: 42, psi: 3 };
+    let note_4 = Note { kind: 5, value: 3, address: 43, psi: 4 };
+
+    main(
+        [input_note_1, input_note_2],
+        [note_3, note_4],
+        0,
+        [
+            get_note_commitment(note_1),
+            get_note_commitment(input_note_2.note),
+            get_note_commitment(note_3),
+            get_note_commitment(note_4),
+        ],
+        [1, 0, 0, 0, 0],
+    )
+}
+
+#[test(should_fail)]
+fn test_send_kind5_wrong_preimage() {
+    // Spender supplies a preimage that doesn't hash to `address`.
+    let address = kind5_address();
+
+    let mut bad_preimage = shared_preimage();
+    bad_preimage[0] = 99;
+
+    let note_1 = Note { kind: 5, value: 10, address, psi: 1 };
+    let input_note_1 = InputNote {
+        note: note_1,
+        secret_key: 0,
+        preimage: bad_preimage,
+        time_proof: zeroTimeProof,
+    };
+    let input_note_2 = padding_input();
+
+    let note_3 = Note { kind: 5, value: 10, address: 42, psi: 3 };
+    let note_4 = Note { kind: 0, value: 0, address: 0, psi: 0 };
+
+    main(
+        [input_note_1, input_note_2],
+        [note_3, note_4],
+        0,
+        [
+            get_note_commitment(note_1),
+            get_note_commitment(input_note_2.note),
+            get_note_commitment(note_3),
+            get_note_commitment(note_4),
+        ],
+        [1, 0, 0, 0, 0],
+    )
+}
+
+#[test]
+fn test_send_kind6_sha_preimage_ownership() {
+    // kind 6: ownership proven by SHA-256 preimage whose Poseidon hash
+    // (over the SHA digest as a field pair) matches the note address.
+    // Reuses the (preimage, sha) pair from signature32sha::test_main.
+    let preimage = shared_preimage();
+    let address = kind6_address();
+
+    let note_1 = Note { kind: 6, value: 10, address, psi: 1 };
+    let input_note_1 = InputNote {
+        note: note_1,
+        secret_key: 0,
+        preimage,
+        time_proof: zeroTimeProof,
+    };
+    let input_note_2 = padding_input();
+
+    let note_3 = Note { kind: 6, value: 4, address: 99, psi: 3 };
+    let note_4 = Note { kind: 6, value: 6, address: 100, psi: 4 };
+
+    main(
+        [input_note_1, input_note_2],
+        [note_3, note_4],
+        0,
+        [
+            get_note_commitment(note_1),
+            get_note_commitment(input_note_2.note),
+            get_note_commitment(note_3),
+            get_note_commitment(note_4),
+        ],
+        [1, 0, 0, 0, 0],
+    )
+}
+
+#[test(should_fail)]
+fn test_send_kind6_wrong_preimage() {
+    let address = kind6_address();
+
+    let mut bad_preimage = shared_preimage();
+    bad_preimage[31] = 0; // changes SHA digest -> Poseidon mismatch
+
+    let note_1 = Note { kind: 6, value: 10, address, psi: 1 };
+    let input_note_1 = InputNote {
+        note: note_1,
+        secret_key: 0,
+        preimage: bad_preimage,
+        time_proof: zeroTimeProof,
+    };
+    let input_note_2 = padding_input();
+
+    let note_3 = Note { kind: 6, value: 10, address: 42, psi: 3 };
+    let note_4 = Note { kind: 0, value: 0, address: 0, psi: 0 };
+
+    main(
+        [input_note_1, input_note_2],
+        [note_3, note_4],
+        0,
+        [
+            get_note_commitment(note_1),
+            get_note_commitment(input_note_2.note),
+            get_note_commitment(note_3),
+            get_note_commitment(note_4),
+        ],
+        [1, 0, 0, 0, 0],
+    )
+}
+
+#[test]
+fn test_burn_kind6_sha_preimage() {
+    // Combine a kind-6 spend with the burn flow to confirm the ownership
+    // check fires alongside the burn-specific assertions.
+    let preimage = shared_preimage();
+    let address = kind6_address();
+
+    let note_1 = Note { kind: 6, value: 15, address, psi: 1 };
+    let input_note_1 = InputNote {
+        note: note_1,
+        secret_key: 0,
+        preimage,
+        time_proof: zeroTimeProof,
+    };
+    let input_note_2 = padding_input();
+
+    let note_3 = Note { kind: 0, value: 0, address: 0, psi: 0 };
+    let note_4 = Note { kind: 6, value: 5, address, psi: 3 };
+
+    main(
+        [input_note_1, input_note_2],
+        [note_3, note_4],
+        0,
+        [
+            get_note_commitment(note_1),
+            get_note_commitment(input_note_2.note),
+            get_note_commitment(note_3),
+            get_note_commitment(note_4),
+        ],
+        [3, 6, 10, get_note_commitment(note_1), 0],
+    )
+}
+
+#[test]
+fn test_mint_kind6_sha_preimage() {
+    // Mint flow with a kind-6 input -- verifies SHA preimage ownership
+    // is enforced even while increasing supply via msg_value.
+    let preimage = shared_preimage();
+    let address = kind6_address();
+
+    let note_1 = Note { kind: 6, value: 5, address, psi: 1 };
+    let input_note_1 = InputNote {
+        note: note_1,
+        secret_key: 0,
+        preimage,
+        time_proof: zeroTimeProof,
+    };
+    let input_note_2 = padding_input();
+
+    // Mint pattern: output[0] carries msg_note_kind, output[1] is the value note.
+    let note_3 = Note { kind: 6, value: 0, address: 0, psi: 2 };
+    let note_4 = Note { kind: 6, value: 15, address, psi: 3 };
+
+    let mint_hash = poseidon2::Poseidon2::hash([note_3.psi, note_4.psi], 2);
+
+    main(
+        [input_note_1, input_note_2],
+        [note_3, note_4],
+        0,
+        [
+            get_note_commitment(note_1),
+            get_note_commitment(input_note_2.note),
+            get_note_commitment(note_3),
+            get_note_commitment(note_4),
+        ],
+        [2, 6, 10, mint_hash, 0],
+    )
+}
+
+#[test(should_fail)]
+fn test_send_kind5_zero_secret_other_kind() {
+    // Sanity: a kind-5 note still rejects unrelated preimages even when
+    // the secret_key happens to be the trivial Poseidon preimage of the
+    // address that a kind-1 spend would use. Confirms the dispatch by
+    // `kind` is not bypassable via secret_key collisions.
+    let address = kind5_address();
+    let mut wrong_preimage: [u8; 32] = [0; 32];
+    wrong_preimage[31] = 1;
+
+    let note_1 = Note { kind: 5, value: 10, address, psi: 1 };
+    let input_note_1 = InputNote {
+        note: note_1,
+        secret_key: 101,
+        preimage: wrong_preimage,
+        time_proof: zeroTimeProof,
+    };
+    let input_note_2 = padding_input();
+
+    let note_3 = Note { kind: 5, value: 10, address: 42, psi: 3 };
+    let note_4 = Note { kind: 0, value: 0, address: 0, psi: 0 };
+
+    main(
+        [input_note_1, input_note_2],
+        [note_3, note_4],
+        0,
+        [
+            get_note_commitment(note_1),
+            get_note_commitment(input_note_2.note),
+            get_note_commitment(note_3),
+            get_note_commitment(note_4),
+        ],
+        [1, 0, 0, 0, 0],
+    )
+}
+
+#[test]
+fn test_send_two_kind6_inputs_shared_preimage() {
+    // Two real kind-6 inputs sharing the same preimage/address (a user
+    // consolidating two of their own notes). Confirms the ownership
+    // check fires for both input slots, not just index 0.
+    let preimage = shared_preimage();
+    let address = kind6_address();
+
+    let note_1 = Note { kind: 6, value: 7, address, psi: 1 };
+    let note_2 = Note { kind: 6, value: 3, address, psi: 2 };
+    let input_note_1 = InputNote {
+        note: note_1,
+        secret_key: 0,
+        preimage,
+        time_proof: zeroTimeProof,
+    };
+    let input_note_2 = InputNote {
+        note: note_2,
+        secret_key: 0,
+        preimage,
+        time_proof: zeroTimeProof,
+    };
+
+    let note_3 = Note { kind: 6, value: 10, address: 42, psi: 3 };
+    let note_4 = Note { kind: 0, value: 0, address: 0, psi: 0 };
+
+    main(
+        [input_note_1, input_note_2],
+        [note_3, note_4],
+        0,
+        [
+            get_note_commitment(note_1),
+            get_note_commitment(note_2),
+            get_note_commitment(note_3),
+            get_note_commitment(note_4),
+        ],
+        [1, 0, 0, 0, 0],
+    )
+}
+
+#[test(should_fail)]
+fn test_send_two_kind6_inputs_second_wrong_preimage() {
+    // Same as above but the second input supplies a bad preimage. Must
+    // fail -- the ownership assertion must apply to input index 1, not
+    // only index 0.
+    let preimage = shared_preimage();
+    let address = kind6_address();
+
+    let mut bad_preimage = preimage;
+    bad_preimage[0] = 200;
+
+    let note_1 = Note { kind: 6, value: 7, address, psi: 1 };
+    let note_2 = Note { kind: 6, value: 3, address, psi: 2 };
+    let input_note_1 = InputNote {
+        note: note_1,
+        secret_key: 0,
+        preimage,
+        time_proof: zeroTimeProof,
+    };
+    let input_note_2 = InputNote {
+        note: note_2,
+        secret_key: 0,
+        preimage: bad_preimage,
+        time_proof: zeroTimeProof,
+    };
+
+    let note_3 = Note { kind: 6, value: 10, address: 42, psi: 3 };
+    let note_4 = Note { kind: 0, value: 0, address: 0, psi: 0 };
+
+    main(
+        [input_note_1, input_note_2],
+        [note_3, note_4],
+        0,
+        [
+            get_note_commitment(note_1),
+            get_note_commitment(note_2),
+            get_note_commitment(note_3),
+            get_note_commitment(note_4),
+        ],
+        [1, 0, 0, 0, 0],
     )
 }

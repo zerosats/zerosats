@@ -60,7 +60,10 @@ pub fn check_pow_chain(
     anchor_hash: [u8; 32],
     n_blocks: Field,
 ) -> bool {
-    assert(n_blocks as u8 < MAX_CHAIN_LEN);
+    // Range-check n_blocks before casting so a huge Field cannot truncate
+    // down to a small u32 and bypass the chain-length bound.
+    n_blocks.assert_max_bit_size::<32>();
+    assert((n_blocks as u32) <= MAX_CHAIN_LEN, "n_blocks exceeds MAX_CHAIN_LEN");
 
     let anchor_zeros = count_leading_zero_bits(anchor_hash);
 
