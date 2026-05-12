@@ -17,7 +17,7 @@ use flate2::read::GzDecoder;
 // pub use migrate::*;
 pub use utxo::*;
 
-fn get_bytecode_from_program(program_json: &str) -> Vec<u8> {
+pub fn get_bytecode_from_program(program_json: &str) -> Vec<u8> {
     let mut program = serde_json::from_str::<serde_json::Value>(program_json).unwrap();
     let bytecode_base64 = program.get_mut("bytecode").unwrap().as_str().unwrap();
     let bytecode_gzipped = base64::engine::general_purpose::STANDARD

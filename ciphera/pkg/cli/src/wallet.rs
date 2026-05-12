@@ -64,6 +64,15 @@ pub struct Wallet {
     pub balance: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub chain_id: Option<u64>,
+    /// Notes received via Payy links, kept in a separate bucket from
+    /// `avail`/`balance` because the note kinds (e.g. Polygon USDC) are not
+    /// part of the Citrea ticker set and the proofs go through a different
+    /// (Payy) circuit and node. Keyed by the raw note_kind contract hex.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub payy_avail: HashMap<String, Vec<InputNote>>,
+    /// Per-contract balance for [`Wallet::payy_avail`].
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub payy_balance: HashMap<String, u64>,
     #[serde(skip)]
     storage_path: Option<PathBuf>,
 }
@@ -78,6 +87,8 @@ impl Wallet {
             name,
             balance: 0,
             chain_id: Some(chain_id),
+            payy_avail: HashMap::new(),
+            payy_balance: HashMap::new(),
             storage_path: None,
         }
     }
@@ -93,6 +104,8 @@ impl Wallet {
             name,
             balance: 0,
             chain_id: Some(chain_id),
+            payy_avail: HashMap::new(),
+            payy_balance: HashMap::new(),
             storage_path: None,
         }
     }
@@ -387,6 +400,51 @@ impl Wallet {
 
     pub fn prepare_receive(&self, input_note: &InputNote) -> Result<(Self, Utxo), WalletError> {
         self.stage(|wallet| wallet.receive(input_note))
+    }
+
+    /// Receive a note that arrived via a Payy link. Builds a fresh
+    /// receiver-owned output note with the **same** `note.contract` as the
+    /// gifted input (so the Payy circuit's per-(kind,contract) value
+    /// conservation holds) and stores it in [`Wallet::payy_avail`] keyed by
+    /// the contract hex, leaving the Ciphera `avail` map untouched.
+    fn receive_payy(&mut self, input_note: &InputNote) -> Result<Utxo, WalletError> {
+        let amount = self.get_note_amount(&input_note.note)?;
+        let received = self.receive_payy_note(amount, input_note.note.contract);
+        let key = format!("{:#x}", input_note.note.contract);
+        self.payy_avail
+            .entry(key.clone())
+            .or_default()
+            .push(received.clone());
+        *self.payy_balance.entry(key).or_default() += amount;
+        debug!(amount = amount, "received payy note into payy_avail");
+        Ok(Utxo::new_send(
+            [input_note.clone(), InputNote::padding_note()],
+            [received.note, Note::padding_note()],
+        ))
+    }
+
+    pub fn prepare_receive_payy(
+        &self,
+        input_note: &InputNote,
+    ) -> Result<(Self, Utxo), WalletError> {
+        self.stage(|wallet| wallet.receive_payy(input_note))
+    }
+
+    /// Generate a fresh receiver-owned note for a Payy receive. The output's
+    /// `note.contract` must match the gifted input's contract for the proof
+    /// to balance, so it's threaded through explicitly rather than resolved
+    /// from a Citrea ticker.
+    fn receive_payy_note(&self, amount: u64, contract: Element) -> InputNote {
+        let pk = self.gen_pk();
+        let self_address = hash_merge([pk, Element::ZERO]);
+        let note = Note {
+            kind: Element::new(2),
+            contract,
+            address: self_address,
+            psi: hash_merge([pk, pk]),
+            value: Element::from(amount),
+        };
+        InputNote::new(note, pk)
     }
 
     fn mint(&mut self, amount: u64, ticker: &str) -> Result<Utxo, WalletError> {

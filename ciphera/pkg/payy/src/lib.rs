@@ -13,4 +13,4 @@ pub use note_url::{
     NoteURLPayload, NoteUrlDecodeError, NoteUrlDecodeResult, decode_activity_url_payload,
     input_note_from_payload, payload_from_input_note, try_decode_activity_url_payload,
 };
-pub use utxo::prove_send;
+pub use utxo::{prove_send, prove_send_payy};

@@ -18,6 +18,7 @@ element.workspace = true
 rand.workspace = true
 primitives.workspace = true
 zk-primitives.workspace = true
+payy.workspace = true
 smirk.workspace = true
 hex.workspace = true
 contracts.workspace = true

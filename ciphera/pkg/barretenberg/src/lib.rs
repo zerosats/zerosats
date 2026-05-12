@@ -11,6 +11,38 @@ pub use traits::{Prove, Verify};
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
+/// Prove an arbitrary Noir circuit with the workspace's default backend.
+///
+/// This is the single externally-callable entry point for crates that ship
+/// their own Noir program + verification key (e.g. `payy`, which carries a
+/// Payy-flavored UTXO circuit alongside the workspace's Ciphera circuits).
+///
+/// `program_json` is the full Noir `program.json` artifact (used both as the
+/// `CompiledProgram` source and to extract the gzipped+base64 bytecode).
+/// `key` is the raw verification key bytes (`bb write_vk` output).
+/// `inputs` is a hand-built `InputMap` matching the circuit's ABI.
+pub fn prove_default(
+    program_json: &str,
+    key: &[u8],
+    inputs: &noirc_abi::InputMap,
+    recursive: bool,
+    oracle_hash_keccak: bool,
+) -> Result<Vec<u8>> {
+    let artifact: noirc_artifacts::program::ProgramArtifact =
+        serde_json::from_str(program_json)?;
+    let compiled = noirc_driver::CompiledProgram::from(artifact);
+    let bytecode = circuits::get_bytecode_from_program(program_json);
+    prove::prove::<backend::DefaultBackend>(
+        &compiled,
+        program_json.as_bytes(),
+        &bytecode,
+        key,
+        inputs,
+        recursive,
+        oracle_hash_keccak,
+    )
+}
+
 // #[cfg(test)]
 // mod tests {
 //     use super::*;

@@ -116,8 +116,16 @@ enum Commands {
         #[arg(long, default_value = None)]
         note: Option<String>,
 
+        /// Ciphera-format note link (legacy CipheraURL).
         #[arg(long)]
         link: Option<String>,
+
+        /// Payy-format note link (versioned NoteURLPayload, base58).
+        ///
+        /// Triggers the Payy receive path: proof via Payy UTXO circuit,
+        /// submission to the Payy node, note stored under wallet.payy_avail.
+        #[arg(long)]
+        payy_link: Option<String>,
     },
     Import {
         #[arg(required = true, long)]
@@ -441,6 +449,86 @@ async fn handle_spend_to(
         }
         Err(e) => {
             eprintln!("\n❌ Could not send transaction!");
+            Err(e)
+        }
+    }
+}
+
+/// Default Payy node host. Same RPC wire format as the Ciphera node
+/// (POST /v0/transaction { "proof": <UtxoProof> }) but proofs are generated
+/// against the Payy UTXO circuit and the network sees Payy-flavored notes.
+/// Override by editing the constant; not exposed as a flag in this iteration.
+const PAYY_NODE_HOST: &str = "https://validators.mainnet.payy.network";
+const PAYY_NODE_PORT: u16 = 443;
+
+/// Receive a Payy-format note link: decode → prove with Payy UTXO circuit →
+/// submit to Payy node → store the receiver-owned output note in the wallet's
+/// `payy_avail` bucket.
+async fn handle_receive_payy(
+    name: &str,
+    timeout_secs: u64,
+    chain: u64,
+    payy_link: &str,
+) -> Result<()> {
+    debug!(
+        "Connecting wallet {} to Payy node at {}:{}",
+        name, PAYY_NODE_HOST, PAYY_NODE_PORT
+    );
+
+    let mut client = NodeClient::builder()
+        .name(name)
+        .host(PAYY_NODE_HOST)
+        .port(PAYY_NODE_PORT)
+        .timeout_secs(timeout_secs)
+        .build(chain, false)?;
+
+    match client.check_health().await {
+        Ok(health) => {
+            println!("\n✅ Payy node Health Check Passed!");
+            println!("   Current Height: {}", health.height);
+            debug!("Payy node is healthy at height: {}", health.height);
+        }
+        Err(e) => {
+            error!("Payy node health check failed: {}", e);
+            eprintln!("\n❌ Payy node Health Check Failed!");
+            eprintln!("   Error: {e}");
+            return Err(e);
+        }
+    }
+
+    let payload = payy::try_decode_activity_url_payload(payy_link)
+        .map_err(|e| color_eyre::eyre::eyre!("invalid --payy-link: {e}"))?;
+    let input_note = payy::input_note_from_payload(&payload);
+    println!("\n🗝 Decoded Payy note: {input_note:?}");
+
+    let (prepared_wallet, utxo) = client.get_wallet().prepare_receive_payy(&input_note)?;
+
+    println!("Generating Payy UTXO proof...");
+    let snark = payy::prove_send_payy(utxo.input_notes.clone(), utxo.output_notes.clone())
+        .map_err(|e| color_eyre::eyre::eyre!("Payy proof generation failed: {e}"))?;
+    println!("✅ Proof ready.");
+
+    match client.transaction(&snark).await {
+        Ok(tx) => {
+            println!("\n✅ Transaction {} has been sent!", tx.txn_hash);
+            println!("   Height: {}", tx.height);
+            println!("   Root hash: {}", tx.root_hash);
+
+            prepared_wallet.save()?;
+            client.replace_wallet(prepared_wallet);
+
+            let contract_hex = format!("{:#x}", input_note.note.contract);
+            let balance = client
+                .get_wallet()
+                .payy_balance
+                .get(&contract_hex)
+                .copied()
+                .unwrap_or(0);
+            println!("\nPayy balance for {contract_hex}: {} sats", units::wei_to_sats(balance));
+            Ok(())
+        }
+        Err(e) => {
+            eprintln!("\n❌ Could not send Payy transaction!");
             Err(e)
         }
     }
@@ -1361,17 +1449,25 @@ async fn main() -> Result<()> {
             )
             .await?;
         }
-        Commands::Receive { note, link } => {
-            handle_receive(
-                &cli.name,
-                &cli.host,
-                cli.port,
-                cli.timeout,
-                cli.chain,
-                note,
-                link,
-            )
-            .await?;
+        Commands::Receive {
+            note,
+            link,
+            payy_link,
+        } => {
+            if let Some(plink) = payy_link {
+                handle_receive_payy(&cli.name, cli.timeout, cli.chain, &plink).await?;
+            } else {
+                handle_receive(
+                    &cli.name,
+                    &cli.host,
+                    cli.port,
+                    cli.timeout,
+                    cli.chain,
+                    note,
+                    link,
+                )
+                .await?;
+            }
         }
         Commands::Import { note } => {
             handle_import(&cli.name, &note).await?;
