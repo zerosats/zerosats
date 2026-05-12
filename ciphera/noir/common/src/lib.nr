@@ -71,3 +71,13 @@ pub fn is_one_of(value: Field, one_of: [Field]) -> bool {
     }
     is_one_of
 }
+
+pub fn bytes_32_to_field_pair(bytes: [u8; 32]) -> (Field, Field) {
+  let mut low_bytes = [0u8; 16];
+  let mut high_bytes = [0u8; 16];
+  for i in 0..16 {
+      low_bytes[i] = bytes[i];
+      high_bytes[i] = bytes[i + 16];
+  }
+  (Field::from_be_bytes::<16>(low_bytes), Field::from_be_bytes::<16>(high_bytes))
+}

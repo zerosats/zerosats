@@ -1,25 +1,17 @@
 use poseidon::poseidon2;
 use sha256::digest;
+use common::bytes_32_to_field_pair;
 
-fn main(message_hash: Field, preimage: [u8; 32], sha_hash: pub [u8; 32], poseidon_hash: pub Field, message: pub Field) {
+fn main(message_hash: Field, preimage: [u8; 32], sha_hash: [u8; 32], poseidon_hash: pub Field, message: pub Field) {
     let mut computed_sha_hash = digest(preimage);
     assert(sha_hash == computed_sha_hash, "Address is not owned by the owner");
 
-    let mut share_1_bytes = [0u8; 16];
-    let mut share_2_bytes = [0u8; 16];
+    let (low, high) = bytes_32_to_field_pair(preimage);
 
-    for i in 0..16 {
-        share_1_bytes[i] = preimage[i];
-        share_2_bytes[i] = preimage[i + 16];
-    }
-
-    let share_1 = Field::from_be_bytes::<16>(share_1_bytes);
-    let share_2 = Field::from_be_bytes::<16>(share_2_bytes);
-
-    let computed_hash = poseidon2::Poseidon2::hash([share_1, share_2], 2);
+    let computed_hash = poseidon2::Poseidon2::hash([low, high], 2);
     assert(poseidon_hash == computed_hash, "Address is not owned by the owner");
 
-    let calc_message_hash = poseidon2::Poseidon2::hash([share_1, share_2, message], 3);
+    let calc_message_hash = poseidon2::Poseidon2::hash([low, high, message], 3);
     assert(calc_message_hash == message_hash, "Message hash is invalid");
 }
 

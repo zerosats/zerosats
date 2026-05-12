@@ -1,21 +1,13 @@
 use poseidon::poseidon2;
+use common::bytes_32_to_field_pair;
 
-fn main(preimage: [u8; 32], message_hash: Field, hash: pub Field, message: pub Field) {
-    let mut share_1_bytes = [0u8; 16];
-    let mut share_2_bytes = [0u8; 16];
+fn main(preimage: [u8; 32], message_hash: Field, address: pub Field, message: pub Field) {
+    let (low, high) = bytes_32_to_field_pair(preimage);
 
-    for i in 0..16 {
-        share_1_bytes[i] = preimage[i];
-        share_2_bytes[i] = preimage[i + 16];
-    }
+    let computed_hash = poseidon2::Poseidon2::hash([low, high], 2);
+    assert(address == computed_hash, "Address is not owned by the owner");
 
-    let share_1 = Field::from_be_bytes::<16>(share_1_bytes);
-    let share_2 = Field::from_be_bytes::<16>(share_2_bytes);
-
-    let computed_hash = poseidon2::Poseidon2::hash([share_1, share_2], 2);
-    assert(hash == computed_hash, "Address is not owned by the owner");
-
-    let calc_message_hash = poseidon2::Poseidon2::hash([share_1, share_2, message], 3);
+    let calc_message_hash = poseidon2::Poseidon2::hash([low, high, message], 3);
     assert(calc_message_hash == message_hash, "Message hash is invalid");
 }
 
