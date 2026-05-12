@@ -27,6 +27,7 @@ impl From<&CipheraURL> for InputNote {
                 psi: hash_merge([value.private_key, value.private_key]),
                 value: value.value,
             },
+            ..InputNote::default()
         }
     }
 }
@@ -118,6 +119,7 @@ mod tests {
                 psi: Element::ZERO,
                 value: Element::new(1),
             },
+            ..InputNote::default()
         };
 
         let a: CipheraURL = (&input_note).into();
@@ -155,6 +157,7 @@ mod tests {
                 psi: Element::ZERO,
                 value: Element::MAX,
             },
+            ..InputNote::default()
         };
 
         let a: CipheraURL = (&input_note).into();

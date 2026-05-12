@@ -227,6 +227,7 @@ async fn verify_transfers() {
     let utxo1_input_note1 = InputNote {
         note: send_note(60, address, 1),
         secret_key,
+        ..InputNote::default()
     };
     tree.insert(utxo1_input_note1.note.commitment(), ())
         .unwrap();
@@ -234,6 +235,7 @@ async fn verify_transfers() {
     let utxo1_input_note2 = InputNote {
         note: send_note(40, address, 2),
         secret_key,
+        ..InputNote::default()
     };
     tree.insert(utxo1_input_note2.note.commitment(), ())
         .unwrap();
@@ -268,11 +270,13 @@ async fn verify_transfers() {
     let utxo2_input_note1 = InputNote {
         note: utxo1_output_note1.clone(),
         secret_key,
+        ..InputNote::default()
     };
 
     let utxo2_input_note2 = InputNote {
         note: utxo1_output_note2.clone(),
         secret_key,
+        ..InputNote::default()
     };
 
     let utxo2_old_root = tree.root_hash();
@@ -389,6 +393,7 @@ async fn burn_to() {
     let input_note1 = InputNote {
         note: send_note(100, address, 1),
         secret_key,
+        ..InputNote::default()
     };
     tree.insert(input_note1.note.commitment(), ()).unwrap();
 
@@ -500,6 +505,7 @@ async fn substitute_burn() {
     let input_note1 = InputNote {
         note: send_note(100, address, 1),
         secret_key,
+        ..InputNote::default()
     };
     tree.insert(input_note1.note.commitment(), ()).unwrap();
 

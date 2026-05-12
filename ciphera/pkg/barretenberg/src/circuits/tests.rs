@@ -77,11 +77,13 @@ fn test_utxo() {
     let input_note1 = InputNote {
         note: send_note(50, address, 1),
         secret_key,
+        ..InputNote::default()
     };
 
     let input_note2 = InputNote {
         note: send_note(30, address, 2),
         secret_key,
+        ..InputNote::default()
     };
 
     let output_note1 = send_note(40, address, 3);
@@ -215,6 +217,7 @@ fn test_agg_utxo() {
     let utxo1_input_note1 = InputNote {
         note: send_note(50, address, 1),
         secret_key,
+        ..InputNote::default()
     };
     tree.insert(utxo1_input_note1.note.commitment(), ())
         .unwrap();
@@ -222,6 +225,7 @@ fn test_agg_utxo() {
     let utxo1_input_note2 = InputNote {
         note: send_note(30, address, 2),
         secret_key,
+        ..InputNote::default()
     };
     tree.insert(utxo1_input_note2.note.commitment(), ())
         .unwrap();
@@ -263,6 +267,7 @@ fn test_agg_agg() {
     let utxo1_input_note1 = InputNote {
         note: send_note(60, address, 1),
         secret_key,
+        ..InputNote::default()
     };
     tree.insert(utxo1_input_note1.note.commitment(), ())
         .unwrap();
@@ -270,6 +275,7 @@ fn test_agg_agg() {
     let utxo1_input_note2 = InputNote {
         note: send_note(40, address, 2),
         secret_key,
+        ..InputNote::default()
     };
     tree.insert(utxo1_input_note2.note.commitment(), ())
         .unwrap();
@@ -304,11 +310,13 @@ fn test_agg_agg() {
     let utxo2_input_note1 = InputNote {
         note: utxo1_output_note1.clone(),
         secret_key,
+        ..InputNote::default()
     };
 
     let utxo2_input_note2 = InputNote {
         note: utxo1_output_note2.clone(),
         secret_key,
+        ..InputNote::default()
     };
 
     let utxo2_old_root = tree.root_hash();
@@ -352,12 +360,14 @@ fn test_alt_agg_utxo() {
     let slow_input_note1 = InputNote {
         note: send_note(25, address, 12),
         secret_key,
+        ..InputNote::default()
     };
     tree.insert(slow_input_note1.note.commitment(), ()).unwrap();
 
     let slow_input_note2 = InputNote {
         note: send_note(15, address, 13),
         secret_key,
+        ..InputNote::default()
     };
     tree.insert(slow_input_note2.note.commitment(), ()).unwrap();
 
@@ -379,10 +389,12 @@ fn test_alt_agg_utxo() {
             InputNote {
                 note: mint_output_note1.clone(),
                 secret_key,
+                ..InputNote::default()
             },
             InputNote {
                 note: mint_output_note2.clone(),
                 secret_key,
+                ..InputNote::default()
             },
         ],
         burn_address,

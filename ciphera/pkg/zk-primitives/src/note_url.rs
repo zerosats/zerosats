@@ -43,6 +43,7 @@ impl From<&NoteURLPayload> for InputNote {
                 psi,
                 value: value.value,
             },
+            ..InputNote::default()
         }
     }
 }
