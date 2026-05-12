@@ -1,4 +1,4 @@
-use crate::constants::{FULL_ROUNDS, PARTIAL_ROUNDS, RATE, ROUND_CONSTANTS, MDS};
+use crate::constants::{FULL_ROUNDS, MDS, PARTIAL_ROUNDS, RATE, ROUND_CONSTANTS};
 
 // S-box function (x^5)
 fn sbox(x: Field) -> Field {
@@ -44,27 +44,27 @@ fn partial_round(mut state: [Field; 3], round_constants: [Field; 3]) -> [Field; 
 pub fn permute(mut state: [Field; 3]) -> [Field; 3] {
     let r_f = FULL_ROUNDS / 2;
     let r_p = PARTIAL_ROUNDS;
-    
+
     let mut round_idx = 0;
-    
+
     // First half of full rounds
     for _ in 0..r_f {
         state = full_round(state, ROUND_CONSTANTS[round_idx]);
         round_idx = round_idx + 1;
     }
-    
+
     // Partial rounds
     for _ in 0..r_p {
         state = partial_round(state, ROUND_CONSTANTS[round_idx]);
         round_idx = round_idx + 1;
     }
-    
+
     // Second half of full rounds
     for _ in 0..r_f {
         state = full_round(state, ROUND_CONSTANTS[round_idx]);
         round_idx = round_idx + 1;
     }
-    
+
     state
 }
 
@@ -80,13 +80,9 @@ impl PoseidonSponge {
     pub fn new(initial_capacity: Field) -> Self {
         let mut state = [0; 3];
         state[2] = initial_capacity; // Set capacity element at index RATE (2)
-        Self {
-            state,
-            cache: [0; 2],
-            cache_size: 0,
-        }
+        Self { state, cache: [0; 2], cache_size: 0 }
     }
-    
+
     // Absorb a field element
     pub fn absorb(&mut self, input: Field) {
         if self.cache_size == RATE {
@@ -100,7 +96,7 @@ impl PoseidonSponge {
             self.cache_size = self.cache_size + 1;
         }
     }
-    
+
     // Perform duplex operation (add cache to state and permute)
     fn perform_duplex(&mut self) {
         // Add cached values to state
@@ -114,7 +110,7 @@ impl PoseidonSponge {
         // Clear cache
         self.cache_size = 0;
     }
-    
+
     // Squeeze output
     pub fn squeeze(mut self) -> Field {
         // Final duplex to compress any remaining cached data
@@ -128,7 +124,7 @@ impl PoseidonSponge {
 pub fn hash_2(left: Field, right: Field) -> Field {
     // Initial capacity element: (2 << 64) for ConstantLength<2>
     let initial_capacity = 2 * 0x10000000000000000; // 2 * 2^64
-    
+
     let mut sponge = PoseidonSponge::new(initial_capacity);
     sponge.absorb(left);
     sponge.absorb(right);
@@ -139,12 +135,12 @@ pub fn hash_2(left: Field, right: Field) -> Field {
 pub fn hash<let N: u32>(inputs: [Field; N]) -> Field {
     // Initial capacity element: (N << 64) for ConstantLength<N>
     let initial_capacity = (N as Field) * 0x10000000000000000; // N * 2^64
-    
+
     let mut sponge = PoseidonSponge::new(initial_capacity);
     for i in 0..N {
         sponge.absorb(inputs[i]);
     }
-    
+
     // Add padding (zero padding) to make total absorbed elements a multiple of RATE
     // Calculate how many zeros to add
     let k = (N + RATE - 1) / RATE; // Ceiling division
@@ -152,6 +148,6 @@ pub fn hash<let N: u32>(inputs: [Field; N]) -> Field {
     for _ in 0..padding_count {
         sponge.absorb(0);
     }
-    
+
     sponge.squeeze()
 }

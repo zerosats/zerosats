@@ -1,4 +1,15 @@
 use poseidon::poseidon2;
+use bitcoin::check_pow_chain;
+
+pub struct TimeLock {
+    pub zero_block: [u8; 32],
+    pub n_blocks: Field,
+}
+
+pub struct TimeProof {
+    pub lock: TimeLock,
+    pub headers: [[u8; 80]; 2],
+}
 
 pub struct Note {
     pub kind: Field,
@@ -10,6 +21,8 @@ pub struct Note {
 pub struct InputNote {
     pub note: Note,
     pub secret_key: Field,
+    pub preimage: [u8; 32],
+    pub time_proof: TimeProof,
 }
 
 pub fn check_commitment(note: Note, commitment: Field) {
@@ -28,16 +41,57 @@ pub fn get_note_commitment(note: Note) -> Field {
     }
 }
 
-pub fn get_address(secret_key: Field) -> Field {
+pub fn get_secret_hash(secret_key: Field) -> Field {
     poseidon2::Poseidon2::hash([secret_key, 0], 2)
 }
 
-pub fn check_input_note_ownership(input_note: InputNote) {
-    if (input_note.note.value != 0) {
-        assert(
-            get_address(input_note.secret_key) == input_note.note.address,
-            "Input note is not owned by the owner",
-        );
+pub fn get_timelock_commitment(lock: TimeLock) -> Field {
+    let (low, high) = bytes_32_to_field_pair(lock.zero_block);
+    let zero_block_hash = poseidon2::Poseidon2::hash([low, high], 2);
+     poseidon2::Poseidon2::hash([zero_block_hash, lock.n_blocks], 2)
+}
+
+pub unconstrained fn check_input_note_ownership(input_note: InputNote) {
+    if input_note.note.value != 0 {
+        if input_note.note.kind as u8 < 5 {
+            assert(
+                        get_secret_hash(input_note.secret_key) == input_note.note.address,
+                        "Input note is not owned by the owner",
+                    );
+        }
+        // signature32
+        if input_note.note.kind == 5 {
+            let (low, high) = bytes_32_to_field_pair(input_note.preimage);
+
+            let computed_hash = poseidon2::Poseidon2::hash([low, high], 2);
+            assert(computed_hash == input_note.note.address, "Address is not owned by the owner");
+        }
+        // signature32sha
+        if input_note.note.kind == 6 {
+            let computed_sha_hash = unsafe { sha256::digest(input_note.preimage) };
+            let (low, high) = bytes_32_to_field_pair(computed_sha_hash);
+
+            let computed_hash = poseidon2::Poseidon2::hash([low, high], 2);
+            assert(computed_hash == input_note.note.address, "Address is not owned by the owner");
+        }
+        // timelocked
+        if input_note.note.kind == 7 {
+            let key_hash = get_secret_hash(input_note.secret_key);
+            let commitment = get_timelock_commitment(input_note.time_proof.lock);
+            let timelocked_address = poseidon2::Poseidon2::hash([key_hash, commitment], 2);
+            assert(
+                        timelocked_address == input_note.note.address,
+                        "Input note is not owned by the owner",
+                    );
+            assert(check_pow_chain(input_note.time_proof.headers, input_note.time_proof.lock.zero_block, input_note.time_proof.lock.n_blocks));
+        }
+        // time- and hashlocked
+        if input_note.note.kind == 8 {
+            assert(
+                        get_secret_hash(input_note.secret_key) == input_note.note.address,
+                        "Input note is not owned by the owner",
+                    );
+        }
     }
 }
 

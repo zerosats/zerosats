@@ -1,2 +1,2 @@
 [workspace]
-members = ["utxo", "agg_utxo", "agg_agg", "signature", "signature32", "signature32sha", "timelock", "points", "migrate", "poseidon_alt"]
+members = ["utxo", "agg_utxo", "agg_agg", "signature", "signature32", "signature32sha", "timelock", "migrate", "poseidon_alt"]
