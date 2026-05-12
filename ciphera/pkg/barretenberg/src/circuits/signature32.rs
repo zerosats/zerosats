@@ -6,8 +6,7 @@ use noirc_abi::InputMap;
 use noirc_artifacts::program::ProgramArtifact;
 use noirc_driver::CompiledProgram;
 use zk_primitives::{
-    bytes_to_elements, Signature32, Signature32Proof, Signature32ProofBytes, Signature32PublicInput,
-    ToBytes,
+    bytes_to_elements, Signature32, Signature32Proof, Signature32ProofBytes, Signature32PublicInput
 };
 
 use crate::{
@@ -85,7 +84,7 @@ struct Signature32Input {
     preimage: [u8; 32],
     message: Base,
     message_hash: Base,
-    hash: Base,
+    address: Base,
 }
 
 impl From<&Signature32> for Signature32Input {
@@ -94,7 +93,7 @@ impl From<&Signature32> for Signature32Input {
             preimage: signature.preimage,
             message: signature.message.to_base(),
             message_hash: signature.message_hash().to_base(),
-            hash: signature.hash().to_base(),
+            address: signature.address().to_base(),
         }
     }
 }
@@ -118,8 +117,8 @@ impl From<Signature32Input> for InputMap {
             noirc_abi::input_parser::InputValue::Field(input.message_hash),
         );
         map.insert(
-            "hash".to_owned(),
-            noirc_abi::input_parser::InputValue::Field(input.hash),
+            "address".to_owned(),
+            noirc_abi::input_parser::InputValue::Field(input.address),
         );
         map.insert(
             "message".to_owned(),
@@ -464,12 +463,12 @@ mod tests {
 
     #[test]
     fn test_zcash_note_adaptor() {
-        use musig2::secp::{MaybeScalar, Point, Scalar};
+        use musig2::secp::{Point, Scalar};
         use musig2::{AdaptorSignature, KeyAggContext, PartialSignature};
 
         // === Key setup ===
         // A (statechain entity) and X (transitory key, known by B)
-        let seckey_a = Scalar::from_slice(&[0xAA; 32]).unwrap();
+        let _seckey_a = Scalar::from_slice(&[0xAA; 32]).unwrap();
         let seckey_x = Scalar::from_slice(&[0xBB; 32]).unwrap();
         // B (current owner) and C (new owner) signing keys for BC signature
         let seckey_c = Scalar::from_slice(&[0xDD; 32]).unwrap();
@@ -579,7 +578,7 @@ mod tests {
         // Verify the conversion
         assert_eq!(input.preimage, preimage);
         assert_eq!(input.message, message.to_base());
-        assert_eq!(input.hash, signature.hash().to_base());
+        assert_eq!(input.address, signature.address().to_base());
         assert_eq!(input.message_hash, signature.message_hash().to_base());
     }
 }

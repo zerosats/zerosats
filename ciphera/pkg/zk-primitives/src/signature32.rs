@@ -23,7 +23,7 @@ impl Signature32 {
 
     /// Get the address (derived from preimage)
     #[must_use]
-    pub fn hash(&self) -> Element {
+    pub fn address(&self) -> Element {
         let element = Element::from_be_bytes(self.preimage);
         let (high, low) = element.decompose_be();
         hash::hash_merge([high, low])
