@@ -33,6 +33,7 @@ dirs = { workspace = true}
 smirk = { workspace = true }
 temp-env = "0.3.6"
 musig2 = { version="0.3.1", features = ["rand"] }
+sha2 = { workspace = true }
 
 [[bin]]
 name = "vk_hash"

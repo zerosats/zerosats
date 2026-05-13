@@ -5,6 +5,7 @@ mod note;
 mod points;
 mod signature;
 mod signature32;
+mod signature32sha;
 #[cfg(test)]
 mod tests;
 mod utxo;

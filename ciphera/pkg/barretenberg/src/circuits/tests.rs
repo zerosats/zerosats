@@ -2,8 +2,9 @@ use element::Element;
 use flate2::{Compression, write::GzEncoder};
 use std::io::Write;
 use zk_primitives::{
-    AggAgg, AggUtxo, InputNote, MerklePath, Note, ToBytes, Utxo, UtxoKind, UtxoProof,
-    UtxoProofBundleWithMerkleProofs, bridged_polygon_usdc_note_kind, get_address_for_private_key,
+    AggAgg, AggUtxo, InputNote, MerklePath, Note, TimeLock, TimeProof, ToBytes, Utxo, UtxoKind,
+    UtxoProof, UtxoProofBundleWithMerkleProofs, bridged_polygon_usdc_note_kind,
+    get_address_for_private_key,
 };
 
 use crate::{Prove, Result, Verify};
@@ -425,4 +426,274 @@ fn test_alt_agg_utxo() {
     );
 
     prove_and_verify(&agg_utxo).unwrap();
+}
+
+// =====================================================================
+// Spend-path tests for note kinds 5 (signature32), 6 (signature32sha),
+// 7 (timelock), and 8 (HTLC: SHA preimage path + timelock refund path).
+//
+// In Rust terms, the Noir circuit's `note.kind` field maps to
+// `zk_primitives::Note.contract` (see `barretenberg::circuits::note::BNote::from`),
+// so we set `contract` to 5/6/7/8 to select the spend path.
+//
+// The PoW chain fixture below reuses the exact bytes from
+// noir/timelock/src/main.nr (block 946920 + headers 946921 & 946922),
+// which is the same data that drives the Noir `test_main_two_blocks` test.
+// =====================================================================
+
+use sha2::{Digest, Sha256};
+
+fn shared_preimage_bytes() -> [u8; 32] {
+    [
+        1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25,
+        26, 27, 28, 29, 30, 31, 32,
+    ]
+}
+
+// Poseidon of the 32-byte preimage's (high, low) 16-byte halves. Matches
+// `signature32` and the Noir kind-5 ownership check.
+fn kind5_address(preimage: [u8; 32]) -> Element {
+    let element = Element::from_be_bytes(preimage);
+    let (high, low) = element.decompose_be();
+    hash::hash_merge([high, low])
+}
+
+// Poseidon of the SHA-256 digest's (high, low) 16-byte halves. Matches
+// `signature32sha` and the Noir kind-6 ownership check; also the encoding
+// of `note.psi` for the kind-8 hash-path.
+fn kind6_address(preimage: [u8; 32]) -> Element {
+    let sha: [u8; 32] = Sha256::digest(preimage).into();
+    let element = Element::from_be_bytes(sha);
+    let (high, low) = element.decompose_be();
+    hash::hash_merge([high, low])
+}
+
+fn timelock_commitment(lock: &TimeLock) -> Element {
+    let element = Element::from_be_bytes(lock.zero_block);
+    let (high, low) = element.decompose_be();
+    let zero_block_hash = hash::hash_merge([high, low]);
+    hash::hash_merge([zero_block_hash, lock.n_blocks])
+}
+
+// Address for the timelock-locked / HTLC-refund spend path:
+//   Poseidon(get_secret_hash(sk), timelock_commitment).
+// `get_secret_hash` is Poseidon([sk, 0]) which is what
+// `get_address_for_private_key` already does.
+fn timelock_address(secret_key: Element, lock: &TimeLock) -> Element {
+    let key_hash = get_address_for_private_key(secret_key);
+    let commitment = timelock_commitment(lock);
+    hash::hash_merge([key_hash, commitment])
+}
+
+// Block 946920 hash (LE) -- the anchor for the PoW chain fixture.
+fn anchor_zero_block() -> [u8; 32] {
+    [
+        0xf8, 0xa1, 0x7c, 0xed, 0x1d, 0xac, 0x17, 0xba, 0x27, 0xba, 0x9d, 0xee, 0x7f, 0x63, 0x95,
+        0x9b, 0xa7, 0x54, 0x18, 0xb6, 0x7c, 0xe7, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00,
+    ]
+}
+
+// 80-byte serialized header for block 946921, prev_hash linking to 946920.
+fn header_946921() -> [u8; 80] {
+    [
+        0x00, 0x40, 0x0b, 0x20, 0xf8, 0xa1, 0x7c, 0xed, 0x1d, 0xac, 0x17, 0xba, 0x27, 0xba, 0x9d,
+        0xee, 0x7f, 0x63, 0x95, 0x9b, 0xa7, 0x54, 0x18, 0xb6, 0x7c, 0xe7, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xee, 0xa2, 0x39, 0xdc, 0xe3, 0x77, 0x3c, 0x5f, 0x61,
+        0x79, 0xd2, 0xd1, 0x49, 0xb2, 0x5f, 0x1b, 0x17, 0xf6, 0x49, 0x33, 0x86, 0x95, 0x5c, 0xf5,
+        0x3f, 0xc7, 0x04, 0x5a, 0x39, 0xb8, 0xc6, 0x00, 0x0c, 0xc8, 0xef, 0x69, 0x69, 0x13, 0x02,
+        0x17, 0xe3, 0x10, 0xa9, 0x35,
+    ]
+}
+
+// 80-byte serialized header for block 946922.
+fn header_946922() -> [u8; 80] {
+    [
+        0x00, 0x00, 0x07, 0x20, 0xcf, 0x51, 0x90, 0x4c, 0xcc, 0x0c, 0xf4, 0x7b, 0x6a, 0xab, 0xf0,
+        0xcc, 0xfe, 0x55, 0x5c, 0x19, 0x77, 0x7c, 0xf6, 0x62, 0x06, 0x01, 0x02, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x74, 0x3f, 0xc7, 0xf1, 0xaf, 0xc9, 0x8f, 0x0e, 0x2f,
+        0x4e, 0x20, 0xc4, 0x0c, 0xb2, 0x11, 0x35, 0x07, 0x8a, 0x30, 0x5c, 0x01, 0xb9, 0x05, 0xe7,
+        0xc5, 0x26, 0xac, 0x10, 0xb7, 0xb4, 0x25, 0xc9, 0xf2, 0xc9, 0xef, 0x69, 0x69, 0x13, 0x02,
+        0x17, 0x65, 0xdb, 0x8d, 0x21,
+    ]
+}
+
+// Lock + 2-header PoW witness corresponding to the anchor / header fixtures.
+// This is the same chain proved by `noir/timelock::test_main_two_blocks`.
+fn pow_two_block_proof() -> TimeProof {
+    TimeProof {
+        lock: TimeLock {
+            zero_block: anchor_zero_block(),
+            n_blocks: Element::new(2),
+        },
+        headers: [header_946921(), header_946922()],
+    }
+}
+
+fn pow_two_block_lock() -> TimeLock {
+    TimeLock {
+        zero_block: anchor_zero_block(),
+        n_blocks: Element::new(2),
+    }
+}
+
+#[test]
+fn test_utxo_kind5_signature32_spend() {
+    // Kind 5: ownership proven by a 32-byte preimage whose Poseidon
+    // hash (over its high/low 16-byte halves) equals `note.address`.
+    let preimage = shared_preimage_bytes();
+    let address = kind5_address(preimage);
+    let kind5 = Element::new(5);
+
+    let input_note = InputNote {
+        note: note(50, address, 1, kind5),
+        secret_key: Element::ZERO,
+        preimage,
+        ..InputNote::default()
+    };
+
+    let utxo = Utxo {
+        kind: UtxoKind::Send,
+        input_notes: [input_note, InputNote::padding_note()],
+        output_notes: [
+            note(30, Element::new(42), 3, kind5),
+            note(20, Element::new(43), 4, kind5),
+        ],
+        burn_address: None,
+    };
+
+    prove_and_verify(&utxo).unwrap();
+}
+
+#[test]
+fn test_utxo_kind6_signature32sha_spend() {
+    // Kind 6: ownership proven by revealing a SHA-256 preimage whose
+    // digest hashes (under Poseidon, over high/low halves) to `note.address`.
+    let preimage = shared_preimage_bytes();
+    let address = kind6_address(preimage);
+    let kind6 = Element::new(6);
+
+    let input_note = InputNote {
+        note: note(40, address, 1, kind6),
+        secret_key: Element::ZERO,
+        preimage,
+        ..InputNote::default()
+    };
+
+    let utxo = Utxo {
+        kind: UtxoKind::Send,
+        input_notes: [input_note, InputNote::padding_note()],
+        output_notes: [
+            note(25, Element::new(99), 3, kind6),
+            note(15, Element::new(100), 4, kind6),
+        ],
+        burn_address: None,
+    };
+
+    prove_and_verify(&utxo).unwrap();
+}
+
+#[test]
+fn test_utxo_kind7_timelock_spend() {
+    // Kind 7: spendable only after a PoW-chain witness of `n_blocks`
+    // chained from `zero_block`. `note.address` is bound to both the
+    // owner's secret_key and the specific timelock.
+    let (secret_key, _) = get_keypair(101);
+    let lock = pow_two_block_lock();
+    let address = timelock_address(secret_key, &lock);
+    let kind7 = Element::new(7);
+
+    let input_note = InputNote {
+        note: note(50, address, 1, kind7),
+        secret_key,
+        preimage: [0u8; 32],
+        time_proof: pow_two_block_proof(),
+    };
+
+    let utxo = Utxo {
+        kind: UtxoKind::Send,
+        input_notes: [input_note, InputNote::padding_note()],
+        output_notes: [
+            note(20, Element::new(7), 3, kind7),
+            note(30, Element::new(8), 4, kind7),
+        ],
+        burn_address: None,
+    };
+
+    prove_and_verify(&utxo).unwrap();
+}
+
+#[test]
+fn test_utxo_kind8_htlc_hash_path() {
+    // Kind 8 hash path: any time, anyone holding the preimage can spend
+    // by revealing it. Constraint: Poseidon(SHA256(preimage) halves) == note.psi.
+    // The note.address can be anything (it's only constrained on the
+    // refund path), so we set it to a generic owner address.
+    let preimage = shared_preimage_bytes();
+    let psi = kind6_address(preimage);
+    let kind8 = Element::new(8);
+
+    // The address here is irrelevant for the hash path; pick something
+    // simple. The circuit only constrains `note.psi`.
+    let input_note = InputNote {
+        note: Note {
+            kind: Element::new(2),
+            contract: kind8,
+            address: Element::new(1234),
+            psi,
+            value: Element::new(50),
+        },
+        secret_key: Element::ZERO,
+        preimage,
+        ..InputNote::default()
+    };
+
+    let utxo = Utxo {
+        kind: UtxoKind::Send,
+        input_notes: [input_note, InputNote::padding_note()],
+        output_notes: [
+            note(20, Element::new(50), 3, kind8),
+            note(30, Element::new(51), 4, kind8),
+        ],
+        burn_address: None,
+    };
+
+    prove_and_verify(&utxo).unwrap();
+}
+
+#[test]
+fn test_utxo_kind8_htlc_refund_path() {
+    // Kind 8 refund path: triggered by `preimage == [0; 32]`. Falls back
+    // to the timelocked Poseidon-key path -- `note.address` must equal
+    // Poseidon(get_secret_hash(sk), timelock_commitment) AND a valid PoW
+    // chain of `n_blocks` headers is required.
+    let (secret_key, _) = get_keypair(202);
+    let lock = pow_two_block_lock();
+    let address = timelock_address(secret_key, &lock);
+    let kind8 = Element::new(8);
+
+    let input_note = InputNote {
+        note: Note {
+            kind: Element::new(2),
+            contract: kind8,
+            address,
+            psi: Element::new(7777), // unconstrained on this path
+            value: Element::new(60),
+        },
+        secret_key,
+        preimage: [0u8; 32],
+        time_proof: pow_two_block_proof(),
+    };
+
+    let utxo = Utxo {
+        kind: UtxoKind::Send,
+        input_notes: [input_note, InputNote::padding_note()],
+        output_notes: [
+            note(25, Element::new(60), 3, kind8),
+            note(35, Element::new(61), 4, kind8),
+        ],
+        burn_address: None,
+    };
+
+    prove_and_verify(&utxo).unwrap();
 }
