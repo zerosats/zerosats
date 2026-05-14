@@ -7,19 +7,11 @@ NARGO=${NARGO:-nargo}
 
 # Detect repo root: in Docker, ciphera/ contents are at the git root.
 # Locally, they're under a ciphera/ subdirectory.
-GIT_ROOT=$(git rev-parse --show-toplevel)
-if [ -d "$GIT_ROOT/noir" ]; then
-  REPO_ROOT="$GIT_ROOT"
-elif [ -d "$GIT_ROOT/ciphera/noir" ]; then
-  REPO_ROOT="$GIT_ROOT/ciphera"
-else
-  echo "ERROR: Cannot find noir/ directory under $GIT_ROOT or $GIT_ROOT/ciphera/"
-  exit 1
-fi
+REPO_ROOT=/workspace
 BACKEND=${BACKEND:-bb}
 
 # Clean target
-rm -rf "$REPO_ROOT/noir/target"
+#rm -rf "$REPO_ROOT/noir/target"
 
 # Compile the program
 $NARGO compile --workspace
@@ -35,7 +27,7 @@ mkdir -p $REPO_ROOT/fixtures/keys
 
 # Get all program names from the workspace - the ordering of these is important,
 # as the hash from utxo is used in agg_utxo, and agg_utxo used in agg_agg
-PROGRAMS=("signature" "points" "utxo" "agg_utxo" "agg_agg") # "migrate")
+PROGRAMS=("signature" "signature32" "signature32sha" "utxo" "agg_utxo" "agg_agg") # "migrate")
 
 # Define which programs should use the recursive flag
 RECURSIVE_PROGRAMS=("agg_agg" "agg_utxo" "utxo")
