@@ -83,6 +83,7 @@ pub fn check_spend_conditions(input_note: InputNote) {
                         timelocked_address == input_note.note.address,
                         "Input note is not owned by the owner",
                     );
+            // Not fool-proof. Not checking min difficulty to save on circuit constraints
             assert(check_pow_chain(input_note.time_proof.headers, input_note.time_proof.lock.zero_block, input_note.time_proof.lock.n_blocks));
         }
         // time- and hashlocked
@@ -102,6 +103,8 @@ pub fn check_spend_conditions(input_note: InputNote) {
                             timelocked_address == input_note.note.address,
                             "HTLC: wrong refund commitment",
                         );
+
+                // Not fool-proof. Not checking min difficulty to save on circuit constraints
                 assert(
                     check_pow_chain(input_note.time_proof.headers, input_note.time_proof.lock.zero_block, input_note.time_proof.lock.n_blocks),
                     "HTLC: timelocked"

@@ -10,7 +10,7 @@ fn main(
     message: pub Field,
 ) {
     let mut computed_sha_hash = digest(preimage);
-    assert(sha_hash == computed_sha_hash, "Address is not owned by the owner");
+    assert(sha_hash == computed_sha_hash, "SHA does not correspond to preimage");
 
     let (low, high) = bytes_32_to_field_pair(preimage);
 

@@ -1,4 +1,3 @@
-use poseidon::poseidon2;
 use sha256::digest;
 
 global MAX_CHAIN_LEN: u32 = 2;
