@@ -50,11 +50,9 @@ impl Prove for AggAgg {
 
         let proof_bytes = prove::<DefaultBackend>(
             &PROGRAM_COMPILED,
-            PROGRAM.as_bytes(),
-            &BYTECODE,
+            &PROGRAM.as_bytes(),
             KEY,
             &inputs,
-            false,
             true,
         )?;
         let public_inputs_bytes = proof_bytes[..AGG_AGG_PUBLIC_INPUTS_COUNT * 32].to_vec();

@@ -41,11 +41,9 @@ impl BindingBackend {
 
 impl Backend for BindingBackend {
     fn prove(
-        _program: &[u8],
-        bytecode: &[u8],
+        program: &[u8],
         key: &[u8],
         witness: &[u8],
-        _recursive: bool,
         oracle_hash_keccak: bool,
     ) -> Result<Vec<u8>> {
         let _guard = BB_MUTEX.lock().unwrap();
@@ -54,11 +52,11 @@ impl Backend for BindingBackend {
 
         let proof = match oracle_hash_keccak {
             false => unsafe {
-                bb_rs::barretenberg_api::acir::acir_prove_ultra_honk(bytecode, witness, key)
+                bb_rs::barretenberg_api::acir::acir_prove_ultra_honk(program, witness, key)
             },
             true => unsafe {
                 bb_rs::barretenberg_api::acir::acir_prove_ultra_keccak_zk_honk(
-                    bytecode, witness, key,
+                    program, witness, key,
                 )
             },
         };

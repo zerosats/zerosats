@@ -47,11 +47,9 @@ impl Prove for Utxo {
 
         let proof_bytes = prove::<DefaultBackend>(
             &PROGRAM_COMPILED,
-            PROGRAM.as_bytes(),
-            &BYTECODE,
+            &PROGRAM.as_bytes(),
             KEY,
             &inputs,
-            true,
             false,
         )?;
 

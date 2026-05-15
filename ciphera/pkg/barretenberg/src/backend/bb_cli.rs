@@ -70,10 +70,8 @@ fn get_bb_path() -> Result<PathBuf> {
 impl Backend for CliBackend {
     fn prove(
         program: &[u8],
-        _bytecode: &[u8],
         key: &[u8],
         witness: &[u8],
-        _recursive: bool,
         oracle_hash_keccak: bool,
     ) -> Result<Vec<u8>> {
         let mut witness_gz = GzEncoder::new(witness, Compression::none());
