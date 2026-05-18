@@ -27,7 +27,8 @@ lazy_static! {
     static ref PROGRAM_COMPILED: CompiledProgram = CompiledProgram::from(PROGRAM_ARTIFACT.clone());
     static ref PROGRAM_PATH: PathBuf = write_to_temp_file(PROGRAM.as_bytes(), ".json");
     static ref BYTECODE: Vec<u8> = get_bytecode_from_program(PROGRAM);
-    pub static ref AGG_AGG_VERIFICATION_KEY: VerificationKey = VerificationKey::from_bytes(KEY);
+    pub static ref AGG_AGG_VERIFICATION_KEY: VerificationKey =
+        VerificationKey::from_bytes(KEY).expect("Fail to read verification key");
     pub static ref AGG_AGG_VERIFICATION_KEY_HASH: VerificationKeyHash = VerificationKeyHash(
         bn254_blackbox_solver::poseidon_hash(&AGG_AGG_VERIFICATION_KEY.0).unwrap()
     );
@@ -48,13 +49,8 @@ impl Prove for AggAgg {
     fn prove(&self) -> Self::Result<Self::Proof> {
         let inputs = InputMap::from(AggAggInput::from(self));
 
-        let proof_bytes = prove::<DefaultBackend>(
-            &PROGRAM_COMPILED,
-            &PROGRAM.as_bytes(),
-            KEY,
-            &inputs,
-            true,
-        )?;
+        let proof_bytes =
+            prove::<DefaultBackend>(&PROGRAM_COMPILED, PROGRAM.as_bytes(), KEY, &inputs, true)?;
         let public_inputs_bytes = proof_bytes[..AGG_AGG_PUBLIC_INPUTS_COUNT * 32].to_vec();
         let public_inputs = bytes_to_elements(&public_inputs_bytes);
         let raw_proof = proof_bytes[AGG_AGG_PUBLIC_INPUTS_COUNT * 32..].to_vec();

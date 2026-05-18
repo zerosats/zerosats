@@ -495,7 +495,10 @@ impl BurnSubstitutor {
                 .call(
                     &self.claimer_contract,
                     "addBurnIfSwapCreated",
-                    (escrow.to_token(), Token::FixedBytes(substitute_burn_key.as_bytes().to_vec())),
+                    (
+                        escrow.to_token(),
+                        Token::FixedBytes(substitute_burn_key.as_bytes().to_vec()),
+                    ),
                     &self.rollup_contract.signer,
                     self.rollup_contract.signer_address,
                 )

@@ -13,12 +13,7 @@ pub fn prove<B: Backend>(
 
     let witness = bincode::serialize(&results.witness_stack)?;
 
-    B::prove(
-        program,
-        key,
-        &witness,
-        oracle_hash_keccak,
-    )
+    B::prove(program, key, &witness, oracle_hash_keccak)
     // Ok(proof)
 }
 

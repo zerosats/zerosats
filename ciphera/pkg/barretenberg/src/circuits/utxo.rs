@@ -15,8 +15,8 @@ use noirc_artifacts::program::ProgramArtifact;
 use noirc_driver::CompiledProgram;
 use std::path::PathBuf;
 use zk_primitives::{
-    UTXO_PROOF_SIZE, UTXO_PUBLIC_INPUTS_COUNT, Utxo, UtxoProof, UtxoProofBytes,
-    UtxoPublicInput, bytes_to_elements,
+    UTXO_PROOF_SIZE, UTXO_PUBLIC_INPUTS_COUNT, Utxo, UtxoProof, UtxoProofBytes, UtxoPublicInput,
+    bytes_to_elements,
 };
 
 const PROGRAM: &str = include_str!("../../../../fixtures/programs/utxo.json");
@@ -27,7 +27,8 @@ lazy_static! {
     static ref PROGRAM_COMPILED: CompiledProgram = CompiledProgram::from(PROGRAM_ARTIFACT.clone());
     static ref PROGRAM_PATH: PathBuf = write_to_temp_file(PROGRAM.as_bytes(), ".json");
     static ref BYTECODE: Vec<u8> = get_bytecode_from_program(PROGRAM);
-    pub static ref UTXO_VERIFICATION_KEY: VerificationKey = VerificationKey::from_bytes(KEY);
+    pub static ref UTXO_VERIFICATION_KEY: VerificationKey =
+        VerificationKey::from_bytes(KEY).expect("Fail to read verification key");
     pub static ref UTXO_VERIFICATION_KEY_HASH: VerificationKeyHash = VerificationKeyHash(
         bn254_blackbox_solver::poseidon_hash(&UTXO_VERIFICATION_KEY.0).unwrap()
     );
@@ -45,13 +46,8 @@ impl Prove for Utxo {
         //     element::Element::from_base(UTXO_VERIFICATION_KEY_HASH.0).to_u256()
         // );
 
-        let proof_bytes = prove::<DefaultBackend>(
-            &PROGRAM_COMPILED,
-            &PROGRAM.as_bytes(),
-            KEY,
-            &inputs,
-            false,
-        )?;
+        let proof_bytes =
+            prove::<DefaultBackend>(&PROGRAM_COMPILED, PROGRAM.as_bytes(), KEY, &inputs, false)?;
 
         // Slice the first 6, 32 byte chunks as the public inputs
         let public_inputs = proof_bytes[..UTXO_PUBLIC_INPUTS_COUNT * 32].to_vec();

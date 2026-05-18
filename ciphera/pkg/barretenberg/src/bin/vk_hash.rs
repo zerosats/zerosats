@@ -35,7 +35,8 @@ fn main() {
         std::process::exit(1);
     }
 
-    let verification_key = VerificationKey::from_bytes(&vk_bytes);
+    let verification_key =
+        VerificationKey::from_bytes(&vk_bytes).expect("Fail to read verification key");
 
     let hash = match poseidon_hash(&verification_key.0) {
         Ok(hash) => hash,

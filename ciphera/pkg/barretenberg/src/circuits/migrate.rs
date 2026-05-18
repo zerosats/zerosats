@@ -25,7 +25,8 @@ lazy_static! {
     static ref PROGRAM_COMPILED: CompiledProgram = CompiledProgram::from(PROGRAM_ARTIFACT.clone());
     static ref PROGRAM_PATH: PathBuf = write_to_temp_file(PROGRAM.as_bytes(), ".json");
     static ref BYTECODE: Vec<u8> = get_bytecode_from_program(PROGRAM);
-    pub static ref MIGRATE_VERIFICATION_KEY: VerificationKey = VerificationKey::from_bytes(KEY);
+    pub static ref MIGRATE_VERIFICATION_KEY: VerificationKey =
+        VerificationKey::from_bytes(KEY).expect("Fail to read verification key");
     pub static ref MIGRATE_VERIFICATION_KEY_HASH: VerificationKeyHash = VerificationKeyHash(
         bn254_blackbox_solver::poseidon_hash(&MIGRATE_VERIFICATION_KEY.0).unwrap()
     );
@@ -71,13 +72,8 @@ impl Prove for Migrate {
     fn prove(&self) -> Self::Result<Self::Proof> {
         let inputs = InputMap::from(MigrateInput::from(self));
 
-        let proof_bytes = prove::<DefaultBackend>(
-            &PROGRAM_COMPILED,
-            &PROGRAM.as_bytes(),
-            KEY,
-            &inputs,
-            false,
-        )?;
+        let proof_bytes =
+            prove::<DefaultBackend>(&PROGRAM_COMPILED, PROGRAM.as_bytes(), KEY, &inputs, false)?;
 
         // The migrate circuit has 2 public inputs (old_address, new_address)
         let public_inputs_count = 2;

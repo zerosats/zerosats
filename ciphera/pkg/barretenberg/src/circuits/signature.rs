@@ -14,8 +14,8 @@ use noirc_artifacts::program::ProgramArtifact;
 use noirc_driver::CompiledProgram;
 use std::path::PathBuf;
 use zk_primitives::{
-    Signature, SignatureProof, SignatureProofBytes, SignaturePublicInput,
-    bytes_to_elements, get_address_for_private_key,
+    Signature, SignatureProof, SignatureProofBytes, SignaturePublicInput, bytes_to_elements,
+    get_address_for_private_key,
 };
 
 const PROGRAM: &str = include_str!("../../../../fixtures/programs/signature.json");
@@ -39,13 +39,8 @@ impl Prove for Signature {
     fn prove(&self) -> Self::Result<Self::Proof> {
         let inputs = InputMap::from(SignatureInput::from(self));
 
-        let proof_bytes = prove::<DefaultBackend>(
-            &PROGRAM_COMPILED,
-            &PROGRAM.as_bytes(),
-            KEY,
-            &inputs,
-            false,
-        )?;
+        let proof_bytes =
+            prove::<DefaultBackend>(&PROGRAM_COMPILED, PROGRAM.as_bytes(), KEY, &inputs, false)?;
 
         // Slice off the public inputs
         let public_inputs = proof_bytes[..SIGNATURE_PUBLIC_INPUTS_COUNT * 32].to_vec();

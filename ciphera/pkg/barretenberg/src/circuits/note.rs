@@ -28,7 +28,10 @@ impl From<BInputNote> for InputValue {
             ("note".to_owned(), note.note.into()),
             ("secret_key".to_owned(), InputValue::Field(note.secret_key)),
             ("preimage".to_owned(), bytes_to_input_value(&note.preimage)),
-            ("time_proof".to_owned(), time_proof_to_input_value(&note.time_proof)),
+            (
+                "time_proof".to_owned(),
+                time_proof_to_input_value(&note.time_proof),
+            ),
         ]))
     }
 }
