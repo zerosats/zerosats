@@ -6,7 +6,7 @@ use sha2::{Digest, Sha256};
 use crate::ToBytes;
 
 /// A signature variant that simultaneously proves Poseidon ownership of an
-/// address and reveals the SHA-256 hash of the same 32-byte preimage. This
+/// address and confirms the SHA-256 computation for a given 32-byte preimage. This
 /// mirrors the Noir `signature32sha` circuit and is used by the kind-6
 /// (signature32sha) spend path: it lets a Bitcoin-style hashlock (SHA-256)
 /// be tied to a note whose address is committed under Poseidon.
