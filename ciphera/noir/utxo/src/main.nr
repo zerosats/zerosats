@@ -1,6 +1,6 @@
 use common::{
     bytes_32_to_field_pair, check_commitment, check_spend_conditions, get_note_commitment,
-    get_secret_hash, InputNote, Note, TimeLock, TimeProof,
+    get_secret_hash, get_timelock_commitment, InputNote, Note, TimeLock, TimeProof,
 };
 use poseidon::poseidon2;
 
@@ -1169,6 +1169,416 @@ fn test_send_two_kind6_inputs_shared_preimage() {
             get_note_commitment(note_4),
         ],
         [1, 0, 0, 0, 0],
+    )
+}
+
+// =====================================================================
+// Bitcoin-header fixtures for kind 8 / kind 9 refund paths.
+//
+// Copied from `timelock::main` so utxo tests can exercise the PoW chain
+// check inside `check_spend_conditions` without depending on the
+// timelock crate. Anchor + two consecutive mainnet headers (946921,
+// 946922) -- enough to satisfy MAX_CHAIN_LEN = 2.
+// =====================================================================
+
+fn bitcoin_anchor_zero_block() -> [u8; 32] {
+    [
+        0xf8, 0xa1, 0x7c, 0xed, 0x1d, 0xac, 0x17, 0xba, 0x27, 0xba, 0x9d, 0xee, 0x7f, 0x63, 0x95,
+        0x9b, 0xa7, 0x54, 0x18, 0xb6, 0x7c, 0xe7, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00,
+    ]
+}
+
+fn bitcoin_header_946921() -> [u8; 80] {
+    [
+        0x00, 0x40, 0x0b, 0x20, 0xf8, 0xa1, 0x7c, 0xed, 0x1d, 0xac, 0x17, 0xba, 0x27, 0xba, 0x9d,
+        0xee, 0x7f, 0x63, 0x95, 0x9b, 0xa7, 0x54, 0x18, 0xb6, 0x7c, 0xe7, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xee, 0xa2, 0x39, 0xdc, 0xe3, 0x77, 0x3c, 0x5f, 0x61,
+        0x79, 0xd2, 0xd1, 0x49, 0xb2, 0x5f, 0x1b, 0x17, 0xf6, 0x49, 0x33, 0x86, 0x95, 0x5c, 0xf5,
+        0x3f, 0xc7, 0x04, 0x5a, 0x39, 0xb8, 0xc6, 0x00, 0x0c, 0xc8, 0xef, 0x69, 0x69, 0x13, 0x02,
+        0x17, 0xe3, 0x10, 0xa9, 0x35,
+    ]
+}
+
+fn bitcoin_header_946922() -> [u8; 80] {
+    [
+        0x00, 0x00, 0x07, 0x20, 0xcf, 0x51, 0x90, 0x4c, 0xcc, 0x0c, 0xf4, 0x7b, 0x6a, 0xab, 0xf0,
+        0xcc, 0xfe, 0x55, 0x5c, 0x19, 0x77, 0x7c, 0xf6, 0x62, 0x06, 0x01, 0x02, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x74, 0x3f, 0xc7, 0xf1, 0xaf, 0xc9, 0x8f, 0x0e, 0x2f,
+        0x4e, 0x20, 0xc4, 0x0c, 0xb2, 0x11, 0x35, 0x07, 0x8a, 0x30, 0x5c, 0x01, 0xb9, 0x05, 0xe7,
+        0xc5, 0x26, 0xac, 0x10, 0xb7, 0xb4, 0x25, 0xc9, 0xf2, 0xc9, 0xef, 0x69, 0x69, 0x13, 0x02,
+        0x17, 0x65, 0xdb, 0x8d, 0x21,
+    ]
+}
+
+fn bitcoin_time_proof() -> TimeProof {
+    let lock = TimeLock { zero_block: bitcoin_anchor_zero_block(), n_blocks: 2 };
+    TimeProof { lock, headers: [bitcoin_header_946921(), bitcoin_header_946922()] }
+}
+
+// Expected `note.psi` for any timelocked spend (kind 1-4 with active
+// timelock, or kind 8/9 refund branch): Poseidon over the secret-key
+// hash and the timelock commitment.
+fn timelocked_psi(sk: Field) -> Field {
+    let key_hash = get_secret_hash(sk);
+    let commitment = get_timelock_commitment(bitcoin_time_proof().lock);
+    poseidon2::Poseidon2::hash([key_hash, commitment], 2)
+}
+
+#[test]
+fn test_send_kind8_htlc_claim() {
+    // Kind 8 claim path: spender supplies the SHA preimage whose
+    // Poseidon-of-field-pair hash equals `note.address` (same address
+    // construction as kind 6). `psi` is free in the claim branch.
+    let preimage = shared_preimage();
+    let address = kind6_address();
+
+    let note_1 = Note { kind: 8, value: 10, address, psi: 999 };
+    let input_note_1 = InputNote {
+        note: note_1,
+        secret_key: 0,
+        preimage,
+        time_proof: zeroTimeProof,
+    };
+    let input_note_2 = padding_input();
+
+    let note_3 = Note { kind: 8, value: 7, address: 42, psi: 3 };
+    let note_4 = Note { kind: 8, value: 3, address: 43, psi: 4 };
+
+    main(
+        [input_note_1, input_note_2],
+        [note_3, note_4],
+        0,
+        [
+            get_note_commitment(note_1),
+            get_note_commitment(input_note_2.note),
+            get_note_commitment(note_3),
+            get_note_commitment(note_4),
+        ],
+        [1, 0, 0, 0, 0],
+    )
+}
+
+#[test(should_fail)]
+fn test_send_kind8_htlc_wrong_preimage() {
+    // Non-zero preimage selects the claim branch, but it doesn't hash
+    // to `note.address` -- the HTLC hashlock assertion must fail.
+    let address = kind6_address();
+
+    let mut bad_preimage = shared_preimage();
+    bad_preimage[5] = 77;
+
+    let note_1 = Note { kind: 8, value: 10, address, psi: 999 };
+    let input_note_1 = InputNote {
+        note: note_1,
+        secret_key: 0,
+        preimage: bad_preimage,
+        time_proof: zeroTimeProof,
+    };
+    let input_note_2 = padding_input();
+
+    let note_3 = Note { kind: 8, value: 10, address: 42, psi: 3 };
+    let note_4 = Note { kind: 0, value: 0, address: 0, psi: 0 };
+
+    main(
+        [input_note_1, input_note_2],
+        [note_3, note_4],
+        0,
+        [
+            get_note_commitment(note_1),
+            get_note_commitment(input_note_2.note),
+            get_note_commitment(note_3),
+            get_note_commitment(note_4),
+        ],
+        [1, 0, 0, 0, 0],
+    )
+}
+
+#[test]
+fn test_send_kind8_htlc_refund() {
+    // Kind 8 refund path: zero preimage selects the timelocked branch.
+    // `note.psi` must equal Poseidon(secret_hash, timelock_commitment)
+    // and the PoW chain headers must link to the anchor zero_block.
+    let sk: Field = 101;
+    let psi = timelocked_psi(sk);
+
+    let note_1 = Note { kind: 8, value: 10, address: 1234, psi };
+    let input_note_1 = InputNote {
+        note: note_1,
+        secret_key: sk,
+        preimage: zeros32,
+        time_proof: bitcoin_time_proof(),
+    };
+    let input_note_2 = padding_input();
+
+    let note_3 = Note { kind: 8, value: 7, address: 42, psi: 3 };
+    let note_4 = Note { kind: 8, value: 3, address: 43, psi: 4 };
+
+    main(
+        [input_note_1, input_note_2],
+        [note_3, note_4],
+        0,
+        [
+            get_note_commitment(note_1),
+            get_note_commitment(input_note_2.note),
+            get_note_commitment(note_3),
+            get_note_commitment(note_4),
+        ],
+        [1, 0, 0, 0, 0],
+    )
+}
+
+#[test(should_fail)]
+fn test_send_kind8_htlc_refund_wrong_psi() {
+    // Zero preimage forces the refund branch but `psi` doesn't match
+    // the expected timelock commitment -- must fail with
+    // "HTLC: wrong refund commitment".
+    let sk: Field = 101;
+
+    let note_1 = Note { kind: 8, value: 10, address: 1234, psi: 12345 };
+    let input_note_1 = InputNote {
+        note: note_1,
+        secret_key: sk,
+        preimage: zeros32,
+        time_proof: bitcoin_time_proof(),
+    };
+    let input_note_2 = padding_input();
+
+    let note_3 = Note { kind: 8, value: 10, address: 42, psi: 3 };
+    let note_4 = Note { kind: 0, value: 0, address: 0, psi: 0 };
+
+    main(
+        [input_note_1, input_note_2],
+        [note_3, note_4],
+        0,
+        [
+            get_note_commitment(note_1),
+            get_note_commitment(input_note_2.note),
+            get_note_commitment(note_3),
+            get_note_commitment(note_4),
+        ],
+        [1, 0, 0, 0, 0],
+    )
+}
+
+// =====================================================================
+// Timelocked normal notes (kind 1-4 with an active TimeLock).
+//
+// `check_spend_conditions` now binds `note.psi` to
+//   Poseidon(get_secret_hash(sk), get_timelock_commitment(lock))
+// whenever `timelock_is_active(lock)` (i.e. `zero_block != [0; 32]`),
+// and additionally requires a valid PoW chain from that anchor.
+// =====================================================================
+
+#[test]
+fn test_send_timelocked_normal_note() {
+    // Happy path: kind 1 input, active timelock, `psi` carries the
+    // expected timelock commitment, PoW chain headers link to the anchor.
+    let sk: Field = 101;
+    let address = get_secret_hash(sk);
+    let psi = timelocked_psi(sk);
+
+    let note_1 = Note { kind: 1, value: 10, address, psi };
+    let input_note_1 = InputNote {
+        note: note_1,
+        secret_key: sk,
+        preimage: zeros32,
+        time_proof: bitcoin_time_proof(),
+    };
+    let input_note_2 = padding_input();
+
+    let note_3 = Note { kind: 1, value: 7, address, psi: 3 };
+    let note_4 = Note { kind: 1, value: 3, address, psi: 4 };
+
+    main(
+        [input_note_1, input_note_2],
+        [note_3, note_4],
+        0,
+        [
+            get_note_commitment(note_1),
+            get_note_commitment(input_note_2.note),
+            get_note_commitment(note_3),
+            get_note_commitment(note_4),
+        ],
+        [1, 0, 0, 0, 0],
+    )
+}
+
+#[test(should_fail)]
+fn test_send_timelocked_normal_note_wrong_psi() {
+    // Active timelock but `psi` doesn't bind to the lock+key. Must fail
+    // with "Wrong timelock commitment".
+    let sk: Field = 101;
+    let address = get_secret_hash(sk);
+
+    let note_1 = Note { kind: 1, value: 10, address, psi: 12345 };
+    let input_note_1 = InputNote {
+        note: note_1,
+        secret_key: sk,
+        preimage: zeros32,
+        time_proof: bitcoin_time_proof(),
+    };
+    let input_note_2 = padding_input();
+
+    let note_3 = Note { kind: 1, value: 10, address, psi: 3 };
+    let note_4 = Note { kind: 0, value: 0, address: 0, psi: 0 };
+
+    main(
+        [input_note_1, input_note_2],
+        [note_3, note_4],
+        0,
+        [
+            get_note_commitment(note_1),
+            get_note_commitment(input_note_2.note),
+            get_note_commitment(note_3),
+            get_note_commitment(note_4),
+        ],
+        [1, 0, 0, 0, 0],
+    )
+}
+
+#[test(should_fail)]
+fn test_send_timelocked_normal_note_bad_pow_chain() {
+    // psi is correct, but the supplied headers don't actually chain back
+    // to the anchor zero_block (header_946922 alone, no 946921 first).
+    // Must fail with "Input note is locked".
+    let sk: Field = 101;
+    let address = get_secret_hash(sk);
+    let psi = timelocked_psi(sk);
+
+    let bad_lock = TimeLock { zero_block: bitcoin_anchor_zero_block(), n_blocks: 2 };
+    // Swap the two headers -- breaks chain linkage on the first slot.
+    let bad_proof = TimeProof {
+        lock: bad_lock,
+        headers: [bitcoin_header_946922(), bitcoin_header_946921()],
+    };
+
+    let note_1 = Note { kind: 1, value: 10, address, psi };
+    let input_note_1 = InputNote {
+        note: note_1,
+        secret_key: sk,
+        preimage: zeros32,
+        time_proof: bad_proof,
+    };
+    let input_note_2 = padding_input();
+
+    let note_3 = Note { kind: 1, value: 10, address, psi: 3 };
+    let note_4 = Note { kind: 0, value: 0, address: 0, psi: 0 };
+
+    main(
+        [input_note_1, input_note_2],
+        [note_3, note_4],
+        0,
+        [
+            get_note_commitment(note_1),
+            get_note_commitment(input_note_2.note),
+            get_note_commitment(note_3),
+            get_note_commitment(note_4),
+        ],
+        [1, 0, 0, 0, 0],
+    )
+}
+
+#[test(should_fail)]
+fn test_send_timelocked_normal_note_wrong_secret() {
+    // Signature check still fires even when the timelock would otherwise
+    // be satisfied -- a stranger can't spend just by producing a valid
+    // PoW chain.
+    let owner_sk: Field = 101;
+    let address = get_secret_hash(owner_sk);
+    let psi = timelocked_psi(owner_sk);
+
+    let note_1 = Note { kind: 1, value: 10, address, psi };
+    let input_note_1 = InputNote {
+        note: note_1,
+        secret_key: 202, // not the owner's key
+        preimage: zeros32,
+        time_proof: bitcoin_time_proof(),
+    };
+    let input_note_2 = padding_input();
+
+    let note_3 = Note { kind: 1, value: 10, address, psi: 3 };
+    let note_4 = Note { kind: 0, value: 0, address: 0, psi: 0 };
+
+    main(
+        [input_note_1, input_note_2],
+        [note_3, note_4],
+        0,
+        [
+            get_note_commitment(note_1),
+            get_note_commitment(input_note_2.note),
+            get_note_commitment(note_3),
+            get_note_commitment(note_4),
+        ],
+        [1, 0, 0, 0, 0],
+    )
+}
+
+#[test]
+fn test_send_inactive_timelock_psi_is_free() {
+    // Regression: when zero_block is all-zeros `timelock_is_active`
+    // returns false, so the timelock branch is skipped and `psi` can
+    // carry an arbitrary value (the original normal-note semantics).
+    let sk: Field = 101;
+    let address = get_secret_hash(sk);
+
+    let note_1 = Note { kind: 1, value: 10, address, psi: 0xdeadbeef };
+    let input_note_1 = InputNote {
+        note: note_1,
+        secret_key: sk,
+        preimage: zeros32,
+        time_proof: zeroTimeProof, // zero_block all-zeros -> lock inactive
+    };
+    let input_note_2 = padding_input();
+
+    let note_3 = Note { kind: 1, value: 10, address, psi: 3 };
+    let note_4 = Note { kind: 0, value: 0, address: 0, psi: 0 };
+
+    main(
+        [input_note_1, input_note_2],
+        [note_3, note_4],
+        0,
+        [
+            get_note_commitment(note_1),
+            get_note_commitment(input_note_2.note),
+            get_note_commitment(note_3),
+            get_note_commitment(note_4),
+        ],
+        [1, 0, 0, 0, 0],
+    )
+}
+
+#[test]
+fn test_burn_timelocked_normal_note() {
+    // Burn flow with a timelocked input note (kind 3). Confirms the
+    // timelock check fires alongside the burn assertions.
+    let sk: Field = 101;
+    let address = get_secret_hash(sk);
+    let psi = timelocked_psi(sk);
+
+    let note_1 = Note { kind: 1, value: 15, address, psi };
+    let input_note_1 = InputNote {
+        note: note_1,
+        secret_key: sk,
+        preimage: zeros32,
+        time_proof: bitcoin_time_proof(),
+    };
+    let input_note_2 = padding_input();
+
+    let note_3 = Note { kind: 0, value: 0, address: 0, psi: 0 };
+    let note_4 = Note { kind: 1, value: 5, address, psi: 3 };
+
+    main(
+        [input_note_1, input_note_2],
+        [note_3, note_4],
+        0,
+        [
+            get_note_commitment(note_1),
+            get_note_commitment(input_note_2.note),
+            get_note_commitment(note_3),
+            get_note_commitment(note_4),
+        ],
+        [3, 1, 10, get_note_commitment(note_1), 0],
     )
 }
 

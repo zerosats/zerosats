@@ -1,6 +1,6 @@
 [package]
 name = "signature_shamir"
-type = "bin"
+type = "lib"
 authors = [ "Ilya Evdokimov" ]
 compiler_version = ">=0.36.0"
 

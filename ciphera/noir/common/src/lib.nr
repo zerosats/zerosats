@@ -45,6 +45,16 @@ pub fn get_secret_hash(secret_key: Field) -> Field {
     poseidon2::Poseidon2::hash([secret_key, 0], 2)
 }
 
+pub fn timelock_is_active(lock: TimeLock) -> bool {
+    let mut result = false;
+    for i in 0..32 {
+        if lock.zero_block[i] != 0 {
+            result = true
+        };
+    }
+    result
+}
+
 pub fn get_timelock_commitment(lock: TimeLock) -> Field {
     let (low, high) = bytes_32_to_field_pair(lock.zero_block);
     let zero_block_hash = poseidon2::Poseidon2::hash([low, high], 2);
@@ -54,10 +64,26 @@ pub fn get_timelock_commitment(lock: TimeLock) -> Field {
 pub fn check_spend_conditions(input_note: InputNote) {
     if input_note.note.value != 0 {
         if is_one_of(input_note.note.kind, [1, 2, 3, 4]) {
-            assert(
-                        get_secret_hash(input_note.secret_key) == input_note.note.address,
-                        "Input note is not owned by the owner",
+            let key_hash = get_secret_hash(input_note.secret_key);
+
+            assert(key_hash == input_note.note.address, "Input note is not owned by the owner");
+
+            if timelock_is_active(input_note.time_proof.lock) {
+                    let commitment = get_timelock_commitment(input_note.time_proof.lock);
+                    let timelocked_committment = poseidon2::Poseidon2::hash([key_hash, commitment], 2);
+
+                    assert( timelocked_committment == input_note.note.psi, "Wrong timelock commitment");
+
+                    // Not fool-proof. Not checking min difficulty to save on circuit constraints
+                    assert(
+                        check_pow_chain(
+                            input_note.time_proof.headers,
+                            input_note.time_proof.lock.zero_block,
+                            input_note.time_proof.lock.n_blocks
+                        ),
+                        "Input note is locked"
                     );
+            }
         }
         // signature32
         if input_note.note.kind == 5 {
@@ -93,14 +119,14 @@ pub fn check_spend_conditions(input_note: InputNote) {
                 let (low, high) = bytes_32_to_field_pair(computed_sha_hash);
 
                 let computed_hash = poseidon2::Poseidon2::hash([low, high], 2);
-                assert(computed_hash == input_note.note.psi, "HTLC: computed hash does not match to SHA preimage");
+                assert(computed_hash == input_note.note.address, "HTLC: computed hash does not match to SHA preimage");
             } else {
                 let key_hash = get_secret_hash(input_note.secret_key);
                 let commitment = get_timelock_commitment(input_note.time_proof.lock);
                 let timelocked_address = poseidon2::Poseidon2::hash([key_hash, commitment], 2);
 
                 assert(
-                            timelocked_address == input_note.note.address,
+                            timelocked_address == input_note.note.psi,
                             "HTLC: wrong refund commitment",
                         );
 
