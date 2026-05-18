@@ -35,7 +35,7 @@ mkdir -p $REPO_ROOT/fixtures/keys
 
 # Get all program names from the workspace - the ordering of these is important,
 # as the hash from utxo is used in agg_utxo, and agg_utxo used in agg_agg
-PROGRAMS=("signature" "points" "utxo" "agg_utxo" "agg_agg") # "migrate")
+PROGRAMS=("signature" "signature32" "signature32sha" "utxo" "agg_utxo" "agg_agg") # "migrate")
 
 # Define which programs should use the recursive flag
 RECURSIVE_PROGRAMS=("agg_agg" "agg_utxo" "utxo")
@@ -79,20 +79,15 @@ for NAME in "${PROGRAMS[@]}"; do
   echo "$(echo "$NAME" | tr '[:lower:]' '[:upper:]')"
   echo "================"
 
-  recursive_args=()
-  if is_recursive "$NAME"; then
-    echo "Generating verification key for $NAME (with --init_kzg_accumulator)..."
-    recursive_args=("--init_kzg_accumulator")
-  else
-    echo "Generating verification key for $NAME..."
-  fi
-  $BACKEND write_vk "${recursive_args[@]}" ${oracle_hash_args[@]} --scheme ultra_honk --output_format bytes_and_fields -b $REPO_ROOT/fixtures/programs/${NAME}.json -o $REPO_ROOT/fixtures/keys/ \
-    && mv $REPO_ROOT/fixtures/keys/{vk,${NAME}_key} && mv $REPO_ROOT/fixtures/keys/{vk_fields.json,${NAME}_key_fields.json} \
-    && rm $REPO_ROOT/fixtures/keys/vk_hash $REPO_ROOT/fixtures/keys/vk_hash_fields.json
+  verifier_type_args=("--verifier_type" "standalone")
+  echo "Generating verification key for $NAME (--verifier_type standalone)..."
+  $BACKEND write_vk "${verifier_type_args[@]}" ${oracle_hash_args[@]} --scheme ultra_honk -b $REPO_ROOT/fixtures/programs/${NAME}.json -o $REPO_ROOT/fixtures/keys/ \
+    && mv $REPO_ROOT/fixtures/keys/{vk,${NAME}_key} \
+    && rm $REPO_ROOT/fixtures/keys/vk_hash
 
   # Print verification key hash as u256 and hex
   echo "Verification key hash for $NAME:"
-  VK_HASH_OUTPUT=$(cd $REPO_ROOT && cargo run --bin vk_hash -- $REPO_ROOT/fixtures/keys/${NAME}_key_fields.json)
+  VK_HASH_OUTPUT=$(cd $REPO_ROOT && cargo run --bin vk_hash -- $REPO_ROOT/fixtures/keys/${NAME}_key)
   echo "$VK_HASH_OUTPUT" | sed 's/^/  /'
   echo ""
 

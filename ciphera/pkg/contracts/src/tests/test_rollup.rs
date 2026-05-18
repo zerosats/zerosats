@@ -62,6 +62,7 @@ pub mod rollup {
             InputNote {
                 note: wn.note(),
                 secret_key: wn.wallet.pk,
+                ..InputNote::default()
             }
         }
 

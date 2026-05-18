@@ -15,7 +15,7 @@ export interface RollupV1$Type {
   readonly deployedLinkReferences: {};
   readonly immutableReferences: {};
   readonly inputSourceName: "project/contracts/rollup/RollupV1.sol";
-  readonly buildInfoId: "solc-0_8_28-bde4a7b31dce523c0f8851b920ad7a9877317332";
+  readonly buildInfoId: "solc-0_8_28-d9cef24180c0f93d321fd933c970e3464fb50fdd";
 };
 
 import "hardhat/types/artifacts";

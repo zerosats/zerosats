@@ -1,6 +1,6 @@
 use barretenberg::verify::VerificationKey;
 use bn254_blackbox_solver::poseidon_hash;
-use element::{Base, Element};
+use element::Element;
 use std::env;
 use std::fs;
 use std::path::Path;
@@ -8,36 +8,37 @@ use std::path::Path;
 fn main() {
     let args: Vec<String> = env::args().collect();
     if args.len() != 2 {
-        eprintln!("Usage: {} <vk_fields.json>", args[0]);
+        eprintln!("Usage: {} <vk>", args[0]);
         std::process::exit(1);
     }
 
-    let vk_fields_path = &args[1];
+    let vk_path = &args[1];
 
-    if !Path::new(vk_fields_path).exists() {
-        eprintln!("Error: File {vk_fields_path} does not exist");
+    if !Path::new(vk_path).exists() {
+        eprintln!("Error: File {vk_path} does not exist");
         std::process::exit(1);
     }
 
-    let vk_fields_data = match fs::read(vk_fields_path) {
+    let vk_bytes = match fs::read(vk_path) {
         Ok(data) => data,
         Err(e) => {
-            eprintln!("Error reading file {vk_fields_path}: {e}");
+            eprintln!("Error reading file {vk_path}: {e}");
             std::process::exit(1);
         }
     };
 
-    let vk_fields: Vec<Base> = match serde_json::from_slice(&vk_fields_data) {
-        Ok(fields) => fields,
-        Err(e) => {
-            eprintln!("Error parsing JSON from {vk_fields_path}: {e}");
-            std::process::exit(1);
-        }
-    };
+    if vk_bytes.len() % 32 != 0 {
+        eprintln!(
+            "Error: vk file {vk_path} length {} is not a multiple of 32",
+            vk_bytes.len()
+        );
+        std::process::exit(1);
+    }
 
-    let verification_key = VerificationKey(vk_fields);
+    let verification_key =
+        VerificationKey::from_bytes(&vk_bytes).expect("Fail to read verification key");
 
-    let hash = match poseidon_hash(&verification_key.0, false) {
+    let hash = match poseidon_hash(&verification_key.0) {
         Ok(hash) => hash,
         Err(e) => {
             eprintln!("Error computing Poseidon hash: {e}");

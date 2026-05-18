@@ -16,7 +16,7 @@ const [senderClient] = await viem.getWalletClients();
 console.log("Wallet address:", senderClient.account.address);
 
 // Amount to wrap (0.1 ETH in this example)
-const amountToWrap = parseEther("0.1");
+const amountToWrap = parseEther("0.01");
 
 // Check ETH balance
 const ethBalanceBefore = await publicClient.getBalance({
