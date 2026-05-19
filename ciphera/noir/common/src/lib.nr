@@ -66,23 +66,24 @@ pub fn check_spend_conditions(input_note: InputNote) {
     if input_note.note.value != 0 {
         if input_note.spend_type == 0 {
             let key_hash = get_secret_hash(input_note.secret_key);
-            assert(key_hash == input_note.note.address, "Input note is not owned by the owner");
 
             if timelock_is_active(input_note.time_proof.lock) {
-                    let commitment = get_timelock_commitment(input_note.time_proof.lock);
-                    let timelocked_committment = poseidon2::Poseidon2::hash([key_hash, commitment], 2);
+                let commitment = get_timelock_commitment(input_note.time_proof.lock);
+                let timelocked_committment = poseidon2::Poseidon2::hash([key_hash, commitment], 2);
 
-                    assert( timelocked_committment == input_note.note.psi, "Wrong timelock commitment");
+                assert( timelocked_committment == input_note.note.psi, "Wrong timelock commitment");
 
-                    // Not fool-proof. Not checking min difficulty to save on circuit constraints
-                    assert(
-                        check_pow_chain(
-                            input_note.time_proof.headers,
-                            input_note.time_proof.lock.zero_block,
-                            input_note.time_proof.lock.n_blocks
-                        ),
-                        "Input note is locked"
-                    );
+                // Not fool-proof. Not checking min difficulty to save on circuit constraints
+                assert(
+                    check_pow_chain(
+                        input_note.time_proof.headers,
+                        input_note.time_proof.lock.zero_block,
+                        input_note.time_proof.lock.n_blocks
+                    ),
+                    "Input note is locked"
+                );
+            } else {
+                assert(key_hash == input_note.note.address, "Input note is not owned by the owner");
             }
         }
 

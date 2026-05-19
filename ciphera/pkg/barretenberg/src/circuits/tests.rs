@@ -1,6 +1,7 @@
 use element::Element;
 use flate2::{Compression, write::GzEncoder};
 use std::io::Write;
+use std::str::FromStr;
 use zk_primitives::{
     AggAgg, AggUtxo, InputNote, MerklePath, Note, TimeLock, TimeProof, ToBytes, Utxo, UtxoKind,
     UtxoProof, UtxoProofBundleWithMerkleProofs, bridged_polygon_usdc_note_kind,
@@ -15,17 +16,17 @@ pub fn get_keypair(key: u64) -> (Element, Element) {
     (secret_key, address)
 }
 
-pub fn send_note(value: u64, address: Element, psi: u64) -> Note {
+pub fn send_note(value: u64, address: Element, psi: Element) -> Note {
     note(value, address, psi, bridged_polygon_usdc_note_kind())
 }
 
-pub fn note(value: u64, address: Element, psi: u64, note_kind: Element) -> Note {
+pub fn note(value: u64, address: Element, psi: Element, note_kind: Element) -> Note {
     Note {
         utxo_kind: Element::new(2),
         value: Element::new(value),
         address,
         note_kind,
-        psi: Element::new(psi),
+        psi,
     }
 }
 
@@ -76,19 +77,19 @@ fn test_utxo() {
     let (secret_key, address) = get_keypair(101);
 
     let input_note1 = InputNote {
-        note: send_note(50, address, 1),
+        note: send_note(50, address, Element::new(1)),
         secret_key,
         ..InputNote::default()
     };
 
     let input_note2 = InputNote {
-        note: send_note(30, address, 2),
+        note: send_note(30, address , Element::new(2)),
         secret_key,
         ..InputNote::default()
     };
 
-    let output_note1 = send_note(40, address, 3);
-    let output_note2 = send_note(40, address, 4);
+    let output_note1 = send_note(40, address, Element::new(3));
+    let output_note2 = send_note(40, address, Element::new(4));
 
     let utxo = Utxo {
         input_notes: [input_note1, input_note2],
@@ -216,7 +217,7 @@ fn test_agg_utxo() {
     let mut tree = smirk::Tree::<161, ()>::new();
 
     let utxo1_input_note1 = InputNote {
-        note: send_note(50, address, 1),
+        note: send_note(50, address, Element::new(1)),
         secret_key,
         ..InputNote::default()
     };
@@ -224,7 +225,7 @@ fn test_agg_utxo() {
         .unwrap();
 
     let utxo1_input_note2 = InputNote {
-        note: send_note(30, address, 2),
+        note: send_note(30, address, Element::new(2)),
         secret_key,
         ..InputNote::default()
     };
@@ -233,8 +234,8 @@ fn test_agg_utxo() {
 
     let utxo1_old_root = tree.root_hash();
 
-    let utxo1_output_note1 = send_note(40, address, 3);
-    let utxo1_output_note2 = send_note(40, address, 4);
+    let utxo1_output_note1 = send_note(40, address, Element::new(3));
+    let utxo1_output_note2 = send_note(40, address, Element::new(4));
 
     let utxo1 = Utxo {
         input_notes: [utxo1_input_note1.clone(), utxo1_input_note2.clone()],
@@ -266,7 +267,7 @@ fn test_agg_agg() {
     let mut tree = smirk::Tree::<161, ()>::new();
 
     let utxo1_input_note1 = InputNote {
-        note: send_note(60, address, 1),
+        note: send_note(60, address, Element::new(1)),
         secret_key,
         ..InputNote::default()
     };
@@ -274,7 +275,7 @@ fn test_agg_agg() {
         .unwrap();
 
     let utxo1_input_note2 = InputNote {
-        note: send_note(40, address, 2),
+        note: send_note(40, address, Element::new(2)),
         secret_key,
         ..InputNote::default()
     };
@@ -283,8 +284,8 @@ fn test_agg_agg() {
 
     let utxo1_old_root = tree.root_hash();
 
-    let utxo1_output_note1 = send_note(70, address, 3);
-    let utxo1_output_note2 = send_note(30, address, 4);
+    let utxo1_output_note1 = send_note(70, address, Element::new(3));
+    let utxo1_output_note2 = send_note(30, address, Element::new(4));
 
     let utxo1 = Utxo {
         input_notes: [utxo1_input_note1.clone(), utxo1_input_note2.clone()],
@@ -322,8 +323,8 @@ fn test_agg_agg() {
 
     let utxo2_old_root = tree.root_hash();
 
-    let utxo2_output_note1 = send_note(55, address, 5);
-    let utxo2_output_note2 = send_note(45, address, 6);
+    let utxo2_output_note1 = send_note(55, address, Element::new(5));
+    let utxo2_output_note2 = send_note(45, address, Element::new(6));
 
     let utxo2 = Utxo {
         input_notes: [utxo2_input_note1.clone(), utxo2_input_note2.clone()],
@@ -359,14 +360,14 @@ fn test_alt_agg_utxo() {
 
     // Pre-insert SlowBurn input notes so they exist before the aggregate's old_root
     let slow_input_note1 = InputNote {
-        note: send_note(25, address, 12),
+        note: send_note(25, address, Element::new(12)),
         secret_key,
         ..InputNote::default()
     };
     tree.insert(slow_input_note1.note.commitment(), ()).unwrap();
 
     let slow_input_note2 = InputNote {
-        note: send_note(15, address, 13),
+        note: send_note(15, address, Element::new(13)),
         secret_key,
         ..InputNote::default()
     };
@@ -375,8 +376,8 @@ fn test_alt_agg_utxo() {
     let old_root = tree.root_hash();
 
     // --- UTXO 1: Mint (padding inputs, 2 real outputs) ---
-    let mint_output_note1 = send_note(30, address, 10);
-    let mint_output_note2 = send_note(20, address, 11);
+    let mint_output_note1 = send_note(30, address, Element::new(10));
+    let mint_output_note2 = send_note(20, address, Element::new(11));
     let mint_utxo = Utxo::new_mint([mint_output_note1.clone(), mint_output_note2.clone()]);
 
     let (mint_proof, mp1, mp2, mp3, mp4, _) =
@@ -481,7 +482,7 @@ fn timelock_commitment(lock: &TimeLock) -> Element {
 // `get_address_for_private_key` already does.
 fn timelock_address(secret_key: Element, lock: &TimeLock) -> Element {
     let key_hash = get_address_for_private_key(secret_key);
-    let commitment = timelock_commitment(lock);
+    let commitment = timelock_commitment(&lock);
     hash::hash_merge([key_hash, commitment])
 }
 
@@ -538,15 +539,15 @@ fn pow_two_block_lock() -> TimeLock {
 }
 
 #[test]
-fn test_utxo_kind5_signature32_spend() {
+fn test_utxo_signature32_spend() {
     // Kind 5: ownership proven by a 32-byte preimage whose Poseidon
-    // hash (over its high/low 16-byte halves) equals `note.address`.
+    // hash (over its high/low 16-byte halves), Equals `note.address`.
     let preimage = shared_preimage_bytes();
     let address = signature32_address(preimage);
-    let kind5 = Element::new(5);
+    let note_kind = Element::new(1);
 
     let input_note = InputNote {
-        note: note(50, address, 1, kind5),
+        note: note(50, address, Element::new(1), note_kind),
         spend_type: 1,
         secret_key: Element::ZERO,
         preimage,
@@ -557,8 +558,8 @@ fn test_utxo_kind5_signature32_spend() {
         kind: UtxoKind::Send,
         input_notes: [input_note, InputNote::padding_note()],
         output_notes: [
-            note(30, Element::new(42), 3, kind5),
-            note(20, Element::new(43), 4, kind5),
+            note(30, Element::new(42), Element::new(3), note_kind),
+            note(20, Element::new(43), Element::new(4), note_kind),
         ],
         burn_address: None,
     };
@@ -575,7 +576,7 @@ fn test_utxo_kind6_signature32sha_spend() {
     let kind6 = Element::new(6);
 
     let input_note = InputNote {
-        note: note(40, address, 1, kind6),
+        note: note(40, address, Element::new(1), kind6),
         spend_type: 2,
         secret_key: Element::ZERO,
         preimage,
@@ -586,8 +587,8 @@ fn test_utxo_kind6_signature32sha_spend() {
         kind: UtxoKind::Send,
         input_notes: [input_note, InputNote::padding_note()],
         output_notes: [
-            note(25, Element::new(99), 3, kind6),
-            note(15, Element::new(100), 4, kind6),
+            note(25, Element::new(99), Element::new(3), kind6),
+            note(15, Element::new(100), Element::new(4), kind6),
         ],
         burn_address: None,
     };
@@ -596,17 +597,17 @@ fn test_utxo_kind6_signature32sha_spend() {
 }
 
 #[test]
-fn test_utxo_kind7_timelock_spend() {
-    // Kind 7: spendable only after a PoW-chain witness of `n_blocks`
-    // chained from `zero_block`. `note.address` is bound to both the
-    // owner's secret_key and the specific timelock.
-    let (secret_key, _) = get_keypair(101);
+fn test_utxo_normal_timelocked_spend() {
+    let (secret_key, normal_address) = get_keypair(101);
+
+    assert_eq!(normal_address, Element::from_str("0x22d68b303a6a3d416959fb363795548966049a655418ebd9eb6a818fd6d2e27b").unwrap());
+
     let lock = pow_two_block_lock();
-    let address = timelock_address(secret_key, &lock);
-    let kind7 = Element::new(7);
+    let locked_address = timelock_address(secret_key, &lock);
+    let note_kind = Element::new(1);
 
     let input_note = InputNote {
-        note: note(50, address, 1, kind7),
+        note: note(50, normal_address, locked_address, note_kind),
         spend_type: 0,
         secret_key,
         preimage: [0u8; 32],
@@ -617,8 +618,8 @@ fn test_utxo_kind7_timelock_spend() {
         kind: UtxoKind::Send,
         input_notes: [input_note, InputNote::padding_note()],
         output_notes: [
-            note(20, Element::new(7), 3, kind7),
-            note(30, Element::new(8), 4, kind7),
+            note(20, Element::new(7), Element::new(3), note_kind),
+            note(30, Element::new(8), Element::new(4), note_kind),
         ],
         burn_address: None,
     };
@@ -627,37 +628,35 @@ fn test_utxo_kind7_timelock_spend() {
 }
 
 #[test]
-fn test_utxo_kind8_htlc_hash_path() {
-    // Kind 8 hash path: any time, anyone holding the preimage can spend
-    // by revealing it. Constraint: Poseidon(SHA256(preimage) halves) == note.psi.
-    // The note.address can be anything (it's only constrained on the
-    // refund path), so we set it to a generic owner address.
+fn test_utxo_sha_htlc_hash_path() {
+    let (_, refund_address) = get_keypair(202);
+
     let preimage = shared_preimage_bytes();
-    let psi = signature32sha_address(preimage);
-    let kind8 = Element::new(8);
+    let sha_address = signature32sha_address(preimage);
+    let note_kind = Element::new(8);
 
     // The address here is irrelevant for the hash path; pick something
     // simple. The circuit only constrains `note.psi`.
     let input_note = InputNote {
         note: Note {
             utxo_kind: Element::new(2),
-            note_kind: kind8,
-            address: Element::new(1234),
-            psi,
+            note_kind,
+            address: sha_address,
+            psi: refund_address,
             value: Element::new(50),
         },
         spend_type: 3,
         secret_key: Element::ZERO,
         preimage,
-        ..InputNote::default()
+        time_proof: pow_two_block_proof(),
     };
 
     let utxo = Utxo {
         kind: UtxoKind::Send,
         input_notes: [input_note, InputNote::padding_note()],
         output_notes: [
-            note(20, Element::new(50), 3, Element::new(1234)),
-            note(30, Element::new(51), 4, Element::new(1234)),
+            note(20, Element::new(50), Element::new(3), note_kind),
+            note(30, Element::new(51), Element::new(4), note_kind),
         ],
         burn_address: None,
     };
@@ -666,22 +665,18 @@ fn test_utxo_kind8_htlc_hash_path() {
 }
 
 #[test]
-fn test_utxo_kind8_htlc_refund_path() {
-    // Kind 8 refund path: triggered by `preimage == [0; 32]`. Falls back
-    // to the timelocked Poseidon-key path -- `note.address` must equal
-    // Poseidon(get_secret_hash(sk), timelock_commitment) AND a valid PoW
-    // chain of `n_blocks` headers is required.
-    let (secret_key, _) = get_keypair(202);
+fn test_utxo_sha_htlc_refund_path() {
+    let (secret_key, refund_address) = get_keypair(202);
     let lock = pow_two_block_lock();
-    let address = timelock_address(secret_key, &lock);
-    let kind8 = Element::new(8);
+    let timelocked_address = timelock_address(secret_key, &lock);
+    let note_kind = Element::new(1);
 
     let input_note = InputNote {
         note: Note {
             utxo_kind: Element::new(2),
-            note_kind: kind8,
-            address,
-            psi: Element::new(7777), // unconstrained on this path
+            note_kind: note_kind,
+            address: refund_address,
+            psi: timelocked_address, // unconstrained on this path
             value: Element::new(60),
         },
         spend_type: 3,
@@ -694,8 +689,8 @@ fn test_utxo_kind8_htlc_refund_path() {
         kind: UtxoKind::Send,
         input_notes: [input_note, InputNote::padding_note()],
         output_notes: [
-            note(25, Element::new(60), 3, kind8),
-            note(35, Element::new(61), 4, kind8),
+            note(25, Element::new(60), Element::new(3), note_kind),
+            note(35, Element::new(61), Element::new(4), note_kind),
         ],
         burn_address: None,
     };
