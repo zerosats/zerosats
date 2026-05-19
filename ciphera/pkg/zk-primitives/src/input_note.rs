@@ -1,4 +1,6 @@
-use crate::{NoteURLPayload, decode_activity_url_payload, note::Note};
+use crate::{
+    NoteURLPayload, decode_activity_url_payload, get_address_for_private_key, note::Note,
+};
 use element::Element;
 use serde::{Deserialize, Serialize};
 
@@ -11,6 +13,27 @@ pub struct TimeLock {
     pub zero_block: [u8; 32],
     /// Number of additional PoW blocks required on top of the anchor.
     pub n_blocks: Element,
+}
+
+impl TimeLock {
+    /// Poseidon commitment to the lock's `(zero_block, n_blocks)`. Matches
+    /// the Noir `get_timelock_commitment` helper used by note kinds 7 and 8:
+    /// `Poseidon([Poseidon(field_pair(zero_block)), n_blocks])`.
+    #[must_use]
+    pub fn commitment(&self) -> Element {
+        let element = Element::from_be_bytes(self.zero_block);
+        let (high, low) = element.decompose_be();
+        let zero_block_hash = hash::hash_merge([high, low]);
+        hash::hash_merge([zero_block_hash, self.n_blocks])
+    }
+}
+
+/// Address for the timelocked spend path (kind 7) and the HTLC refund
+/// path (kind 8): `Poseidon(get_secret_hash(secret_key), TimeLock::commitment)`.
+#[must_use]
+pub fn timelock_address(secret_key: Element, lock: &TimeLock) -> Element {
+    let key_hash = get_address_for_private_key(secret_key);
+    hash::hash_merge([key_hash, lock.commitment()])
 }
 
 /// PoW chain witness backing a timelocked spend.

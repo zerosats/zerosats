@@ -452,7 +452,7 @@ fn shared_preimage_bytes() -> [u8; 32] {
 
 // Poseidon of the 32-byte preimage's (high, low) 16-byte halves. Matches
 // `signature32` and the Noir kind-5 ownership check.
-fn kind5_address(preimage: [u8; 32]) -> Element {
+fn signature32_address(preimage: [u8; 32]) -> Element {
     let element = Element::from_be_bytes(preimage);
     let (high, low) = element.decompose_be();
     hash::hash_merge([high, low])
@@ -461,7 +461,7 @@ fn kind5_address(preimage: [u8; 32]) -> Element {
 // Poseidon of the SHA-256 digest's (high, low) 16-byte halves. Matches
 // `signature32sha` and the Noir kind-6 ownership check; also the encoding
 // of `note.psi` for the kind-8 hash-path.
-fn kind6_address(preimage: [u8; 32]) -> Element {
+fn signature32sha_address(preimage: [u8; 32]) -> Element {
     let sha: [u8; 32] = Sha256::digest(preimage).into();
     let element = Element::from_be_bytes(sha);
     let (high, low) = element.decompose_be();
@@ -542,7 +542,7 @@ fn test_utxo_kind5_signature32_spend() {
     // Kind 5: ownership proven by a 32-byte preimage whose Poseidon
     // hash (over its high/low 16-byte halves) equals `note.address`.
     let preimage = shared_preimage_bytes();
-    let address = kind5_address(preimage);
+    let address = signature32_address(preimage);
     let kind5 = Element::new(5);
 
     let input_note = InputNote {
@@ -570,7 +570,7 @@ fn test_utxo_kind6_signature32sha_spend() {
     // Kind 6: ownership proven by revealing a SHA-256 preimage whose
     // digest hashes (under Poseidon, over high/low halves) to `note.address`.
     let preimage = shared_preimage_bytes();
-    let address = kind6_address(preimage);
+    let address = signature32sha_address(preimage);
     let kind6 = Element::new(6);
 
     let input_note = InputNote {
@@ -630,7 +630,7 @@ fn test_utxo_kind8_htlc_hash_path() {
     // The note.address can be anything (it's only constrained on the
     // refund path), so we set it to a generic owner address.
     let preimage = shared_preimage_bytes();
-    let psi = kind6_address(preimage);
+    let psi = signature32sha_address(preimage);
     let kind8 = Element::new(8);
 
     // The address here is irrelevant for the hash path; pick something
@@ -652,8 +652,8 @@ fn test_utxo_kind8_htlc_hash_path() {
         kind: UtxoKind::Send,
         input_notes: [input_note, InputNote::padding_note()],
         output_notes: [
-            note(20, Element::new(50), 3, kind8),
-            note(30, Element::new(51), 4, kind8),
+            note(20, Element::new(50), 3, Element::new(1234)),
+            note(30, Element::new(51), 4, Element::new(1234)),
         ],
         burn_address: None,
     };
