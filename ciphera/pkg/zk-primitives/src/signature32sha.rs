@@ -26,12 +26,12 @@ impl Signature32Sha {
         Self { preimage, message }
     }
 
-    /// Get the Poseidon address derived from the preimage. Matches the
-    /// `poseidon_hash` public input of the Noir circuit and the address
-    /// scheme used by note kinds 5/6.
+    /// Get the Poseidon address derived from the SHA-256 digest of the
+    /// preimage. Matches the kind-6 spend path in the Noir UTXO circuit:
+    /// `note.address = Poseidon(field_pair(SHA256(preimage)))`.
     #[must_use]
     pub fn address(&self) -> Element {
-        let element = Element::from_be_bytes(self.preimage);
+        let element = Element::from_be_bytes(self.sha_hash());
         let (high, low) = element.decompose_be();
         hash::hash_merge([high, low])
     }
@@ -43,10 +43,12 @@ impl Signature32Sha {
         Sha256::digest(self.preimage).into()
     }
 
-    /// Get the message hash (Poseidon hash of [high, low, message]).
+    /// Get the message hash (Poseidon hash of [high, low, message]) where
+    /// the (high, low) pair is the SHA-256 digest of the preimage split
+    /// into 16-byte halves, matching the kind-6 ownership check.
     #[must_use]
     pub fn message_hash(&self) -> Element {
-        let element = Element::from_be_bytes(self.preimage);
+        let element = Element::from_be_bytes(self.sha_hash());
         let (high, low) = element.decompose_be();
         hash::hash_merge([high, low, self.message])
     }
