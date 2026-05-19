@@ -1099,7 +1099,7 @@ async fn citrea_benchmark() -> Result<()> {
                     Note::new_with_psi(Element::new(0xBEEF), Element::from(25_u64), Element::ZERO);
                 let utxo = Utxo::new_mint([note.clone(), Note::padding_note()]);
                 let tx_hash = rollup
-                    .mint(&utxo.mint_hash(), &note.value, &note.contract)
+                    .mint(&utxo.mint_hash(), &note.value, &note.note_kind)
                     .await?;
                 observe_transaction(&rollup.client, &raw_rpc, tx_hash, None).await
             }

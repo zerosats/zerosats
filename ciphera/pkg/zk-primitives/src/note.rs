@@ -10,17 +10,17 @@ use std::collections::BTreeMap;
 #[cfg(feature = "ts-rs")]
 use ts_rs::TS;
 
-/// A note is used in zk circuits to represent some kind of token (e.g. USDC) on
+/// A note is used in zk circuits to represent some utxo_kind of token (e.g. USDC) on
 /// the Ciphera Network.
 ///
 /// This is used to create notes in the zk-rollup
 #[cfg_attr(feature = "ts-rs", derive(TS))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Note {
-    /// The kind of note
-    pub kind: Element,
-    /// The contract of note
-    pub contract: Element,
+    /// The kind of utxo
+    pub utxo_kind: Element,
+    /// The kind of a note
+    pub note_kind: Element,
     /// The address of the note
     pub address: Element,
     /// The psi adds additional entropy to the note, to ensure uniqueness
@@ -34,8 +34,8 @@ impl Note {
     #[must_use]
     pub fn new(address: Element, value: Element) -> Self {
         Self {
-            kind: Element::new(2),
-            contract: bridged_polygon_usdc_note_kind(),
+            utxo_kind: Element::new(2),
+            note_kind: bridged_polygon_usdc_note_kind(),
             address,
             psi: Element::secure_random(thread_rng()),
             value,
@@ -46,8 +46,8 @@ impl Note {
     #[must_use]
     pub fn new_with_psi(address: Element, value: Element, psi: Element) -> Self {
         Self {
-            kind: Element::new(2),
-            contract: bridged_polygon_usdc_note_kind(),
+            utxo_kind: Element::new(2),
+            note_kind: bridged_polygon_usdc_note_kind(),
             address,
             psi,
             value,
@@ -60,71 +60,71 @@ impl Note {
         let address = get_address_for_private_key(private_key);
         let psi = hash_private_key_for_psi(private_key);
         Self {
-            kind: Element::new(2),
-            contract: bridged_polygon_usdc_note_kind(),
+            utxo_kind: Element::new(2),
+            note_kind: bridged_polygon_usdc_note_kind(),
             address,
             psi,
             value,
         }
     }
 
-    /// Note for the kind-5 (signature32) spend path. The address is bound
+    /// Note for the utxo_kind-5 (signature32) spend path. The address is bound
     /// to a 32-byte preimage: `Poseidon(field_pair(preimage))`.
     #[must_use]
     pub fn new_signature32(
         preimage: [u8; 32],
-        contract: Element,
+        note_kind: Element,
         value: Element,
         psi: Element,
     ) -> Self {
         Self {
-            kind: Element::new(5),
-            contract,
+            utxo_kind: Element::new(2),
+            note_kind,
             address: Signature32::new(preimage, Element::ZERO).address(),
             psi,
             value,
         }
     }
 
-    /// Note for the kind-6 (signature32sha) spend path. The address is bound
+    /// Note for the utxo_kind-6 (signature32sha) spend path. The address is bound
     /// to a SHA-256 preimage: `Poseidon(field_pair(SHA256(preimage)))`.
     #[must_use]
     pub fn new_signature32sha(
         preimage: [u8; 32],
-        contract: Element,
+        note_kind: Element,
         value: Element,
         psi: Element,
     ) -> Self {
         Self {
-            kind: Element::new(6),
-            contract,
+            utxo_kind: Element::new(2),
+            note_kind,
             address: Signature32Sha::new(preimage, Element::ZERO).address(),
             psi,
             value,
         }
     }
 
-    /// Note for the kind-7 (timelock) spend path. The address binds the
+    /// Note for the utxo_kind-7 (timelock) spend path. The address binds the
     /// owner's secret key to a PoW timelock:
     /// `Poseidon(get_secret_hash(secret_key), TimeLock::commitment)`.
     #[must_use]
     pub fn new_timelock(
         secret_key: Element,
         lock: &TimeLock,
-        contract: Element,
+        note_kind: Element,
         value: Element,
         psi: Element,
     ) -> Self {
         Self {
-            kind: Element::new(7),
-            contract,
+            utxo_kind: Element::new(2),
+            note_kind,
             address: timelock_address(secret_key, lock),
             psi,
             value,
         }
     }
 
-    /// Note for the kind-8 (HTLC) spend path. The address is the timelock
+    /// Note for the utxo_kind-8 (HTLC) spend path. The address is the timelock
     /// refund commitment and `psi` is the SHA-256 hashlock — matching the
     /// circuit's two-branch check (`note.address` for refund, `note.psi`
     /// for the hash path).
@@ -133,12 +133,12 @@ impl Note {
         secret_key: Element,
         lock: &TimeLock,
         preimage: [u8; 32],
-        contract: Element,
+        note_kind: Element,
         value: Element,
     ) -> Self {
         Self {
-            kind: Element::new(8),
-            contract,
+            utxo_kind: Element::new(2),
+            note_kind,
             address: timelock_address(secret_key, lock),
             psi: Signature32Sha::new(preimage, Element::ZERO).address(),
             value,
@@ -150,8 +150,8 @@ impl Note {
     #[must_use]
     pub fn padding_note() -> Self {
         Note {
-            kind: Element::new(2),
-            contract: Element::ZERO,
+            utxo_kind: Element::new(2),
+            note_kind: Element::ZERO,
             address: Element::ZERO,
             psi: Element::ZERO,
             value: Element::ZERO,
@@ -161,23 +161,23 @@ impl Note {
     /// Check if the note is a padding note
     #[must_use]
     pub fn is_padding_note(&self) -> bool {
-        self.contract == Element::ZERO && self.value == Element::ZERO
+        self.note_kind == Element::ZERO && self.value == Element::ZERO
     }
 
     /// Commitment of the note, this is stored in the merkle tree and proves the note exists.
     ///
-    /// Matches the Noir `get_note_commitment` helper: padding (Noir `note.kind == 0`,
-    /// which maps to Rust `self.contract == 0`) commits to zero, every other note
-    /// commits to `Poseidon([2, contract, value, address, psi, 0, 0], 7)`.
+    /// Matches the Noir `get_note_commitment` helper: padding (Noir `note.utxo_kind == 0`,
+    /// which maps to Rust `self.note_kind == 0`) commits to zero, every other note
+    /// commits to `Poseidon([2, note_kind, value, address, psi, 0, 0], 7)`.
     // TODO: should we leave some space in here?
     #[must_use]
     pub fn commitment(&self) -> Element {
-        if self.contract == Element::ZERO {
+        if self.note_kind == Element::ZERO {
             Element::ZERO
         } else {
             hash::hash_merge([
-                self.kind,
-                self.contract,
+                self.utxo_kind,
+                self.note_kind,
                 self.value,
                 self.address,
                 self.psi,
@@ -203,8 +203,8 @@ impl From<&Note> for InputValue {
             InputValue::Field(note.address.to_base()),
         );
         struct_.insert(
-            "kind".to_owned(),
-            InputValue::Field(note.contract.to_base()),
+            "utxo_kind".to_owned(),
+            InputValue::Field(note.note_kind.to_base()),
         );
         struct_.insert("psi".to_owned(), InputValue::Field(note.psi.to_base()));
         struct_.insert("value".to_owned(), InputValue::Field(note.value.to_base()));
@@ -243,8 +243,8 @@ mod tests {
     fn signature32_address_matches_field_pair() {
         let note = Note::new_signature32(preimage(), Element::new(99), Element::new(50), Element::ZERO);
         assert_eq!(note.address, raw_field_pair_address(preimage()));
-        assert_eq!(note.kind, Element::new(5));
-        assert_eq!(note.contract, Element::new(99));
+        assert_eq!(note.utxo_kind, Element::new(5));
+        assert_eq!(note.note_kind, Element::new(99));
     }
 
     #[test]
@@ -307,22 +307,22 @@ mod tests {
     }
 
     #[test]
-    fn padding_check_gates_on_contract() {
-        // contract=0 → commitment is zero regardless of value (matches Noir kind==0 branch).
-        let zero_kind = Note {
-            kind: Element::new(2),
-            contract: Element::ZERO,
+    fn padding_check_gates_on_note_kind() {
+        // note_kind=0 → commitment is zero regardless of value (matches Noir utxo_kind==0 branch).
+        let zero_utxo_kind = Note {
+            utxo_kind: Element::new(2),
+            note_kind: Element::ZERO,
             address: Element::new(123),
             psi: Element::new(456),
             value: Element::new(10),
         };
-        assert_eq!(zero_kind.commitment(), Element::ZERO);
+        assert_eq!(zero_utxo_kind.commitment(), Element::ZERO);
 
-        // contract!=0 with value=0 → still commits to a non-zero hash, matching
-        // Noir which only zero-commits when note.kind == 0.
+        // note_kind!=0 with value=0 → still commits to a non-zero hash, matching
+        // Noir which only zero-commits when note.utxo_kind == 0.
         let zero_value = Note {
-            kind: Element::new(2),
-            contract: Element::new(5),
+            utxo_kind: Element::new(2),
+            note_kind: Element::new(5),
             address: Element::ZERO,
             psi: Element::ZERO,
             value: Element::ZERO,

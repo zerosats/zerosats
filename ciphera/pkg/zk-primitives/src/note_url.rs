@@ -37,8 +37,8 @@ impl From<&NoteURLPayload> for InputNote {
         InputNote {
             secret_key: value.private_key,
             note: Note {
-                kind: Element::new(2),
-                contract: bridged_polygon_usdc_note_kind(),
+                utxo_kind: Element::new(2),
+                note_kind: bridged_polygon_usdc_note_kind(),
                 address: get_address_for_private_key(value.private_key),
                 psi,
                 value: value.value,

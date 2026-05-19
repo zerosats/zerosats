@@ -241,8 +241,8 @@ async fn mint_and_transfer_alice_to_bob() {
     let bob_pk = Element::new(0xB0B);
     let bob_address = hash_merge([bob_pk, Element::ZERO]);
     let bob_note = Note {
-        kind: Element::new(2),
-        contract: bridged_polygon_usdc_note_kind(),
+        utxo_kind: Element::new(2),
+        note_kind: bridged_polygon_usdc_note_kind(),
         address: bob_address,
         psi: Element::new(0),
         value: Element::new(100),

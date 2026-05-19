@@ -223,8 +223,8 @@ impl Wallet {
         let self_address = hash_merge([pk, Element::ZERO]);
         InputNote::new(
             Note {
-                kind: origin_note.kind,
-                contract: origin_note.contract,
+                kind: origin_note.utxo_kind,
+                contract: origin_note.note_kind,
                 address: self_address,
                 psi: hash_merge([pk, pk]),
                 //psi: Element::secure_random(rand::thread_rng()),
@@ -351,7 +351,7 @@ impl Wallet {
     }
 
     fn spend_to(&mut self, note: &Note) -> Result<Utxo, WalletError> {
-        let ticker = citrea_ticker_from_contract(note.contract);
+        let ticker = citrea_ticker_from_contract(note.note_kind);
         let amount = self.get_note_amount(note)?;
 
         if amount > self.balance {
@@ -372,7 +372,7 @@ impl Wallet {
     }
 
     fn receive(&mut self, input_note: &InputNote) -> Result<Utxo, WalletError> {
-        let ticker = citrea_ticker_from_contract(input_note.note.contract);
+        let ticker = citrea_ticker_from_contract(input_note.note.note_kind);
         let amount = self.get_note_amount(&input_note.note)?;
         let received_note: InputNote = self.receive_note(amount, &ticker);
 
@@ -411,7 +411,7 @@ impl Wallet {
         evm_address: &Element,
         natively_substitute: bool,
     ) -> Result<Utxo, WalletError> {
-        let ticker = citrea_ticker_from_contract(burner_note.note.contract);
+        let ticker = citrea_ticker_from_contract(burner_note.note.note_kind);
 
         let b = self.pull_from_avail(&ticker, burner_note.to_owned())?;
         debug!(balance = b, "pulled first input note");
@@ -493,7 +493,7 @@ impl Wallet {
     /// available notes. Use this when you already hold the `InputNote` value
     /// (e.g. a self-send burner note) rather than searching `pending` by address.
     fn add_to_avail(&mut self, input_note: InputNote) -> Result<(), WalletError> {
-        let ticker = citrea_ticker_from_contract(input_note.note.contract);
+        let ticker = citrea_ticker_from_contract(input_note.note.note_kind);
         self.push_to_avail(&ticker, input_note).map(|_| ())
     }
 
@@ -549,7 +549,7 @@ impl Wallet {
                     }
 
                     for n in new_notes {
-                        let ticker = citrea_ticker_from_contract(n.note.contract);
+                        let ticker = citrea_ticker_from_contract(n.note.note_kind);
                         let b = self.push_to_avail(&ticker, n.clone())?;
                         debug!(balance = b, "added note");
                     }
@@ -604,8 +604,8 @@ mod wallet_tests {
 
     fn create_input_note(amount: u64) -> InputNote {
         let note = Note {
-            kind: Element::new(2),
-            contract: Element::ZERO,
+            utxo_kind: Element::new(2),
+            note_kind: Element::ZERO,
             address: Element::ZERO,
             psi: Element::ZERO,
             value: Element::from(amount),

@@ -414,7 +414,7 @@ async fn handle_spend_to(
     // Spend to UX leverages a variant of NoteURL encoding for providing an "address" with address
     // and amount needed for UTXO construction
     let note = Note::from(&decode_address(address));
-    let ticker = citrea_ticker_from_contract(note.contract);
+    let ticker = citrea_ticker_from_contract(note.note_kind);
 
     let (prepared_wallet, utxo) = client.get_wallet().prepare_spend_to(&note)?;
     let snark = utxo.prove().unwrap();
@@ -516,7 +516,7 @@ async fn handle_receive(
         _ => return Err(AppError::NotEnoughBalance().into()),
     };
 
-    let ticker = citrea_ticker_from_contract(input_note.note.contract);
+    let ticker = citrea_ticker_from_contract(input_note.note.note_kind);
 
     let (prepared_wallet, utxo) = client.get_wallet().prepare_receive(&input_note)?;
     let snark = utxo.prove().unwrap();
@@ -694,7 +694,7 @@ async fn handle_depo_ln(
 
     let note = &utxo.output_notes[0];
     let mint_hash = hash_merge([note.psi, Note::padding_note().psi]);
-    let note_kind = note.contract;
+    let note_kind = note.note_kind;
 
     let mint_hash_h256 = convert_element_to_h256(&mint_hash);
     let note_kind_h256 = convert_element_to_h256(&note_kind);

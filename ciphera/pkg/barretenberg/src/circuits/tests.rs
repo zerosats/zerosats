@@ -19,12 +19,12 @@ pub fn send_note(value: u64, address: Element, psi: u64) -> Note {
     note(value, address, psi, bridged_polygon_usdc_note_kind())
 }
 
-pub fn note(value: u64, address: Element, psi: u64, contract: Element) -> Note {
+pub fn note(value: u64, address: Element, psi: u64, note_kind: Element) -> Note {
     Note {
-        kind: Element::new(2),
+        utxo_kind: Element::new(2),
         value: Element::new(value),
         address,
-        contract,
+        note_kind,
         psi: Element::new(psi),
     }
 }
@@ -432,8 +432,8 @@ fn test_alt_agg_utxo() {
 // Spend-path tests for note kinds 5 (signature32), 6 (signature32sha),
 // 7 (timelock), and 8 (HTLC: SHA preimage path + timelock refund path).
 //
-// In Rust terms, the Noir circuit's `note.kind` field maps to
-// `zk_primitives::Note.contract` (see `barretenberg::circuits::note::BNote::from`),
+// In Rust terms, the Noir circuit's `note.utxo_kind` field maps to
+// `zk_primitives::note.note_kind` (see `barretenberg::circuits::note::BNote::from`),
 // so we set `contract` to 5/6/7/8 to select the spend path.
 //
 // The PoW chain fixture below reuses the exact bytes from
@@ -637,7 +637,7 @@ fn test_utxo_kind8_htlc_hash_path() {
     // simple. The circuit only constrains `note.psi`.
     let input_note = InputNote {
         note: Note {
-            kind: Element::new(2),
+            utxo_kind: Element::new(2),
             contract: kind8,
             address: Element::new(1234),
             psi,
@@ -674,7 +674,7 @@ fn test_utxo_kind8_htlc_refund_path() {
 
     let input_note = InputNote {
         note: Note {
-            kind: Element::new(2),
+            utxo_kind: Element::new(2),
             contract: kind8,
             address,
             psi: Element::new(7777), // unconstrained on this path

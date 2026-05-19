@@ -129,12 +129,12 @@ pub fn get_keypair(key: u64) -> (Element, Element) {
     (secret_key, address)
 }
 
-pub fn note(value: u64, address: Element, psi: u64, contract: Element) -> Note {
+pub fn note(value: u64, address: Element, psi: u64, note_kind: Element) -> Note {
     Note {
-        kind: Element::new(2),
+        utxo_kind: Element::new(2),
         value: Element::new(value),
         address,
-        contract,
+        note_kind,
         psi: Element::new(psi),
     }
 }
@@ -371,7 +371,7 @@ async fn mint_from() {
     tokio::time::sleep(Duration::from_secs(1)).await;
 
     env.rollup_contract
-        .mint(&mint_hash, &note.value, &note.contract)
+        .mint(&mint_hash, &note.value, &note.note_kind)
         .await
         .unwrap();
 }
@@ -588,7 +588,7 @@ async fn substitute_burn() {
     env.rollup_contract
         .substitute_burn(
             &burn_address,
-            &input_note1.note.contract,
+            &input_note1.note.note_kind,
             &hash,
             &Element::new(100),
             height,

@@ -47,7 +47,7 @@ pub struct BNote {
 impl From<&Note> for BNote {
     fn from(note: &Note) -> Self {
         BNote {
-            kind: note.contract.to_base(),
+            kind: note.note_kind.to_base(),
             value: note.value.to_base(),
             address: note.address.to_base(),
             psi: note.psi.to_base(),
@@ -59,7 +59,7 @@ impl From<BNote> for InputValue {
     fn from(note: BNote) -> Self {
         let mut struct_ = BTreeMap::new();
 
-        struct_.insert("kind".to_owned(), InputValue::Field(note.kind));
+        struct_.insert("kind".to_owned(), InputValue::Field(note.utxo_kind));
         struct_.insert("value".to_owned(), InputValue::Field(note.value));
         struct_.insert("address".to_owned(), InputValue::Field(note.address));
         struct_.insert("psi".to_owned(), InputValue::Field(note.psi));
