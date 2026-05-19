@@ -151,9 +151,9 @@ fn test_send_two_inputs_two_outputs() {
     let note_1 = Note { kind: bridged_note_kind(), value: 10, address, psi: 1 };
     let note_2 = Note { kind: bridged_note_kind(), value: 5, address, psi: 2 };
     let input_note_1 =
-        InputNote { note: note_1, secret_key: pk, preimage: zeros32, time_proof: zeroTimeProof };
+        InputNote { note: note_1, spend_type: 0, secret_key: pk, preimage: zeros32, time_proof: zeroTimeProof };
     let input_note_2 =
-        InputNote { note: note_2, secret_key: pk, preimage: zeros32, time_proof: zeroTimeProof };
+        InputNote { note: note_2, spend_type: 0, secret_key: pk, preimage: zeros32, time_proof: zeroTimeProof };
 
     // Outputs
     let note_3 = Note { kind: bridged_note_kind(), value: 1, address, psi: 3 };
@@ -183,9 +183,9 @@ fn test_send_one_input_two_outputs() {
     let note_1 = Note { kind: bridged_note_kind(), value: 10, address, psi: 1 };
     let note_2 = Note { kind: 0, value: 0, address, psi: 0 };
     let input_note_1 =
-        InputNote { note: note_1, secret_key: pk, preimage: zeros32, time_proof: zeroTimeProof };
+        InputNote { note: note_1, spend_type: 0, secret_key: pk, preimage: zeros32, time_proof: zeroTimeProof };
     let input_note_2 =
-        InputNote { note: note_2, secret_key: 0, preimage: zeros32, time_proof: zeroTimeProof };
+        InputNote { note: note_2, spend_type: 0, secret_key: 0, preimage: zeros32, time_proof: zeroTimeProof };
 
     // Outputs
     let note_3 = Note { kind: bridged_note_kind(), value: 1, address, psi: 3 };
@@ -215,9 +215,9 @@ fn test_send_two_inputs_one_output() {
     let note_1 = Note { kind: bridged_note_kind(), value: 10, address, psi: 1 };
     let note_2 = Note { kind: bridged_note_kind(), value: 5, address, psi: 2 };
     let input_note_1 =
-        InputNote { note: note_1, secret_key: pk, preimage: zeros32, time_proof: zeroTimeProof };
+        InputNote { note: note_1, spend_type: 0, secret_key: pk, preimage: zeros32, time_proof: zeroTimeProof };
     let input_note_2 =
-        InputNote { note: note_2, secret_key: pk, preimage: zeros32, time_proof: zeroTimeProof };
+        InputNote { note: note_2, spend_type: 0, secret_key: pk, preimage: zeros32, time_proof: zeroTimeProof };
 
     // Outputs
     let note_3 = Note { kind: bridged_note_kind(), value: 15, address, psi: 3 };
@@ -247,9 +247,9 @@ fn test_send_diff_kinds() {
     let note_1 = Note { kind: bridged_note_kind(), value: 15, address, psi: 1 };
     let note_2 = Note { kind: 2, value: 5, address, psi: 2 };
     let input_note_1 =
-        InputNote { note: note_1, secret_key: pk, preimage: zeros32, time_proof: zeroTimeProof };
+        InputNote { note: note_1, spend_type: 0, secret_key: pk, preimage: zeros32, time_proof: zeroTimeProof };
     let input_note_2 =
-        InputNote { note: note_2, secret_key: pk, preimage: zeros32, time_proof: zeroTimeProof };
+        InputNote { note: note_2, spend_type: 0, secret_key: pk, preimage: zeros32, time_proof: zeroTimeProof };
 
     // Outputs
     let note_3 = Note { kind: bridged_note_kind(), value: 15, address, psi: 3 };
@@ -279,9 +279,9 @@ fn test_mint() {
     let note_1 = Note { kind: bridged_note_kind(), value: 15, address, psi: 1 };
     let note_2 = Note { kind: bridged_note_kind(), value: 5, address, psi: 2 };
     let input_note_1 =
-        InputNote { note: note_1, secret_key: pk, preimage: zeros32, time_proof: zeroTimeProof };
+        InputNote { note: note_1, spend_type: 0, secret_key: pk, preimage: zeros32, time_proof: zeroTimeProof };
     let input_note_2 =
-        InputNote { note: note_2, secret_key: pk, preimage: zeros32, time_proof: zeroTimeProof };
+        InputNote { note: note_2, spend_type: 0, secret_key: pk, preimage: zeros32, time_proof: zeroTimeProof };
 
     // Outputs
     let note_3 = Note { kind: bridged_note_kind(), value: 0, address: 0, psi: 0 };
@@ -315,9 +315,9 @@ fn test_burn() {
     let note_1 = Note { kind: bridged_note_kind(), value: 15, address, psi: 1 };
     let note_2 = Note { kind: bridged_note_kind(), value: 5, address, psi: 2 };
     let input_note_1 =
-        InputNote { note: note_1, secret_key: pk, preimage: zeros32, time_proof: zeroTimeProof };
+        InputNote { note: note_1, spend_type: 0, secret_key: pk, preimage: zeros32, time_proof: zeroTimeProof };
     let input_note_2 =
-        InputNote { note: note_2, secret_key: pk, preimage: zeros32, time_proof: zeroTimeProof };
+        InputNote { note: note_2, spend_type: 0, secret_key: pk, preimage: zeros32, time_proof: zeroTimeProof };
 
     // Outputs
     let note_3 = Note { kind: 0, value: 0, address: 0, psi: 0 };
@@ -347,9 +347,9 @@ fn test_send_zero_value() {
     let note_1 = Note { kind: bridged_note_kind(), value: 0, address, psi: 1 };
     let note_2 = Note { kind: 0, value: 0, address, psi: 0 };
     let input_note_1 =
-        InputNote { note: note_1, secret_key: pk, preimage: zeros32, time_proof: zeroTimeProof };
+        InputNote { note: note_1, spend_type: 0, secret_key: pk, preimage: zeros32, time_proof: zeroTimeProof };
     let input_note_2 =
-        InputNote { note: note_2, secret_key: 0, preimage: zeros32, time_proof: zeroTimeProof };
+        InputNote { note: note_2, spend_type: 0, secret_key: 0, preimage: zeros32, time_proof: zeroTimeProof };
 
     // Outputs - both zero value notes
     let note_3 = Note { kind: bridged_note_kind(), value: 0, address, psi: 3 };
@@ -378,9 +378,9 @@ fn test_mint_with_padding_input() {
     let note_1 = Note { kind: bridged_note_kind(), value: 5, address, psi: 1 };
     let note_2 = Note { kind: 0, value: 0, address, psi: 0 };
     let input_note_1 =
-        InputNote { note: note_1, secret_key: pk, preimage: zeros32, time_proof: zeroTimeProof };
+        InputNote { note: note_1, spend_type: 0, secret_key: pk, preimage: zeros32, time_proof: zeroTimeProof };
     let input_note_2 =
-        InputNote { note: note_2, secret_key: 0, preimage: zeros32, time_proof: zeroTimeProof };
+        InputNote { note: note_2, spend_type: 0, secret_key: 0, preimage: zeros32, time_proof: zeroTimeProof };
 
     // Outputs - note_3 is the first output (minted note), note_4 is padding or same kind
     let note_3 = Note { kind: bridged_note_kind(), value: 15, address, psi: 3 };
@@ -413,9 +413,9 @@ fn test_burn_single_input() {
     let note_1 = Note { kind: bridged_note_kind(), value: 15, address, psi: 1 };
     let note_2 = Note { kind: 0, value: 0, address, psi: 0 };
     let input_note_1 =
-        InputNote { note: note_1, secret_key: pk, preimage: zeros32, time_proof: zeroTimeProof };
+        InputNote { note: note_1, spend_type: 0, secret_key: pk, preimage: zeros32, time_proof: zeroTimeProof };
     let input_note_2 =
-        InputNote { note: note_2, secret_key: 0, preimage: zeros32, time_proof: zeroTimeProof };
+        InputNote { note: note_2, spend_type: 0, secret_key: 0, preimage: zeros32, time_proof: zeroTimeProof };
 
     // Outputs - burn 10 value, keep 5
     let note_3 = Note { kind: 0, value: 0, address: 0, psi: 0 };
@@ -443,9 +443,9 @@ fn test_burn_no_sub() {
     let note_1 = Note { kind: bridged_note_kind(), value: 15, address, psi: 1 };
     let note_2 = Note { kind: bridged_note_kind(), value: 5, address, psi: 2 };
     let input_note_1 =
-        InputNote { note: note_1, secret_key: pk, preimage: zeros32, time_proof: zeroTimeProof };
+        InputNote { note: note_1, spend_type: 0, secret_key: pk, preimage: zeros32, time_proof: zeroTimeProof };
     let input_note_2 =
-        InputNote { note: note_2, secret_key: pk, preimage: zeros32, time_proof: zeroTimeProof };
+        InputNote { note: note_2, spend_type: 0, secret_key: pk, preimage: zeros32, time_proof: zeroTimeProof };
 
     // Outputs
     let note_3 = Note { kind: 0, value: 0, address: 0, psi: 0 };
@@ -475,9 +475,9 @@ fn test_burn_no_sub_single_input() {
     let note_1 = Note { kind: bridged_note_kind(), value: 15, address, psi: 1 };
     let note_2 = Note { kind: 0, value: 0, address, psi: 0 };
     let input_note_1 =
-        InputNote { note: note_1, secret_key: pk, preimage: zeros32, time_proof: zeroTimeProof };
+        InputNote { note: note_1, spend_type: 0, secret_key: pk, preimage: zeros32, time_proof: zeroTimeProof };
     let input_note_2 =
-        InputNote { note: note_2, secret_key: 0, preimage: zeros32, time_proof: zeroTimeProof };
+        InputNote { note: note_2, spend_type: 0, secret_key: 0, preimage: zeros32, time_proof: zeroTimeProof };
 
     // Outputs - burn 10 value, keep 5
     let note_3 = Note { kind: 0, value: 0, address: 0, psi: 0 };
@@ -506,9 +506,9 @@ fn test_burn_no_sub_invalid_addr() {
     let note_1 = Note { kind: bridged_note_kind(), value: 15, address, psi: 1 };
     let note_2 = Note { kind: bridged_note_kind(), value: 5, address, psi: 2 };
     let input_note_1 =
-        InputNote { note: note_1, secret_key: pk, preimage: zeros32, time_proof: zeroTimeProof };
+        InputNote { note: note_1, spend_type: 0, secret_key: pk, preimage: zeros32, time_proof: zeroTimeProof };
     let input_note_2 =
-        InputNote { note: note_2, secret_key: pk, preimage: zeros32, time_proof: zeroTimeProof };
+        InputNote { note: note_2, spend_type: 0, secret_key: pk, preimage: zeros32, time_proof: zeroTimeProof };
 
     // Outputs
     let note_3 = Note { kind: 0, value: 0, address: 0, psi: 0 };
@@ -538,9 +538,9 @@ fn test_mint_different_kinds() {
     let note_1 = Note { kind: bridged_note_kind(), value: 5, address, psi: 1 };
     let note_2 = Note { kind: 2, value: 3, address, psi: 2 };
     let input_note_1 =
-        InputNote { note: note_1, secret_key: pk, preimage: zeros32, time_proof: zeroTimeProof };
+        InputNote { note: note_1, spend_type: 0, secret_key: pk, preimage: zeros32, time_proof: zeroTimeProof };
     let input_note_2 =
-        InputNote { note: note_2, secret_key: pk, preimage: zeros32, time_proof: zeroTimeProof };
+        InputNote { note: note_2, spend_type: 0, secret_key: pk, preimage: zeros32, time_proof: zeroTimeProof };
 
     // Outputs - mint kind 3, first note is the minted note
     let note_3 = Note { kind: 3, value: 18, address, psi: 3 };
@@ -576,9 +576,9 @@ fn test_send_large_values() {
     let note_1 = Note { kind: bridged_note_kind(), value: large_value, address, psi: 1 };
     let note_2 = Note { kind: bridged_note_kind(), value: large_value, address, psi: 2 };
     let input_note_1 =
-        InputNote { note: note_1, secret_key: pk, preimage: zeros32, time_proof: zeroTimeProof };
+        InputNote { note: note_1, spend_type: 0, secret_key: pk, preimage: zeros32, time_proof: zeroTimeProof };
     let input_note_2 =
-        InputNote { note: note_2, secret_key: pk, preimage: zeros32, time_proof: zeroTimeProof };
+        InputNote { note: note_2, spend_type: 0, secret_key: pk, preimage: zeros32, time_proof: zeroTimeProof };
 
     // Outputs
     let note_3 = Note { kind: bridged_note_kind(), value: large_value + 500000, address, psi: 3 };
@@ -607,9 +607,9 @@ fn test_mint_same_kind() {
     let note_1 = Note { kind: bridged_note_kind(), value: 5, address, psi: 1 };
     let note_2 = Note { kind: bridged_note_kind(), value: 10, address, psi: 2 };
     let input_note_1 =
-        InputNote { note: note_1, secret_key: pk, preimage: zeros32, time_proof: zeroTimeProof };
+        InputNote { note: note_1, spend_type: 0, secret_key: pk, preimage: zeros32, time_proof: zeroTimeProof };
     let input_note_2 =
-        InputNote { note: note_2, secret_key: pk, preimage: zeros32, time_proof: zeroTimeProof };
+        InputNote { note: note_2, spend_type: 0, secret_key: pk, preimage: zeros32, time_proof: zeroTimeProof };
 
     // Outputs - mint more of same kind, first note is the minted note
     let note_3 = Note { kind: bridged_note_kind(), value: 25, address, psi: 3 };
@@ -646,9 +646,9 @@ fn test_overflow_input_first_note() {
     let note_1 = Note { kind: bridged_note_kind(), value: overflow_value, address, psi: 1 };
     let note_2 = Note { kind: bridged_note_kind(), value: 5, address, psi: 2 };
     let input_note_1 =
-        InputNote { note: note_1, secret_key: pk, preimage: zeros32, time_proof: zeroTimeProof };
+        InputNote { note: note_1, spend_type: 0, secret_key: pk, preimage: zeros32, time_proof: zeroTimeProof };
     let input_note_2 =
-        InputNote { note: note_2, secret_key: pk, preimage: zeros32, time_proof: zeroTimeProof };
+        InputNote { note: note_2, spend_type: 0, secret_key: pk, preimage: zeros32, time_proof: zeroTimeProof };
 
     // Outputs
     let note_3 = Note { kind: bridged_note_kind(), value: 10, address, psi: 3 };
@@ -681,9 +681,9 @@ fn test_overflow_input_second_note() {
     let note_1 = Note { kind: bridged_note_kind(), value: 5, address, psi: 1 };
     let note_2 = Note { kind: bridged_note_kind(), value: overflow_value, address, psi: 2 };
     let input_note_1 =
-        InputNote { note: note_1, secret_key: pk, preimage: zeros32, time_proof: zeroTimeProof };
+        InputNote { note: note_1, spend_type: 0, secret_key: pk, preimage: zeros32, time_proof: zeroTimeProof };
     let input_note_2 =
-        InputNote { note: note_2, secret_key: pk, preimage: zeros32, time_proof: zeroTimeProof };
+        InputNote { note: note_2, spend_type: 0, secret_key: pk, preimage: zeros32, time_proof: zeroTimeProof };
 
     // Outputs
     let note_3 = Note { kind: bridged_note_kind(), value: 10, address, psi: 3 };
@@ -716,9 +716,9 @@ fn test_overflow_output_first_note() {
     let note_1 = Note { kind: bridged_note_kind(), value: 10, address, psi: 1 };
     let note_2 = Note { kind: bridged_note_kind(), value: 5, address, psi: 2 };
     let input_note_1 =
-        InputNote { note: note_1, secret_key: pk, preimage: zeros32, time_proof: zeroTimeProof };
+        InputNote { note: note_1, spend_type: 0, secret_key: pk, preimage: zeros32, time_proof: zeroTimeProof };
     let input_note_2 =
-        InputNote { note: note_2, secret_key: pk, preimage: zeros32, time_proof: zeroTimeProof };
+        InputNote { note: note_2, spend_type: 0, secret_key: pk, preimage: zeros32, time_proof: zeroTimeProof };
 
     // Outputs - first output has overflow value
     let note_3 = Note { kind: bridged_note_kind(), value: overflow_value, address, psi: 3 };
@@ -751,9 +751,9 @@ fn test_overflow_output_second_note() {
     let note_1 = Note { kind: bridged_note_kind(), value: 10, address, psi: 1 };
     let note_2 = Note { kind: bridged_note_kind(), value: 5, address, psi: 2 };
     let input_note_1 =
-        InputNote { note: note_1, secret_key: pk, preimage: zeros32, time_proof: zeroTimeProof };
+        InputNote { note: note_1, spend_type: 0, secret_key: pk, preimage: zeros32, time_proof: zeroTimeProof };
     let input_note_2 =
-        InputNote { note: note_2, secret_key: pk, preimage: zeros32, time_proof: zeroTimeProof };
+        InputNote { note: note_2, spend_type: 0, secret_key: pk, preimage: zeros32, time_proof: zeroTimeProof };
 
     // Outputs - second output has overflow value
     let note_3 = Note { kind: bridged_note_kind(), value: 5, address, psi: 3 };
@@ -786,9 +786,9 @@ fn test_max_allowed_value() {
     let note_1 = Note { kind: bridged_note_kind(), value: max_value, address, psi: 1 };
     let note_2 = Note { kind: 0, value: 0, address, psi: 0 };
     let input_note_1 =
-        InputNote { note: note_1, secret_key: pk, preimage: zeros32, time_proof: zeroTimeProof };
+        InputNote { note: note_1, spend_type: 0, secret_key: pk, preimage: zeros32, time_proof: zeroTimeProof };
     let input_note_2 =
-        InputNote { note: note_2, secret_key: 0, preimage: zeros32, time_proof: zeroTimeProof };
+        InputNote { note: note_2, spend_type: 0, secret_key: 0, preimage: zeros32, time_proof: zeroTimeProof };
 
     // Outputs - transfer to single output
     let note_3 = Note { kind: bridged_note_kind(), value: max_value, address, psi: 3 };
@@ -821,9 +821,9 @@ fn test_msg_value_overflow() {
     let note_1 = Note { kind: bridged_note_kind(), value: 10, address, psi: 1 };
     let note_2 = Note { kind: bridged_note_kind(), value: 5, address, psi: 2 };
     let input_note_1 =
-        InputNote { note: note_1, secret_key: pk, preimage: zeros32, time_proof: zeroTimeProof };
+        InputNote { note: note_1, spend_type: 0, secret_key: pk, preimage: zeros32, time_proof: zeroTimeProof };
     let input_note_2 =
-        InputNote { note: note_2, secret_key: pk, preimage: zeros32, time_proof: zeroTimeProof };
+        InputNote { note: note_2, spend_type: 0, secret_key: pk, preimage: zeros32, time_proof: zeroTimeProof };
 
     // Outputs - mint with overflow msg_value
     let note_3 = Note { kind: bridged_note_kind(), value: 15, address, psi: 3 };
@@ -879,7 +879,7 @@ fn kind5_address() -> Field {
 }
 
 // kind 6 (signature32sha): address = Poseidon(field_pair(SHA-256(preimage))).
-fn kind6_address() -> Field {
+fn signature_sha_address() -> Field {
     let (low, high) = bytes_32_to_field_pair(shared_preimage_sha());
     poseidon2::Poseidon2::hash([low, high], 2)
 }
@@ -887,6 +887,7 @@ fn kind6_address() -> Field {
 fn padding_input() -> InputNote {
     InputNote {
         note: Note { kind: 0, value: 0, address: 0, psi: 0 },
+        spend_type: 0,
         secret_key: 0,
         preimage: zeros32,
         time_proof: zeroTimeProof,
@@ -903,6 +904,7 @@ fn test_send_kind5_preimage_ownership() {
     let note_1 = Note { kind: 5, value: 10, address, psi: 1 };
     let input_note_1 = InputNote {
         note: note_1,
+        spend_type: 1,
         secret_key: 0, // not used for kind 5
         preimage,
         time_proof: zeroTimeProof,
@@ -937,6 +939,7 @@ fn test_send_kind5_wrong_preimage() {
     let note_1 = Note { kind: 5, value: 10, address, psi: 1 };
     let input_note_1 = InputNote {
         note: note_1,
+        spend_type: 1,
         secret_key: 0,
         preimage: bad_preimage,
         time_proof: zeroTimeProof,
@@ -961,16 +964,17 @@ fn test_send_kind5_wrong_preimage() {
 }
 
 #[test]
-fn test_send_kind6_sha_preimage_ownership() {
+fn test_send_sha_preimage_ownership() {
     // kind 6: ownership proven by SHA-256 preimage whose Poseidon hash
     // (over the SHA digest as a field pair) matches the note address.
     // Reuses the (preimage, sha) pair from signature32sha::test_main.
     let preimage = shared_preimage();
-    let address = kind6_address();
+    let address = signature_sha_address();
 
     let note_1 = Note { kind: 6, value: 10, address, psi: 1 };
     let input_note_1 = InputNote {
         note: note_1,
+        spend_type: 2,
         secret_key: 0,
         preimage,
         time_proof: zeroTimeProof,
@@ -995,8 +999,8 @@ fn test_send_kind6_sha_preimage_ownership() {
 }
 
 #[test(should_fail)]
-fn test_send_kind6_wrong_preimage() {
-    let address = kind6_address();
+fn test_send_wrong_preimage() {
+    let address = signature_sha_address();
 
     let mut bad_preimage = shared_preimage();
     bad_preimage[31] = 0; // changes SHA digest -> Poseidon mismatch
@@ -1004,6 +1008,7 @@ fn test_send_kind6_wrong_preimage() {
     let note_1 = Note { kind: 6, value: 10, address, psi: 1 };
     let input_note_1 = InputNote {
         note: note_1,
+        spend_type: 2,
         secret_key: 0,
         preimage: bad_preimage,
         time_proof: zeroTimeProof,
@@ -1028,15 +1033,16 @@ fn test_send_kind6_wrong_preimage() {
 }
 
 #[test]
-fn test_burn_kind6_sha_preimage() {
+fn test_burn_sha_preimage() {
     // Combine a kind-6 spend with the burn flow to confirm the ownership
     // check fires alongside the burn-specific assertions.
     let preimage = shared_preimage();
-    let address = kind6_address();
+    let address = signature_sha_address();
 
     let note_1 = Note { kind: 6, value: 15, address, psi: 1 };
     let input_note_1 = InputNote {
         note: note_1,
+        spend_type: 2,
         secret_key: 0,
         preimage,
         time_proof: zeroTimeProof,
@@ -1061,15 +1067,16 @@ fn test_burn_kind6_sha_preimage() {
 }
 
 #[test]
-fn test_mint_kind6_sha_preimage() {
+fn test_mint_sha_preimage() {
     // Mint flow with a kind-6 input -- verifies SHA preimage ownership
     // is enforced even while increasing supply via msg_value.
     let preimage = shared_preimage();
-    let address = kind6_address();
+    let address = signature_sha_address();
 
     let note_1 = Note { kind: 6, value: 5, address, psi: 1 };
     let input_note_1 = InputNote {
         note: note_1,
+        spend_type: 2,
         secret_key: 0,
         preimage,
         time_proof: zeroTimeProof,
@@ -1109,6 +1116,7 @@ fn test_send_kind5_zero_secret_other_kind() {
     let note_1 = Note { kind: 5, value: 10, address, psi: 1 };
     let input_note_1 = InputNote {
         note: note_1,
+        spend_type: 1,
         secret_key: 101,
         preimage: wrong_preimage,
         time_proof: zeroTimeProof,
@@ -1133,23 +1141,25 @@ fn test_send_kind5_zero_secret_other_kind() {
 }
 
 #[test]
-fn test_send_two_kind6_inputs_shared_preimage() {
+fn test_send_two_signature_sha_inputs_shared_preimage() {
     // Two real kind-6 inputs sharing the same preimage/address (a user
     // consolidating two of their own notes). Confirms the ownership
     // check fires for both input slots, not just index 0.
     let preimage = shared_preimage();
-    let address = kind6_address();
+    let address = signature_sha_address();
 
     let note_1 = Note { kind: 6, value: 7, address, psi: 1 };
     let note_2 = Note { kind: 6, value: 3, address, psi: 2 };
     let input_note_1 = InputNote {
         note: note_1,
+        spend_type: 2,
         secret_key: 0,
         preimage,
         time_proof: zeroTimeProof,
     };
     let input_note_2 = InputNote {
         note: note_2,
+        spend_type: 2,
         secret_key: 0,
         preimage,
         time_proof: zeroTimeProof,
@@ -1226,16 +1236,17 @@ fn timelocked_psi(sk: Field) -> Field {
 }
 
 #[test]
-fn test_send_kind8_htlc_claim() {
+fn test_send_sha_htlc_claim() {
     // Kind 8 claim path: spender supplies the SHA preimage whose
     // Poseidon-of-field-pair hash equals `note.address` (same address
     // construction as kind 6). `psi` is free in the claim branch.
     let preimage = shared_preimage();
-    let address = kind6_address();
+    let address = signature_sha_address();
 
     let note_1 = Note { kind: 8, value: 10, address, psi: 999 };
     let input_note_1 = InputNote {
         note: note_1,
+        spend_type: 3,
         secret_key: 0,
         preimage,
         time_proof: zeroTimeProof,
@@ -1260,10 +1271,10 @@ fn test_send_kind8_htlc_claim() {
 }
 
 #[test(should_fail)]
-fn test_send_kind8_htlc_wrong_preimage() {
+fn test_send_sha_htlc_wrong_preimage() {
     // Non-zero preimage selects the claim branch, but it doesn't hash
     // to `note.address` -- the HTLC hashlock assertion must fail.
-    let address = kind6_address();
+    let address = signature_sha_address();
 
     let mut bad_preimage = shared_preimage();
     bad_preimage[5] = 77;
@@ -1271,6 +1282,7 @@ fn test_send_kind8_htlc_wrong_preimage() {
     let note_1 = Note { kind: 8, value: 10, address, psi: 999 };
     let input_note_1 = InputNote {
         note: note_1,
+        spend_type: 3,
         secret_key: 0,
         preimage: bad_preimage,
         time_proof: zeroTimeProof,
@@ -1295,7 +1307,7 @@ fn test_send_kind8_htlc_wrong_preimage() {
 }
 
 #[test]
-fn test_send_kind8_htlc_refund() {
+fn test_send_sha_htlc_refund() {
     // Kind 8 refund path: zero preimage selects the timelocked branch.
     // `note.psi` must equal Poseidon(secret_hash, timelock_commitment)
     // and the PoW chain headers must link to the anchor zero_block.
@@ -1305,6 +1317,7 @@ fn test_send_kind8_htlc_refund() {
     let note_1 = Note { kind: 8, value: 10, address: 1234, psi };
     let input_note_1 = InputNote {
         note: note_1,
+        spend_type: 3,
         secret_key: sk,
         preimage: zeros32,
         time_proof: bitcoin_time_proof(),
@@ -1329,7 +1342,7 @@ fn test_send_kind8_htlc_refund() {
 }
 
 #[test(should_fail)]
-fn test_send_kind8_htlc_refund_wrong_psi() {
+fn test_send_sha_htlc_refund_wrong_psi() {
     // Zero preimage forces the refund branch but `psi` doesn't match
     // the expected timelock commitment -- must fail with
     // "HTLC: wrong refund commitment".
@@ -1338,6 +1351,7 @@ fn test_send_kind8_htlc_refund_wrong_psi() {
     let note_1 = Note { kind: 8, value: 10, address: 1234, psi: 12345 };
     let input_note_1 = InputNote {
         note: note_1,
+        spend_type: 3,
         secret_key: sk,
         preimage: zeros32,
         time_proof: bitcoin_time_proof(),
@@ -1381,6 +1395,7 @@ fn test_send_timelocked_normal_note() {
     let note_1 = Note { kind: 1, value: 10, address, psi };
     let input_note_1 = InputNote {
         note: note_1,
+        spend_type: 0,
         secret_key: sk,
         preimage: zeros32,
         time_proof: bitcoin_time_proof(),
@@ -1414,6 +1429,7 @@ fn test_send_timelocked_normal_note_wrong_psi() {
     let note_1 = Note { kind: 1, value: 10, address, psi: 12345 };
     let input_note_1 = InputNote {
         note: note_1,
+        spend_type: 0,
         secret_key: sk,
         preimage: zeros32,
         time_proof: bitcoin_time_proof(),
@@ -1456,6 +1472,7 @@ fn test_send_timelocked_normal_note_bad_pow_chain() {
     let note_1 = Note { kind: 1, value: 10, address, psi };
     let input_note_1 = InputNote {
         note: note_1,
+        spend_type: 0,
         secret_key: sk,
         preimage: zeros32,
         time_proof: bad_proof,
@@ -1491,6 +1508,7 @@ fn test_send_timelocked_normal_note_wrong_secret() {
     let note_1 = Note { kind: 1, value: 10, address, psi };
     let input_note_1 = InputNote {
         note: note_1,
+        spend_type: 0,
         secret_key: 202, // not the owner's key
         preimage: zeros32,
         time_proof: bitcoin_time_proof(),
@@ -1525,6 +1543,7 @@ fn test_send_inactive_timelock_psi_is_free() {
     let note_1 = Note { kind: 1, value: 10, address, psi: 0xdeadbeef };
     let input_note_1 = InputNote {
         note: note_1,
+        spend_type: 0,
         secret_key: sk,
         preimage: zeros32,
         time_proof: zeroTimeProof, // zero_block all-zeros -> lock inactive
@@ -1559,6 +1578,7 @@ fn test_burn_timelocked_normal_note() {
     let note_1 = Note { kind: 1, value: 15, address, psi };
     let input_note_1 = InputNote {
         note: note_1,
+        spend_type: 0,
         secret_key: sk,
         preimage: zeros32,
         time_proof: bitcoin_time_proof(),
@@ -1583,12 +1603,12 @@ fn test_burn_timelocked_normal_note() {
 }
 
 #[test(should_fail)]
-fn test_send_two_kind6_inputs_second_wrong_preimage() {
+fn test_send_two_signature_sha_inputs_second_wrong_preimage() {
     // Same as above but the second input supplies a bad preimage. Must
     // fail -- the ownership assertion must apply to input index 1, not
     // only index 0.
     let preimage = shared_preimage();
-    let address = kind6_address();
+    let address = signature_sha_address();
 
     let mut bad_preimage = preimage;
     bad_preimage[0] = 200;
@@ -1597,12 +1617,14 @@ fn test_send_two_kind6_inputs_second_wrong_preimage() {
     let note_2 = Note { kind: 6, value: 3, address, psi: 2 };
     let input_note_1 = InputNote {
         note: note_1,
+        spend_type: 2,
         secret_key: 0,
         preimage,
         time_proof: zeroTimeProof,
     };
     let input_note_2 = InputNote {
         note: note_2,
+        spend_type: 2,
         secret_key: 0,
         preimage: bad_preimage,
         time_proof: zeroTimeProof,

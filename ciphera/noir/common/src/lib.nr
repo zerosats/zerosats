@@ -20,6 +20,7 @@ pub struct Note {
 
 pub struct InputNote {
     pub note: Note,
+    pub spend_type: u8,
     pub secret_key: Field,
     pub preimage: [u8; 32],
     pub time_proof: TimeProof,
@@ -63,9 +64,8 @@ pub fn get_timelock_commitment(lock: TimeLock) -> Field {
 
 pub fn check_spend_conditions(input_note: InputNote) {
     if input_note.note.value != 0 {
-        if is_one_of(input_note.note.kind, [1, 2, 3, 4]) {
+        if input_note.spend_type == 0 {
             let key_hash = get_secret_hash(input_note.secret_key);
-
             assert(key_hash == input_note.note.address, "Input note is not owned by the owner");
 
             if timelock_is_active(input_note.time_proof.lock) {
@@ -85,35 +85,24 @@ pub fn check_spend_conditions(input_note: InputNote) {
                     );
             }
         }
+
         // signature32
-        if input_note.note.kind == 5 {
+        if input_note.spend_type == 1 {
             let (low, high) = bytes_32_to_field_pair(input_note.preimage);
 
             let computed_hash = poseidon2::Poseidon2::hash([low, high], 2);
             assert(computed_hash == input_note.note.address, "Address is not owned by the owner");
         }
-        // signature32sha
-        if input_note.note.kind == 6 {
+
+        if input_note.spend_type == 2 {
             let computed_sha_hash = sha256::digest(input_note.preimage);
             let (low, high) = bytes_32_to_field_pair(computed_sha_hash);
 
             let computed_hash = poseidon2::Poseidon2::hash([low, high], 2);
             assert(computed_hash == input_note.note.address, "Address is not owned by the owner");
         }
-        // timelocked
-        if input_note.note.kind == 7 {
-            let key_hash = get_secret_hash(input_note.secret_key);
-            let commitment = get_timelock_commitment(input_note.time_proof.lock);
-            let timelocked_address = poseidon2::Poseidon2::hash([key_hash, commitment], 2);
-            assert(
-                        timelocked_address == input_note.note.address,
-                        "Input note is not owned by the owner",
-                    );
-            // Not fool-proof. Not checking min difficulty to save on circuit constraints
-            assert(check_pow_chain(input_note.time_proof.headers, input_note.time_proof.lock.zero_block, input_note.time_proof.lock.n_blocks));
-        }
-        // time- and hashlocked
-        if input_note.note.kind == 8 {
+
+        if input_note.spend_type == 3 {
             if input_note.preimage != [0; 32] {
                 let computed_sha_hash = sha256::digest(input_note.preimage);
                 let (low, high) = bytes_32_to_field_pair(computed_sha_hash);

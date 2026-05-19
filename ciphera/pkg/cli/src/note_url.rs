@@ -22,7 +22,7 @@ impl From<&CipheraURL> for InputNote {
             secret_key: value.private_key,
             note: Note {
                 utxo_kind: Element::new(2),
-                contract,
+                note_kind: contract,
                 address: hash_merge([value.private_key, Element::ZERO]),
                 psi: hash_merge([value.private_key, value.private_key]),
                 value: value.value,
@@ -114,7 +114,7 @@ mod tests {
             secret_key: Element::new(101),
             note: Note {
                 utxo_kind: Element::new(2),
-                contract: citrea_wcbtc_note_kind(),
+                note_kind: citrea_wcbtc_note_kind(),
                 address: hash_merge([Element::new(101), Element::ZERO]),
                 psi: Element::ZERO,
                 value: Element::new(1),
@@ -152,7 +152,7 @@ mod tests {
             secret_key: Element::new(101),
             note: Note {
                 utxo_kind: Element::new(2),
-                contract: citrea_usdc_note_kind(),
+                note_kind: citrea_usdc_note_kind(),
                 address: hash_merge([Element::new(101), Element::ZERO]),
                 psi: Element::ZERO,
                 value: Element::MAX,

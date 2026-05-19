@@ -547,6 +547,7 @@ fn test_utxo_kind5_signature32_spend() {
 
     let input_note = InputNote {
         note: note(50, address, 1, kind5),
+        spend_type: 1,
         secret_key: Element::ZERO,
         preimage,
         ..InputNote::default()
@@ -575,6 +576,7 @@ fn test_utxo_kind6_signature32sha_spend() {
 
     let input_note = InputNote {
         note: note(40, address, 1, kind6),
+        spend_type: 2,
         secret_key: Element::ZERO,
         preimage,
         ..InputNote::default()
@@ -605,6 +607,7 @@ fn test_utxo_kind7_timelock_spend() {
 
     let input_note = InputNote {
         note: note(50, address, 1, kind7),
+        spend_type: 0,
         secret_key,
         preimage: [0u8; 32],
         time_proof: pow_two_block_proof(),
@@ -638,11 +641,12 @@ fn test_utxo_kind8_htlc_hash_path() {
     let input_note = InputNote {
         note: Note {
             utxo_kind: Element::new(2),
-            contract: kind8,
+            note_kind: kind8,
             address: Element::new(1234),
             psi,
             value: Element::new(50),
         },
+        spend_type: 3,
         secret_key: Element::ZERO,
         preimage,
         ..InputNote::default()
@@ -675,11 +679,12 @@ fn test_utxo_kind8_htlc_refund_path() {
     let input_note = InputNote {
         note: Note {
             utxo_kind: Element::new(2),
-            contract: kind8,
+            note_kind: kind8,
             address,
             psi: Element::new(7777), // unconstrained on this path
             value: Element::new(60),
         },
+        spend_type: 3,
         secret_key,
         preimage: [0u8; 32],
         time_proof: pow_two_block_proof(),

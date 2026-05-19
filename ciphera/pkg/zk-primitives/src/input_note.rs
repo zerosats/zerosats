@@ -64,6 +64,15 @@ impl Default for TimeProof {
 pub struct InputNote {
     /// The note to spend
     pub note: Note,
+    /// Selects which spend path the circuit enforces. Mirrors the Noir
+    /// `InputNote.spend_type` field:
+    /// `0` = Poseidon-key ownership (with optional timelock, kinds 1..4 and 7),
+    /// `1` = signature32 preimage (kind 5),
+    /// `2` = signature32sha preimage (kind 6),
+    /// `3` = HTLC (kind 8 -- preimage spends the hash path, all-zero preimage
+    ///       falls back to the timelocked refund path).
+    #[serde(default)]
+    pub spend_type: u8,
     /// Secret key for the address, required to spend a note via the Poseidon
     /// ownership path (note kinds 1..4 and the kind-7/8 refund path).
     pub secret_key: Element,

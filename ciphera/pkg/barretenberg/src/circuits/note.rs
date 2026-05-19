@@ -6,6 +6,7 @@ use zk_primitives::{InputNote, Note, TimeLock, TimeProof};
 #[derive(Debug, Clone)]
 pub struct BInputNote {
     pub note: BNote,
+    pub spend_type: u8,
     pub secret_key: Base,
     pub preimage: [u8; 32],
     pub time_proof: TimeProof,
@@ -15,6 +16,7 @@ impl From<&InputNote> for BInputNote {
     fn from(note: &InputNote) -> Self {
         BInputNote {
             note: BNote::from(&note.note),
+            spend_type: note.spend_type,
             secret_key: note.secret_key.to_base(),
             preimage: note.preimage,
             time_proof: note.time_proof.clone(),
@@ -26,6 +28,10 @@ impl From<BInputNote> for InputValue {
     fn from(note: BInputNote) -> Self {
         InputValue::Struct(BTreeMap::from([
             ("note".to_owned(), note.note.into()),
+            (
+                "spend_type".to_owned(),
+                InputValue::Field(Base::from(u128::from(note.spend_type))),
+            ),
             ("secret_key".to_owned(), InputValue::Field(note.secret_key)),
             ("preimage".to_owned(), bytes_to_input_value(&note.preimage)),
             (
@@ -59,7 +65,7 @@ impl From<BNote> for InputValue {
     fn from(note: BNote) -> Self {
         let mut struct_ = BTreeMap::new();
 
-        struct_.insert("kind".to_owned(), InputValue::Field(note.utxo_kind));
+        struct_.insert("kind".to_owned(), InputValue::Field(note.kind));
         struct_.insert("value".to_owned(), InputValue::Field(note.value));
         struct_.insert("address".to_owned(), InputValue::Field(note.address));
         struct_.insert("psi".to_owned(), InputValue::Field(note.psi));

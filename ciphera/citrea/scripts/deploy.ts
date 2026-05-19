@@ -19,7 +19,7 @@ import { deployBin, citreaDevChain, citreaTestChain } from "./shared";
 import IERC20Artifact from "../openzeppelin-contracts/token/ERC20/IERC20.json";
 
 // Auto-updated by generate_fixtures.sh - do not modify manually
-const AGG_AGG_VERIFICATION_KEY_HASH = "0x0e2ed7da2917371675b5bcb2022e38cebbc577a3d42787ebb89ad92e2abfb85f";
+const AGG_AGG_VERIFICATION_KEY_HASH = "0x06217d07eb8cdcec02a6ec95c66ca96419d781b47f02849b4f3dfa0ca76bb34c";
 
 const EIP1967_ADMIN_STORAGE_SLOT =
   "0xb53127684a568b3173ae13b9f8a6016e243e63b6e8ee1178d6a717850b5d6103";
