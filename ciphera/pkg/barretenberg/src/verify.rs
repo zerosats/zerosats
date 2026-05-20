@@ -23,15 +23,13 @@ impl VerificationKey {
     /// constituent BN254 base-field elements. The binary format is a
     /// concatenation of 32-byte big-endian field elements.
     pub fn from_bytes(bytes: &[u8]) -> Result<Self> {
-        assert!(
-            bytes.len() % 32 == 0,
-            "verification key length {} is not a multiple of 32",
-            bytes.len()
-        );
-        let fields = bytes
-            .chunks_exact(32)
-            .map(Base::from_be_bytes_reduce)
-            .collect();
-        Ok(VerificationKey(fields))
+        if bytes.len() % 32 == 0 {
+            let fields = bytes
+                .chunks_exact(32)
+                .map(Base::from_be_bytes_reduce)
+                .collect();
+            return Ok(VerificationKey(fields));
+        }
+        return Err("verification key length {} is not a multiple of 32".to_owned().into())
     }
 }
