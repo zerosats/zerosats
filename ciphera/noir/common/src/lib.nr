@@ -20,6 +20,7 @@ pub struct Note {
 
 pub struct InputNote {
     pub note: Note,
+    // Note commit spend_type to note hash to fix spending condition.
     pub spend_type: u8,
     pub secret_key: Field,
     pub preimage: [u8; 32],
@@ -85,25 +86,21 @@ pub fn check_spend_conditions(input_note: InputNote) {
             } else {
                 assert(key_hash == input_note.note.address, "Input note is not owned by the owner");
             }
-        }
-
-        // signature32
-        if input_note.spend_type == 1 {
+        } else if input_note.spend_type == 1 {
+            // signature32
             let (low, high) = bytes_32_to_field_pair(input_note.preimage);
 
             let computed_hash = poseidon2::Poseidon2::hash([low, high], 2);
             assert(computed_hash == input_note.note.address, "Address is not owned by the owner");
-        }
-
-        if input_note.spend_type == 2 {
+        } else if input_note.spend_type == 2 {
+            // signature32sha
             let computed_sha_hash = sha256::digest(input_note.preimage);
             let (low, high) = bytes_32_to_field_pair(computed_sha_hash);
 
             let computed_hash = poseidon2::Poseidon2::hash([low, high], 2);
             assert(computed_hash == input_note.note.address, "Address is not owned by the owner");
-        }
-
-        if input_note.spend_type == 3 {
+        } else if input_note.spend_type == 3 {
+            // SHA locked HTLC
             if input_note.preimage != [0; 32] {
                 let computed_sha_hash = sha256::digest(input_note.preimage);
                 let (low, high) = bytes_32_to_field_pair(computed_sha_hash);
@@ -126,8 +123,11 @@ pub fn check_spend_conditions(input_note: InputNote) {
                     "HTLC: timelocked"
                     );
             }
+        } else {
+            assert(false, "Invalid spend type")
         }
     }
+    // Padding note passes check
 }
 
 pub fn slice<let N: u32, let L: u32>(bytes: [u8; N], start: u32) -> [u8; L] {

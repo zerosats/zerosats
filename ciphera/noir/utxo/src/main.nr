@@ -928,6 +928,41 @@ fn test_send_kind5_preimage_ownership() {
     )
 }
 
+#[test(should_fail_with = "Invalid spend type")]
+fn test_send_invalid_spend_type() {
+    // spend_type outside 0..=3 must hit the "Invalid spend type" branch in
+    // check_spend_conditions. 666 doesn't fit in u8 so we cast -- the
+    // truncated value (154) is still invalid, which is exactly the point.
+    let pk: Field = 101;
+    let address = get_secret_hash(pk);
+
+    let note_1 = Note { kind: bridged_note_kind(), value: 10, address, psi: 1 };
+    let input_note_1 = InputNote {
+        note: note_1,
+        spend_type: 666 as u8,
+        secret_key: pk,
+        preimage: zeros32,
+        time_proof: zeroTimeProof,
+    };
+    let input_note_2 = padding_input();
+
+    let note_3 = Note { kind: bridged_note_kind(), value: 10, address, psi: 3 };
+    let note_4 = Note { kind: 0, value: 0, address: 0, psi: 0 };
+
+    main(
+        [input_note_1, input_note_2],
+        [note_3, note_4],
+        0,
+        [
+            get_note_commitment(note_1),
+            get_note_commitment(input_note_2.note),
+            get_note_commitment(note_3),
+            get_note_commitment(note_4),
+        ],
+        [1, 0, 0, 0, 0],
+    )
+}
+
 #[test(should_fail)]
 fn test_send_kind5_wrong_preimage() {
     // Spender supplies a preimage that doesn't hash to `address`.
