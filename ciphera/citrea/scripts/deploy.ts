@@ -15,7 +15,7 @@ import {
   parseAbi,
 } from "viem";
 import { privateKeyToAccount, mnemonicToAccount } from "viem/accounts";
-import { deployBin, citreaDevChain, citreaTestChain } from "./shared";
+import { citreaDevChain, citreaTestChain } from "./shared";
 import IERC20Artifact from "../openzeppelin-contracts/token/ERC20/IERC20.json";
 
 // Auto-updated by generate_fixtures.sh - do not modify manually
@@ -74,7 +74,17 @@ function readAddressFromSlot(slotValue: `0x${string}` | undefined): `0x${string}
 
 async function main() {
   console.log("Initialization...");
-  let aggregateVerifierAddr = process.env.VERIFIER;
+  // Verifiers are deployed separately (see scripts/deploy-verifier.ts).
+  // The rollup deploy expects a pre-deployed aggregate verifier address
+  // via VERIFIER -- it never deploys the verifier itself.
+  const aggregateVerifierAddr = process.env.VERIFIER as
+    | `0x${string}`
+    | undefined;
+  if (!aggregateVerifierAddr) {
+    throw new Error(
+      "VERIFIER is not set. Deploy the aggregate verifier first via scripts/deploy-verifier.ts and pass its address as VERIFIER.",
+    );
+  }
   const isTestnet = process.env.IS_TESTNET === "1";
   let proverAddress = process.env.PROVER_ADDRESS as `0x${string}`;
   let validators =
@@ -84,9 +94,6 @@ async function main() {
   console.log("    Prover Address - ", proverAddress);
   console.log("    Validators - ", validators);
   console.log("    Verifier - ", aggregateVerifierAddr);
-
-  const maybeNoopVerifier = (verifier: string) =>
-    isTestnet ? verifier : "NoopVerifierHonk.bin";
 
   let account;
   let rpcUrl;
@@ -272,19 +279,9 @@ async function main() {
 
   console.log(`✅ ERC20 Contract: ${erc20Address}`);
 
-  if (!aggregateVerifierAddr) {
-    console.log("\n🔍 Deploying Verifier. Looking for binary file...");
-    aggregateVerifierAddr = await deployBin(
-      maybeNoopVerifier("noir/agg_agg_HonkVerifier.bin"),
-      publicClient,
-      walletClient,
-    );
-    console.log(`✅ Aggregate Verifier Contract: ${aggregateVerifierAddr}`);
-  } else {
-    console.log(
-      `✅ Re-using Aggregate Verifier Contract: ${aggregateVerifierAddr}`,
-    );
-  }
+  console.log(
+    `✅ Using pre-deployed Aggregate Verifier Contract: ${aggregateVerifierAddr}`,
+  );
 
   console.log("\n🔍 Deploying Rollup");
 
