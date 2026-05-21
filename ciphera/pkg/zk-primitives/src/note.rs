@@ -104,22 +104,23 @@ impl Note {
         }
     }
 
-    /// Note for the utxo_kind-7 (timelock) spend path. The address binds the
-    /// owner's secret key to a PoW timelock:
-    /// `Poseidon(get_secret_hash(secret_key), TimeLock::commitment)`.
+    /// Note for the timelock spend path (Noir `spend_type == 0` with an
+    /// active TimeLock). `address` carries the plain owner key hash --
+    /// used by the inactive-fallback branch. `psi` is derived from
+    /// `(key_hash, lock.commitment())` and is the field actually
+    /// asserted by the active-timelock branch in the circuit.
     #[must_use]
     pub fn new_timelock(
         secret_key: Element,
         lock: &TimeLock,
         note_kind: Element,
         value: Element,
-        psi: Element,
     ) -> Self {
         Self {
             utxo_kind: Element::new(2),
             note_kind,
-            address: timelock_address(secret_key, lock),
-            psi,
+            address: get_address_for_private_key(secret_key),
+            psi: timelock_address(secret_key, lock),
             value,
         }
     }
@@ -139,8 +140,8 @@ impl Note {
         Self {
             utxo_kind: Element::new(2),
             note_kind,
-            address: timelock_address(secret_key, lock),
-            psi: Signature32Sha::new(preimage, Element::ZERO).address(),
+            address: Signature32Sha::new(preimage, Element::ZERO).address(),
+            psi: timelock_address(secret_key, lock),
             value,
         }
     }
@@ -243,7 +244,9 @@ mod tests {
     fn signature32_address_matches_field_pair() {
         let note = Note::new_signature32(preimage(), Element::new(99), Element::new(50), Element::ZERO);
         assert_eq!(note.address, raw_field_pair_address(preimage()));
-        assert_eq!(note.utxo_kind, Element::new(5));
+        // utxo_kind is the fixed 0x2 prefix used by get_note_commitment;
+        // the per-note spend-path selector lives in note_kind (here 99).
+        assert_eq!(note.utxo_kind, Element::new(2));
         assert_eq!(note.note_kind, Element::new(99));
     }
 
@@ -260,7 +263,10 @@ mod tests {
     }
 
     #[test]
-    fn timelock_address_matches_key_plus_lock() {
+    fn timelock_note_binds_commitment_to_psi() {
+        // Noir's active-timelock branch (spend_type == 0) asserts
+        // `psi == Poseidon(key_hash, lock.commitment())`, not `address`.
+        // The inactive-fallback branch asserts `address == key_hash`.
         let secret_key = Element::new(101);
         let lock = TimeLock {
             zero_block: [7u8; 32],
@@ -271,18 +277,24 @@ mod tests {
             &lock,
             Element::new(7),
             Element::new(50),
-            Element::ZERO,
         );
 
-        let expected_address = hash::hash_merge([
-            get_address_for_private_key(secret_key),
-            lock.commitment(),
-        ]);
-        assert_eq!(note.address, expected_address);
+        let key_hash = get_address_for_private_key(secret_key);
+        let expected_psi = hash::hash_merge([key_hash, lock.commitment()]);
+
+        assert_eq!(note.address, key_hash);
+        assert_eq!(note.psi, expected_psi);
     }
 
     #[test]
     fn htlc_combines_timelock_refund_and_sha_hashlock() {
+        // HTLC (spend_type == 3) checks:
+        //   - hash branch (nonzero preimage): note.address must equal
+        //     Poseidon(field_pair(SHA256(preimage)));
+        //   - refund branch (zero preimage):  note.psi must equal
+        //     Poseidon(key_hash, lock.commitment()).
+        // So address carries the hashlock and psi carries the refund
+        // commitment -- opposite to the pre-fix layout.
         let secret_key = Element::new(101);
         let lock = TimeLock {
             zero_block: [7u8; 32],
@@ -296,14 +308,14 @@ mod tests {
             Element::new(40),
         );
 
-        // Refund branch: address = timelock_address(sk, lock).
-        let expected_address = hash::hash_merge([
+        let expected_refund = hash::hash_merge([
             get_address_for_private_key(secret_key),
             lock.commitment(),
         ]);
-        assert_eq!(note.address, expected_address);
-        // Hash branch: psi = Poseidon(field_pair(SHA256(preimage))).
-        assert_eq!(note.psi, raw_field_pair_address(preimage_sha()));
+        let expected_hashlock = raw_field_pair_address(preimage_sha());
+
+        assert_eq!(note.address, expected_hashlock);
+        assert_eq!(note.psi, expected_refund);
     }
 
     #[test]
