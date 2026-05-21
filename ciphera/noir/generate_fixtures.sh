@@ -29,9 +29,14 @@ mkdir -p "$REPO_ROOT/fixtures/keys"
 
 # Replace a Noir global Field constant's value in-place.
 # Usage: update_noir_hash <file> <global_name> <new_value>
+#
+# Uses -0777 (slurp the whole file) so the substitution survives a
+# `nargo fmt`-induced newline between `=` and the literal -- the
+# fixed-length lookbehind form silently no-ops on wrapped declarations
+# (same failure mode as the Rust/TS perl calls below).
 update_noir_hash() {
   local file="$1" var="$2" hash="$3"
-  perl -i -pe "s/(?<=global ${var}: Field = )\d+(?=;)/${hash}/" "$file"
+  perl -i -0777 -pe "s/(global ${var}:\s*Field\s*=\s*)\d+(\s*;)/\${1}${hash}\${2}/" "$file"
 }
 
 # Extract the u256 decimal hash from vk_hash output.
@@ -133,9 +138,13 @@ AGG_AGG_VK_HASH_HEX=$(echo "$AGG_AGG_VK_OUT" | extract_hex)
 echo "Updating citrea/scripts/deploy.ts AGG_AGG_VERIFICATION_KEY_HASH=$AGG_AGG_VK_HASH_HEX"
 echo "Updating pkg/contracts/src/rollup.rs AGG_AGG_VERIFICATION_KEY_HASH=$AGG_AGG_VK_HASH_HEX"
 
-perl -i -pe "s/(?<=const AGG_AGG_VERIFICATION_KEY_HASH = \")[^\"]*(?=\";)/${AGG_AGG_VK_HASH_HEX}/" \
+# Use -0777 (slurp the whole file) so the substitution survives a
+# rustfmt/prettier-induced newline between `=` and `"`. The lookbehind
+# form fails silently on multi-line declarations -- exactly the failure
+# mode that left pkg/contracts/src/rollup.rs frozen at a stale hash.
+perl -i -0777 -pe "s/(const AGG_AGG_VERIFICATION_KEY_HASH\s*=\s*\")[^\"]*(\")/\${1}${AGG_AGG_VK_HASH_HEX}\${2}/" \
   "$REPO_ROOT/citrea/scripts/deploy.ts"
-perl -i -pe "s/(?<=AGG_AGG_VERIFICATION_KEY_HASH: &str = \")[^\"]*(?=\";)/${AGG_AGG_VK_HASH_HEX}/" \
+perl -i -0777 -pe "s/(AGG_AGG_VERIFICATION_KEY_HASH:\s*&str\s*=\s*\")[^\"]*(\")/\${1}${AGG_AGG_VK_HASH_HEX}\${2}/" \
   "$REPO_ROOT/pkg/contracts/src/rollup.rs"
 
 $BACKEND write_solidity_verifier --scheme ultra_honk \
