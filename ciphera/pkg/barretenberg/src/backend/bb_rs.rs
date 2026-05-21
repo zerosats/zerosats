@@ -10,6 +10,7 @@ lazy_static! {
     static ref BB_MUTEX: Mutex<()> = Mutex::new(());
 }
 
+#[cfg(not(feature = "bb_utxo"))]
 const G2: [u8; 128] = [
     0x01, 0x18, 0xC4, 0xD5, 0xB8, 0x37, 0xBC, 0xC2, 0xBC, 0x89, 0xB5, 0xB3, 0x98, 0xB5, 0x97, 0x4E,
     0x9F, 0x59, 0x44, 0x07, 0x3B, 0x32, 0x07, 0x8B, 0x7E, 0x23, 0x1F, 0xEC, 0x93, 0x88, 0x83, 0xB0,
@@ -34,8 +35,11 @@ lazy_static! {
 impl BindingBackend {
     fn load_srs() {
         INIT.call_once(|| unsafe {
+	    #[cfg(not(feature = "bb_utxo"))]
             bb_rs::barretenberg_api::srs::init_srs(&G1, (G1.len() / 64) as u32, &G2);
-        });
+            #[cfg(feature = "bb_utxo")]  
+            bb_rs::barretenberg_api::srs::init_srs(&G1, (G1.len() / 64) as u32);
+	});
     }
 }
 
