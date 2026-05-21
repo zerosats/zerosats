@@ -26,6 +26,20 @@ fn main(
     // Hardcode verification_key_hash for utxo proof
     assert(verification_key_hash == UTXO_VERIFICATION_KEY_HASH, "only utxo proof allowed");
 
+    // Pre-loop padding invariants. A padded slot's commitments are still
+    // folded into utxo_hashes[i] below and contribute to the outer
+    // commit_hash, so a malicious prover could otherwise poison the
+    // commit_hash with arbitrary fields. Forbid that here so the padded
+    // slot's contribution is canonically poseidon2([0,0,0,0], 4).
+    for i in 0..3 {
+        if proofs[i].utxo_kind == 0 {
+            assert(proofs[i].input_commitments[0] == 0, "padded slot input commitment must be zero");
+            assert(proofs[i].input_commitments[1] == 0, "padded slot input commitment must be zero");
+            assert(proofs[i].output_commitments[0] == 0, "padded slot output commitment must be zero");
+            assert(proofs[i].output_commitments[1] == 0, "padded slot output commitment must be zero");
+        }
+    }
+
     let mut root = old_root;
     let mut utxo_hashes: [Field; 3] = [0, 0, 0];
     let mut messages_index = 0;
@@ -246,6 +260,68 @@ fn test_invalid_verification_key_hash() {
         old_root,
         new_root,
         commit_hash,
+    );
+}
+
+// A padded slot's input/output commitments are folded
+// into commit_hash via utxo_hashes[i]. The pre-loop assertions must
+// forbid any nonzero commitment in a slot whose utxo_kind == 0.
+
+fn padded_slot() -> AggUtxoProofInput {
+    AggUtxoProofInput {
+        proof: [0; 508],
+        utxo_kind: 0,
+        input_merkle_paths: [[0; 160]; 2],
+        output_merkle_paths: [[0; 160]; 2],
+        input_commitments: [0; 2],
+        output_commitments: [0; 2],
+    }
+}
+
+fn real_send_slot() -> AggUtxoProofInput {
+    AggUtxoProofInput {
+        proof: [0; 508],
+        utxo_kind: 1, // send, no message consumption
+        input_merkle_paths: [[0; 160]; 2],
+        output_merkle_paths: [[0; 160]; 2],
+        input_commitments: [0; 2],
+        output_commitments: [0; 2],
+    }
+}
+
+#[test(should_fail_with = "padded slot input commitment must be zero")]
+fn test_padded_slot_nonzero_input_commitment_fails() {
+    let mut bad_padding = padded_slot();
+    bad_padding.input_commitments[0] = 12345;
+
+    let proofs = [real_send_slot(), bad_padding, padded_slot()];
+
+    main(
+        [0; 115],
+        UTXO_VERIFICATION_KEY_HASH,
+        proofs,
+        [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        0,
+        0,
+        0,
+    );
+}
+
+#[test(should_fail_with = "padded slot output commitment must be zero")]
+fn test_padded_slot_nonzero_output_commitment_fails() {
+    let mut bad_padding = padded_slot();
+    bad_padding.output_commitments[1] = 67890;
+
+    let proofs = [real_send_slot(), padded_slot(), bad_padding];
+
+    main(
+        [0; 115],
+        UTXO_VERIFICATION_KEY_HASH,
+        proofs,
+        [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        0,
+        0,
+        0,
     );
 }
 

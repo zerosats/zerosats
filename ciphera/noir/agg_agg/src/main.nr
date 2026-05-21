@@ -126,7 +126,7 @@ fn test_first_proof_cannot_be_padding() {
 
 #[test(should_fail_with = "padded child messages must be zero")]
 fn test_padded_child_messages_must_be_zero() {
-    // F-02 regression: padded slot 1 carries a forged burn (kind = 3) in
+    // Padded slot 1 carries a forged burn (kind = 3) in
     // its message segment. The recursive verifier reuses slot 0's proof
     // so the segment would otherwise be unconstrained -- this assertion
     // must catch it.
