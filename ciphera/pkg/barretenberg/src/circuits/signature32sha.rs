@@ -41,7 +41,7 @@ impl Prove for Signature32Sha {
         let inputs = InputMap::from(Signature32ShaInput::from(self));
 
         let proof_bytes =
-            prove::<DefaultBackend>(&PROGRAM_COMPILED, PROGRAM.as_bytes(), KEY, &inputs, false, false)?;
+            prove::<DefaultBackend>(&PROGRAM_COMPILED, PROGRAM.as_bytes(), KEY, &inputs, false)?;
 
         let public_inputs = proof_bytes[..SIGNATURE_PUBLIC_INPUTS_COUNT * 32].to_vec();
         let public_inputs = bytes_to_elements(&public_inputs);

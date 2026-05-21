@@ -73,7 +73,7 @@ impl Prove for Migrate {
         let inputs = InputMap::from(MigrateInput::from(self));
 
         let proof_bytes =
-            prove::<DefaultBackend>(&PROGRAM_COMPILED, PROGRAM.as_bytes(), KEY, &inputs, false, false)?;
+            prove::<DefaultBackend>(&PROGRAM_COMPILED, PROGRAM.as_bytes(), KEY, &inputs, false)?;
 
         // The migrate circuit has 2 public inputs (old_address, new_address)
         let public_inputs_count = 2;

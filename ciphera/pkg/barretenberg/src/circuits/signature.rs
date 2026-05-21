@@ -40,7 +40,7 @@ impl Prove for Signature {
         let inputs = InputMap::from(SignatureInput::from(self));
 
         let proof_bytes =
-            prove::<DefaultBackend>(&PROGRAM_COMPILED, PROGRAM.as_bytes(), KEY, &inputs, false, false)?;
+            prove::<DefaultBackend>(&PROGRAM_COMPILED, PROGRAM.as_bytes(), KEY, &inputs, false)?;
 
         // Slice off the public inputs
         let public_inputs = proof_bytes[..SIGNATURE_PUBLIC_INPUTS_COUNT * 32].to_vec();

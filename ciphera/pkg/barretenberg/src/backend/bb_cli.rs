@@ -73,7 +73,6 @@ impl Backend for CliBackend {
         key: &[u8],
         witness: &[u8],
         oracle_hash_keccak: bool,
-        recursive: bool,
     ) -> Result<Vec<u8>> {
         let mut witness_gz = GzEncoder::new(witness, Compression::none());
         let mut witness_gz_buf = Vec::with_capacity(witness.len() + 0xFF);
@@ -111,10 +110,6 @@ impl Backend for CliBackend {
 
         if oracle_hash_keccak {
             cmd.arg("--oracle_hash").arg("keccak");
-        }
-
-        if recursive {
-            cmd.arg("--recursive");
         }
 
         let output = cmd.output()?;
