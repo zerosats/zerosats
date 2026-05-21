@@ -8,6 +8,7 @@ pub struct TimeLock {
 
 pub struct TimeProof {
     pub lock: TimeLock,
+    // Note, only 2 blocks timelock is accepted right now. Increase for production usage
     pub headers: [[u8; 80]; 2],
 }
 
