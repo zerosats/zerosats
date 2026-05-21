@@ -50,7 +50,7 @@ impl Prove for AggAgg {
         let inputs = InputMap::from(AggAggInput::from(self));
 
         let proof_bytes =
-            prove::<DefaultBackend>(&PROGRAM_COMPILED, PROGRAM.as_bytes(), KEY, &inputs, true)?;
+            prove::<DefaultBackend>(&PROGRAM_COMPILED, PROGRAM.as_bytes(), KEY, &inputs, true, false)?;
         let public_inputs_bytes = proof_bytes[..AGG_AGG_PUBLIC_INPUTS_COUNT * 32].to_vec();
         let public_inputs = bytes_to_elements(&public_inputs_bytes);
         let raw_proof = proof_bytes[AGG_AGG_PUBLIC_INPUTS_COUNT * 32..].to_vec();

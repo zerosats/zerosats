@@ -40,25 +40,40 @@ impl BindingBackend {
 }
 
 impl Backend for BindingBackend {
+    /// Match the pinned bb_rs API (commit 1a8f9ee). Signatures, from
+    /// `barretenberg/bb_rs/src/barretenberg_api/acir.rs`:
+    ///
+    ///   acir_prove_ultra_honk(constraint_system_buf, witness_buf, recursive: bool)
+    ///   acir_prove_ultra_keccak_honk(constraint_system_buf, witness_buf, recursive: bool)
+    ///   acir_verify_ultra_honk(proof_buf, vkey_buf) -> bool
+    ///   acir_verify_ultra_keccak_honk(proof_buf, vkey_buf) -> bool
+    ///
+    /// Earlier code passed `key` in the third slot of the prove calls
+    /// (audit F-07) and referenced `_zk_` variants that the pinned source
+    /// does not export. The prove path never needs a key here -- the
+    /// binding derives the proving key from the constraint system. `key`
+    /// is retained on the trait only for the CLI backend.
     fn prove(
         program: &[u8],
-        key: &[u8],
+        _key: &[u8],
         witness: &[u8],
         oracle_hash_keccak: bool,
+        recursive: bool,
     ) -> Result<Vec<u8>> {
         let _guard = BB_MUTEX.lock().unwrap();
 
         Self::load_srs();
 
-        let proof = match oracle_hash_keccak {
-            false => unsafe {
-                bb_rs::barretenberg_api::acir::acir_prove_ultra_honk(program, witness, key)
-            },
-            true => unsafe {
-                bb_rs::barretenberg_api::acir::acir_prove_ultra_keccak_zk_honk(
-                    program, witness, key,
+        let proof = if oracle_hash_keccak {
+            unsafe {
+                bb_rs::barretenberg_api::acir::acir_prove_ultra_keccak_honk(
+                    program, witness, recursive,
                 )
-            },
+            }
+        } else {
+            unsafe {
+                bb_rs::barretenberg_api::acir::acir_prove_ultra_honk(program, witness, recursive)
+            }
         };
 
         Ok(proof)
@@ -76,18 +91,18 @@ impl Backend for BindingBackend {
 
         let combined = [public_inputs, proof].concat();
 
-        let verified = match oracle_hash_keccak {
-            false => unsafe {
-                bb_rs::barretenberg_api::acir::acir_verify_ultra_honk(&combined, key)
-            },
-            true => unsafe {
-                bb_rs::barretenberg_api::acir::acir_verify_ultra_keccak_zk_honk(&combined, key)
-            },
+        let verified = if oracle_hash_keccak {
+            unsafe {
+                bb_rs::barretenberg_api::acir::acir_verify_ultra_keccak_honk(&combined, key)
+            }
+        } else {
+            unsafe { bb_rs::barretenberg_api::acir::acir_verify_ultra_honk(&combined, key) }
         };
 
-        match verified {
-            true => Ok(()),
-            false => Err("Proof verification failed".to_owned().into()),
+        if verified {
+            Ok(())
+        } else {
+            Err("Proof verification failed".to_owned().into())
         }
     }
 }

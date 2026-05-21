@@ -8,13 +8,13 @@ pub fn prove<B: Backend>(
     key: &[u8],
     inputs_map: &InputMap,
     oracle_hash_keccak: bool,
+    recursive: bool,
 ) -> Result<Vec<u8>> {
     let results = execute_program_and_decode(compiled_program, inputs_map, false)?;
 
     let witness = bincode::serialize(&results.witness_stack)?;
 
-    B::prove(program, key, &witness, oracle_hash_keccak)
-    // Ok(proof)
+    B::prove(program, key, &witness, oracle_hash_keccak, recursive)
 }
 
 // pub fn prove_witness(

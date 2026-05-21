@@ -49,7 +49,7 @@ impl Prove for AggUtxo {
         // );
 
         let proof_bytes =
-            prove::<DefaultBackend>(&PROGRAM_COMPILED, PROGRAM.as_bytes(), KEY, &inputs, false)?;
+            prove::<DefaultBackend>(&PROGRAM_COMPILED, PROGRAM.as_bytes(), KEY, &inputs, false, false)?;
 
         // Slice the first 8, 32 byte chunks as the public inputs
         let public_inputs = proof_bytes[..AGG_UTXO_PUBLIC_INPUTS_COUNT * 32].to_vec();
