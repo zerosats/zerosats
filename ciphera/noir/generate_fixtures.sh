@@ -2,7 +2,6 @@
 
 set -euo pipefail
 
-# Compile the program
 NARGO=${NARGO:-nargo}
 
 # Detect repo root: in Docker, ciphera/ contents are at the git root.
@@ -18,38 +17,15 @@ else
 fi
 BACKEND=${BACKEND:-bb}
 
-# Clean target
+# Clean target so every artifact in this run is fresh.
 rm -rf "$REPO_ROOT/noir/target"
 
-# Compile the program
-$NARGO compile --workspace
+mkdir -p "$REPO_ROOT/fixtures/programs"
+mkdir -p "$REPO_ROOT/fixtures/keys"
 
-# Create the fixtures directory if it doesn't exist
-mkdir -p $REPO_ROOT/fixtures/programs
-
-# Copy the compiled programs to the fixtures directory
-cp -r $REPO_ROOT/noir/target/* $REPO_ROOT/fixtures/programs/
-
-# Create the keys directory if it doesn't exist
-mkdir -p $REPO_ROOT/fixtures/keys
-
-# Get all program names from the workspace - the ordering of these is important,
-# as the hash from utxo is used in agg_utxo, and agg_utxo used in agg_agg
-PROGRAMS=("signature" "signature32" "signature32sha" "utxo" "agg_utxo" "agg_agg") # "migrate")
-
-# Define which programs should use the recursive flag
-RECURSIVE_PROGRAMS=("agg_agg" "agg_utxo" "utxo")
-
-# Function to check if a program should use recursive flag
-is_recursive() {
-  local program_name="$1"
-  for p in "${RECURSIVE_PROGRAMS[@]}"; do
-    if [[ "$p" == "$program_name" ]]; then
-      return 0  # True in bash
-    fi
-  done
-  return 1  # False in bash
-}
+# ----------------------------------------------------------------------
+# Helpers
+# ----------------------------------------------------------------------
 
 # Replace a Noir global Field constant's value in-place.
 # Usage: update_noir_hash <file> <global_name> <new_value>
@@ -59,76 +35,129 @@ update_noir_hash() {
 }
 
 # Extract the u256 decimal hash from vk_hash output.
-extract_u256() {
-  awk '/^u256:/ { print $2 }'
-}
+extract_u256() { awk '/^u256:/ { print $2 }'; }
 
 # Extract the hex hash from vk_hash output.
-extract_hex() {
-  awk '/^hex:/ { print $2 }'
+extract_hex() { awk '/^hex:/ { print $2 }'; }
+
+# Compile a single Noir package and copy the resulting artifact into the
+# fixtures/programs directory.
+compile_package() {
+  local name="$1"
+  echo "================"
+  echo "COMPILE $name"
+  echo "================"
+  $NARGO compile --package "$name"
+  cp "$REPO_ROOT/noir/target/${name}.json" "$REPO_ROOT/fixtures/programs/${name}.json"
 }
 
-# Generate verification keys for each program
-for NAME in "${PROGRAMS[@]}"; do
-  oracle_hash_args=()
-  if [ "$NAME" == "agg_agg" ]; then
-    oracle_hash_args=("--oracle_hash" "keccak")
-  fi
-
+# Generate the verification key for a compiled package and rename it to
+# the canonical `<name>_key` filename. Extra arguments are forwarded to
+# `bb write_vk` (e.g. `--oracle_hash keccak` for the on-chain proof).
+write_vk_for() {
+  local name="$1"; shift
   echo "================"
-  echo "$(echo "$NAME" | tr '[:lower:]' '[:upper:]')"
+  echo "WRITE_VK $name"
   echo "================"
+  $BACKEND write_vk --verifier_type standalone "$@" --scheme ultra_honk \
+    -b "$REPO_ROOT/fixtures/programs/${name}.json" \
+    -o "$REPO_ROOT/fixtures/keys/"
+  mv "$REPO_ROOT/fixtures/keys/vk" "$REPO_ROOT/fixtures/keys/${name}_key"
+  rm "$REPO_ROOT/fixtures/keys/vk_hash"
+}
 
-  verifier_type_args=("--verifier_type" "standalone")
-  echo "Generating verification key for $NAME (--verifier_type standalone)..."
-  $BACKEND write_vk "${verifier_type_args[@]}" ${oracle_hash_args[@]} --scheme ultra_honk -b $REPO_ROOT/fixtures/programs/${NAME}.json -o $REPO_ROOT/fixtures/keys/ \
-    && mv $REPO_ROOT/fixtures/keys/{vk,${NAME}_key} \
-    && rm $REPO_ROOT/fixtures/keys/vk_hash
+# Compute the u256 + hex hash of a verification key.
+vk_hash_for() {
+  local name="$1"
+  (cd "$REPO_ROOT" && cargo run --quiet --bin vk_hash -- \
+    "$REPO_ROOT/fixtures/keys/${name}_key")
+}
 
-  # Print verification key hash as u256 and hex
-  echo "Verification key hash for $NAME:"
-  VK_HASH_OUTPUT=$(cd $REPO_ROOT && cargo run --bin vk_hash -- $REPO_ROOT/fixtures/keys/${NAME}_key)
-  echo "$VK_HASH_OUTPUT" | sed 's/^/  /'
-  echo ""
+# ----------------------------------------------------------------------
+# Stage 1 — leaf circuits and the inner-most recursion target (utxo).
+#
+# None of these source files contain a propagated VK-hash constant, so
+# they can all be compiled before any hash is known.
+# ----------------------------------------------------------------------
 
-  # Update agg_utxo/src/main.nr with the UTXO verification key hash
-  if [ "$NAME" == "utxo" ]; then
-    UTXO_VK_HASH=$(echo "$VK_HASH_OUTPUT" | extract_u256)
-    echo "Updating agg_utxo/src/main.nr with UTXO verification key hash: $UTXO_VK_HASH"
-    update_noir_hash $REPO_ROOT/noir/agg_utxo/src/main.nr UTXO_VERIFICATION_KEY_HASH "$UTXO_VK_HASH"
-  fi
+LEAF_PROGRAMS=("signature" "signature32" "signature32sha" "utxo")
+for name in "${LEAF_PROGRAMS[@]}"; do
+  compile_package "$name"
+  write_vk_for "$name"
+done
 
-  # Update agg_agg/src/main.nr with the agg_utxo verification key hash
-  if [ "$NAME" == "agg_utxo" ]; then
-    AGG_UTXO_VK_HASH=$(echo "$VK_HASH_OUTPUT" | extract_u256)
-    echo "Updating agg_agg/src/main.nr with agg_utxo verification key hash: $AGG_UTXO_VK_HASH"
-    update_noir_hash $REPO_ROOT/noir/agg_agg/src/main.nr AGG_UTXO_VERIFICATION_KEY_HASH "$AGG_UTXO_VK_HASH"
-  fi
+# ----------------------------------------------------------------------
+# Stage 2 — propagate utxo's VK hash into agg_utxo's source BEFORE
+# compiling agg_utxo. Doing this in the old order meant agg_utxo.json
+# was always one run behind on UTXO_VERIFICATION_KEY_HASH.
+# ----------------------------------------------------------------------
 
-  if [ "$NAME" == "agg_agg" ]; then
-    AGG_AGG_VK_HASH=$(echo "$VK_HASH_OUTPUT" | extract_u256)
-    AGG_AGG_VK_HASH_HEX=$(echo "$VK_HASH_OUTPUT" | extract_hex)
-    echo "Updating citrea/scripts/deploy.ts with agg_agg verification key hash (hex): $AGG_AGG_VK_HASH_HEX"
-    echo "Updating pkg/contracts/src/rollup.rs with agg_agg verification key hash (hex): $AGG_AGG_VK_HASH_HEX"
+UTXO_VK_OUT=$(vk_hash_for utxo)
+echo "Verification key hash for utxo:"
+echo "$UTXO_VK_OUT" | sed 's/^/  /'
+UTXO_VK_HASH=$(echo "$UTXO_VK_OUT" | extract_u256)
+echo "Updating noir/agg_utxo/src/main.nr UTXO_VERIFICATION_KEY_HASH=$UTXO_VK_HASH"
+update_noir_hash "$REPO_ROOT/noir/agg_utxo/src/main.nr" \
+  UTXO_VERIFICATION_KEY_HASH "$UTXO_VK_HASH"
 
-    perl -i -pe "s/(?<=const AGG_AGG_VERIFICATION_KEY_HASH = \")[^\"]*(?=\";)/${AGG_AGG_VK_HASH_HEX}/" $REPO_ROOT/citrea/scripts/deploy.ts
-    perl -i -pe "s/(?<=AGG_AGG_VERIFICATION_KEY_HASH: &str = \")[^\"]*(?=\";)/${AGG_AGG_VK_HASH_HEX}/" $REPO_ROOT/pkg/contracts/src/rollup.rs
+compile_package agg_utxo
+write_vk_for agg_utxo
 
-    $BACKEND write_solidity_verifier --scheme ultra_honk -k $REPO_ROOT/fixtures/keys/${NAME}_key -o $REPO_ROOT/citrea/noir/${NAME}.sol
-    if [[ "$(uname)" == "Darwin" ]]; then
-      SOLC=$REPO_ROOT/fixtures/binaries/solc-v0.8.29-macos
-    else
-      SOLC=$REPO_ROOT/fixtures/binaries/solc-v0.8.29-linux
-    fi
+# ----------------------------------------------------------------------
+# Stage 3 — propagate agg_utxo's VK hash into agg_agg's source BEFORE
+# compiling agg_agg.
+# ----------------------------------------------------------------------
 
+AGG_UTXO_VK_OUT=$(vk_hash_for agg_utxo)
+echo "Verification key hash for agg_utxo:"
+echo "$AGG_UTXO_VK_OUT" | sed 's/^/  /'
+AGG_UTXO_VK_HASH=$(echo "$AGG_UTXO_VK_OUT" | extract_u256)
+echo "Updating noir/agg_agg/src/main.nr AGG_UTXO_VERIFICATION_KEY_HASH=$AGG_UTXO_VK_HASH"
+update_noir_hash "$REPO_ROOT/noir/agg_agg/src/main.nr" \
+  AGG_UTXO_VERIFICATION_KEY_HASH "$AGG_UTXO_VK_HASH"
 
-    SOLC_INPUT=$(mktemp)
-    cat <<EOF > "$SOLC_INPUT"
+compile_package agg_agg
+# agg_agg is verified on-chain by Solidity, so use the keccak oracle.
+write_vk_for agg_agg --oracle_hash keccak
+
+# ----------------------------------------------------------------------
+# Stage 4 — propagate agg_agg's VK hash into the Rust + TypeScript
+# consumers, then build the Solidity verifier.
+# ----------------------------------------------------------------------
+
+AGG_AGG_VK_OUT=$(vk_hash_for agg_agg)
+echo "Verification key hash for agg_agg:"
+echo "$AGG_AGG_VK_OUT" | sed 's/^/  /'
+AGG_AGG_VK_HASH_HEX=$(echo "$AGG_AGG_VK_OUT" | extract_hex)
+
+echo "Updating citrea/scripts/deploy.ts AGG_AGG_VERIFICATION_KEY_HASH=$AGG_AGG_VK_HASH_HEX"
+echo "Updating pkg/contracts/src/rollup.rs AGG_AGG_VERIFICATION_KEY_HASH=$AGG_AGG_VK_HASH_HEX"
+
+perl -i -pe "s/(?<=const AGG_AGG_VERIFICATION_KEY_HASH = \")[^\"]*(?=\";)/${AGG_AGG_VK_HASH_HEX}/" \
+  "$REPO_ROOT/citrea/scripts/deploy.ts"
+perl -i -pe "s/(?<=AGG_AGG_VERIFICATION_KEY_HASH: &str = \")[^\"]*(?=\";)/${AGG_AGG_VK_HASH_HEX}/" \
+  "$REPO_ROOT/pkg/contracts/src/rollup.rs"
+
+$BACKEND write_solidity_verifier --scheme ultra_honk \
+  -k "$REPO_ROOT/fixtures/keys/agg_agg_key" \
+  -o "$REPO_ROOT/citrea/noir/agg_agg.sol"
+
+if [[ "$(uname)" == "Darwin" ]]; then
+  SOLC="$REPO_ROOT/fixtures/binaries/solc-v0.8.29-macos"
+else
+  SOLC="$REPO_ROOT/fixtures/binaries/solc-v0.8.29-linux"
+fi
+
+SOLC_INPUT=$(mktemp)
+SOLC_OUTPUT=$(mktemp)
+trap 'rm -f "$SOLC_INPUT" "$SOLC_OUTPUT"' EXIT
+
+cat <<EOF > "$SOLC_INPUT"
 {
   "language": "Solidity",
   "sources": {
     "agg_agg.sol": {
-      "urls": ["citrea/noir/$NAME.sol"]
+      "urls": ["citrea/noir/agg_agg.sol"]
     }
   },
   "settings": {
@@ -144,34 +173,29 @@ for NAME in "${PROGRAMS[@]}"; do
 }
 EOF
 
-    SOLC_OUTPUT=$(mktemp)
-    (cd "$REPO_ROOT" && $SOLC --standard-json "$SOLC_INPUT") > "$SOLC_OUTPUT"
+(cd "$REPO_ROOT" && $SOLC --standard-json "$SOLC_INPUT") > "$SOLC_OUTPUT"
 
-    SOURCE_KEY=$(jq -r '.contracts | keys[0]' "$SOLC_OUTPUT")
-    if [[ "$SOURCE_KEY" == "null" ]]; then
-      echo "Failed to determine source key from solc output" >&2
-      exit 1
-    fi
+SOURCE_KEY=$(jq -r '.contracts | keys[0]' "$SOLC_OUTPUT")
+if [[ "$SOURCE_KEY" == "null" ]]; then
+  echo "Failed to determine source key from solc output" >&2
+  exit 1
+fi
 
-    HONK_BYTECODE=$(jq -r ".contracts[\"$SOURCE_KEY\"][\"HonkVerifier\"].evm.bytecode.object" "$SOLC_OUTPUT")
-    if [[ "$HONK_BYTECODE" == "null" || -z "$HONK_BYTECODE" ]]; then
-      echo "Failed to extract HonkVerifier bytecode from solc output" >&2
-      exit 1
-    fi
-    printf '%s' "$HONK_BYTECODE" > "$REPO_ROOT/citrea/contracts/noir/${NAME}_HonkVerifier.bin"
+HONK_BYTECODE=$(jq -r ".contracts[\"$SOURCE_KEY\"][\"HonkVerifier\"].evm.bytecode.object" "$SOLC_OUTPUT")
+if [[ "$HONK_BYTECODE" == "null" || -z "$HONK_BYTECODE" ]]; then
+  echo "Failed to extract HonkVerifier bytecode from solc output" >&2
+  exit 1
+fi
+printf '%s' "$HONK_BYTECODE" > "$REPO_ROOT/citrea/contracts/noir/agg_agg_HonkVerifier.bin"
 
-    LIB_BYTECODE=$(jq -r ".contracts[\"$SOURCE_KEY\"][\"ZKTranscriptLib\"].evm.bytecode.object" "$SOLC_OUTPUT")
-    if [[ "$LIB_BYTECODE" == "null" || -z "$LIB_BYTECODE" ]]; then
-      echo "Failed to extract ZKTranscriptLib bytecode from solc output" >&2
-      exit 1
-    fi
-    printf '%s' "$LIB_BYTECODE" > "$REPO_ROOT/citrea/contracts/noir/${NAME}_ZKTranscriptLib.bin"
+LIB_BYTECODE=$(jq -r ".contracts[\"$SOURCE_KEY\"][\"ZKTranscriptLib\"].evm.bytecode.object" "$SOLC_OUTPUT")
+if [[ "$LIB_BYTECODE" == "null" || -z "$LIB_BYTECODE" ]]; then
+  echo "Failed to extract ZKTranscriptLib bytecode from solc output" >&2
+  exit 1
+fi
+printf '%s' "$LIB_BYTECODE" > "$REPO_ROOT/citrea/contracts/noir/agg_agg_ZKTranscriptLib.bin"
 
-    jq ".contracts[\"$SOURCE_KEY\"][\"HonkVerifier\"].evm.bytecode.linkReferences" "$SOLC_OUTPUT" > "$REPO_ROOT/citrea/contracts/noir/${NAME}_HonkVerifier.linkrefs.json"
+jq ".contracts[\"$SOURCE_KEY\"][\"HonkVerifier\"].evm.bytecode.linkReferences" "$SOLC_OUTPUT" \
+  > "$REPO_ROOT/citrea/contracts/noir/agg_agg_HonkVerifier.linkrefs.json"
 
-    rm "$SOLC_INPUT" "$SOLC_OUTPUT"
-  fi
-
-done
-
-echo "Successfully copied compiled programs to fixtures/keys/programs"
+echo "Successfully generated programs, keys, and Solidity verifier"
