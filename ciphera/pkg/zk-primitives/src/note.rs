@@ -54,6 +54,25 @@ impl Note {
         }
     }
 
+    /// Create a new note with a custom `note_kind` and PSI. Use for non-USDC
+    /// kinds (5/6/7/8 spend paths, or anything else that doesn't sit on the
+    /// default bridged-polygon-USDC kind).
+    #[must_use]
+    pub fn new_with_note_kind(
+        address: Element,
+        value: Element,
+        psi: Element,
+        note_kind: Element,
+    ) -> Self {
+        Self {
+            utxo_kind: Element::new(2),
+            note_kind,
+            address,
+            psi,
+            value,
+        }
+    }
+
     /// New note from ephemeral private key (only use private key once)
     #[must_use]
     pub fn new_from_ephemeral_private_key(private_key: Element, value: Element) -> Self {

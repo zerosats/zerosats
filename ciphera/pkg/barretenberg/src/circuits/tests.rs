@@ -4,8 +4,7 @@ use std::io::Write;
 use std::str::FromStr;
 use zk_primitives::{
     AggAgg, AggUtxo, InputNote, MerklePath, Note, TimeLock, TimeProof, ToBytes, Utxo, UtxoKind,
-    UtxoProof, UtxoProofBundleWithMerkleProofs, bridged_polygon_usdc_note_kind,
-    get_address_for_private_key,
+    UtxoProof, UtxoProofBundleWithMerkleProofs, get_address_for_private_key,
 };
 
 use crate::{Prove, Result, Verify};
@@ -17,17 +16,11 @@ pub fn get_keypair(key: u64) -> (Element, Element) {
 }
 
 pub fn send_note(value: u64, address: Element, psi: Element) -> Note {
-    note(value, address, psi, bridged_polygon_usdc_note_kind())
+    Note::new_with_psi(address, Element::new(value), psi)
 }
 
 pub fn note(value: u64, address: Element, psi: Element, note_kind: Element) -> Note {
-    Note {
-        utxo_kind: Element::new(2),
-        value: Element::new(value),
-        address,
-        note_kind,
-        psi,
-    }
+    Note::new_with_note_kind(address, Element::new(value), psi, note_kind)
 }
 
 pub fn compress_proof(proof: &impl ToBytes) -> Vec<u8> {
@@ -76,27 +69,16 @@ pub fn prove_and_verify<P: Prove>(proof_input: &P) -> Result<P::Proof> {
 fn test_utxo() {
     let (secret_key, address) = get_keypair(101);
 
-    let input_note1 = InputNote {
-        note: send_note(50, address, Element::new(1)),
-        secret_key,
-        ..InputNote::default()
-    };
-
-    let input_note2 = InputNote {
-        note: send_note(30, address , Element::new(2)),
-        secret_key,
-        ..InputNote::default()
-    };
+    let input_note1 = InputNote::new(send_note(50, address, Element::new(1)), secret_key);
+    let input_note2 = InputNote::new(send_note(30, address, Element::new(2)), secret_key);
 
     let output_note1 = send_note(40, address, Element::new(3));
     let output_note2 = send_note(40, address, Element::new(4));
 
-    let utxo = Utxo {
-        input_notes: [input_note1, input_note2],
-        output_notes: [output_note1, output_note2],
-        kind: UtxoKind::Send,
-        burn_address: None,
-    };
+    let utxo = Utxo::new_send(
+        [input_note1, input_note2],
+        [output_note1, output_note2],
+    );
 
     prove_and_verify(&utxo).unwrap();
 }

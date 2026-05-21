@@ -89,15 +89,86 @@ pub struct InputNote {
 }
 
 impl InputNote {
-    /// Create a new input note for the standard Poseidon-key ownership path.
-    /// `preimage` and `time_proof` default to zero -- callers that need them
-    /// (kinds 5/6/7/8) should construct `InputNote` directly.
+    /// Create a new input note for the standard Poseidon-key ownership path
+    /// (`spend_type == 0`, kinds 1..=4 with an inactive timelock).
     #[must_use]
     pub fn new(note: Note, secret_key: Element) -> Self {
         Self {
             note,
             secret_key,
             ..Self::default()
+        }
+    }
+
+    /// Input note for the signature32 spend path (`spend_type == 1`, note
+    /// kind 5). The 32-byte preimage proves ownership; `secret_key` and
+    /// `time_proof` are not consulted by the circuit on this path.
+    #[must_use]
+    pub fn new_signature32(note: Note, preimage: [u8; 32]) -> Self {
+        Self {
+            note,
+            spend_type: 1,
+            secret_key: Element::ZERO,
+            preimage,
+            time_proof: TimeProof::default(),
+        }
+    }
+
+    /// Input note for the signature32sha spend path (`spend_type == 2`,
+    /// note kind 6). The SHA-256 preimage proves ownership.
+    #[must_use]
+    pub fn new_signature32sha(note: Note, preimage: [u8; 32]) -> Self {
+        Self {
+            note,
+            spend_type: 2,
+            secret_key: Element::ZERO,
+            preimage,
+            time_proof: TimeProof::default(),
+        }
+    }
+
+    /// Input note for the Poseidon-key path under an active timelock
+    /// (`spend_type == 0`, kinds 1..=4 with a non-zero `lock.zero_block`).
+    /// The PoW chain in `time_proof` must extend `lock.zero_block` by
+    /// `lock.n_blocks` blocks; `note.psi` must equal
+    /// `Poseidon(get_address_for_private_key(secret_key), lock.commitment())`.
+    #[must_use]
+    pub fn new_timelocked(note: Note, secret_key: Element, time_proof: TimeProof) -> Self {
+        Self {
+            note,
+            spend_type: 0,
+            secret_key,
+            preimage: [0u8; 32],
+            time_proof,
+        }
+    }
+
+    /// Input note for the HTLC hash-claim branch (`spend_type == 3`,
+    /// note kind 8, non-zero `preimage`). The SHA-256 preimage hashes to
+    /// `note.address`.
+    #[must_use]
+    pub fn new_htlc_claim(note: Note, preimage: [u8; 32]) -> Self {
+        Self {
+            note,
+            spend_type: 3,
+            secret_key: Element::ZERO,
+            preimage,
+            time_proof: TimeProof::default(),
+        }
+    }
+
+    /// Input note for the HTLC refund branch (`spend_type == 3`,
+    /// note kind 8, zero `preimage`). The PoW chain in `time_proof` must
+    /// extend `lock.zero_block`; `note.psi` must equal
+    /// `Poseidon(get_address_for_private_key(secret_key), lock.commitment())`.
+    #[must_use]
+    pub fn new_htlc_refund(note: Note, secret_key: Element, time_proof: TimeProof) -> Self {
+        Self {
+            note,
+            spend_type: 3,
+            secret_key,
+            preimage: [0u8; 32],
+            time_proof,
         }
     }
 
