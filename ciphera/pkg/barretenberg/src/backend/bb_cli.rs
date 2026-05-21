@@ -70,10 +70,8 @@ fn get_bb_path() -> Result<PathBuf> {
 impl Backend for CliBackend {
     fn prove(
         program: &[u8],
-        _bytecode: &[u8],
         key: &[u8],
         witness: &[u8],
-        recursive: bool,
         oracle_hash_keccak: bool,
     ) -> Result<Vec<u8>> {
         let mut witness_gz = GzEncoder::new(witness, Compression::none());
@@ -110,12 +108,6 @@ impl Backend for CliBackend {
             .arg("-o")
             .arg(output_dir.path());
 
-        if recursive {
-            cmd.arg("--honk_recursion")
-                .arg("1")
-                .arg("--init_kzg_accumulator");
-        }
-
         if oracle_hash_keccak {
             cmd.arg("--oracle_hash").arg("keccak");
         }
@@ -137,18 +129,22 @@ impl Backend for CliBackend {
         Ok(proof)
     }
 
-    fn verify(proof: &[u8], key: &[u8], oracle_hash_keccak: bool) -> Result<()> {
+    fn verify(
+        public_inputs: &[u8],
+        proof: &[u8],
+        key: &[u8],
+        oracle_hash_keccak: bool,
+    ) -> Result<()> {
         let mut key_file = NamedTempFile::new()?;
         key_file.write_all(key)?;
         key_file.flush()?;
 
-        let public_inputs_len = proof.len() - 508 * 32;
         let mut proof_file = NamedTempFile::new()?;
-        proof_file.write_all(&proof[public_inputs_len..])?;
+        proof_file.write_all(proof)?;
         proof_file.flush()?;
 
         let mut public_inputs_file = NamedTempFile::new()?;
-        public_inputs_file.write_all(&proof[..public_inputs_len])?;
+        public_inputs_file.write_all(public_inputs)?;
         public_inputs_file.flush()?;
 
         let bb_path = get_bb_path()?;

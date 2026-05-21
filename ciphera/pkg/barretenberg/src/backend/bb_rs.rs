@@ -10,6 +10,7 @@ lazy_static! {
     static ref BB_MUTEX: Mutex<()> = Mutex::new(());
 }
 
+#[cfg(not(feature = "bb_utxo"))]
 const G2: [u8; 128] = [
     0x01, 0x18, 0xC4, 0xD5, 0xB8, 0x37, 0xBC, 0xC2, 0xBC, 0x89, 0xB5, 0xB3, 0x98, 0xB5, 0x97, 0x4E,
     0x9F, 0x59, 0x44, 0x07, 0x3B, 0x32, 0x07, 0x8B, 0x7E, 0x23, 0x1F, 0xEC, 0x93, 0x88, 0x83, 0xB0,
@@ -34,18 +35,19 @@ lazy_static! {
 impl BindingBackend {
     fn load_srs() {
         INIT.call_once(|| unsafe {
+	    #[cfg(not(feature = "bb_utxo"))]
             bb_rs::barretenberg_api::srs::init_srs(&G1, (G1.len() / 64) as u32, &G2);
-        });
+            #[cfg(feature = "bb_utxo")]  
+            bb_rs::barretenberg_api::srs::init_srs(&G1, (G1.len() / 64) as u32);
+	});
     }
 }
 
 impl Backend for BindingBackend {
     fn prove(
-        _program: &[u8],
-        bytecode: &[u8],
+        program: &[u8],
         key: &[u8],
         witness: &[u8],
-        _recursive: bool,
         oracle_hash_keccak: bool,
     ) -> Result<Vec<u8>> {
         let _guard = BB_MUTEX.lock().unwrap();
@@ -54,11 +56,11 @@ impl Backend for BindingBackend {
 
         let proof = match oracle_hash_keccak {
             false => unsafe {
-                bb_rs::barretenberg_api::acir::acir_prove_ultra_honk(bytecode, witness, key)
+                bb_rs::barretenberg_api::acir::acir_prove_ultra_honk(program, witness, key)
             },
             true => unsafe {
                 bb_rs::barretenberg_api::acir::acir_prove_ultra_keccak_zk_honk(
-                    bytecode, witness, key,
+                    program, witness, key,
                 )
             },
         };
@@ -66,15 +68,24 @@ impl Backend for BindingBackend {
         Ok(proof)
     }
 
-    fn verify(proof: &[u8], key: &[u8], oracle_hash_keccak: bool) -> Result<()> {
+    fn verify(
+        public_inputs: &[u8],
+        proof: &[u8],
+        key: &[u8],
+        oracle_hash_keccak: bool,
+    ) -> Result<()> {
         let _guard = BB_MUTEX.lock().unwrap();
 
         Self::load_srs();
 
+        let combined = [public_inputs, proof].concat();
+
         let verified = match oracle_hash_keccak {
-            false => unsafe { bb_rs::barretenberg_api::acir::acir_verify_ultra_honk(proof, key) },
+            false => unsafe {
+                bb_rs::barretenberg_api::acir::acir_verify_ultra_honk(&combined, key)
+            },
             true => unsafe {
-                bb_rs::barretenberg_api::acir::acir_verify_ultra_keccak_zk_honk(proof, key)
+                bb_rs::barretenberg_api::acir::acir_verify_ultra_keccak_zk_honk(&combined, key)
             },
         };
 

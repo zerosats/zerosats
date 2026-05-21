@@ -46,12 +46,12 @@ ts-rs = { version = "^11.0.1", features = ["format", "chrono-impl", "uuid-impl"]
 actix-cors = "0.6.4"
 actix-server = "2.3.0"
 actix-web = "4.4.0"
-acvm = { git = "https://github.com/noir-lang/noir", tag = "v1.0.0-beta.7" }
-noirc_abi = { git = "https://github.com/noir-lang/noir", tag = "v1.0.0-beta.7" }
-noirc_driver = { git = "https://github.com/noir-lang/noir", tag = "v1.0.0-beta.7" }
-noirc_artifacts = { git = "https://github.com/noir-lang/noir", tag = "v1.0.0-beta.7" }
-bn254_blackbox_solver = { git = "https://github.com/noir-lang/noir", tag = "v1.0.0-beta.7" }
-nargo = { git = "https://github.com/noir-lang/noir", tag = "v1.0.0-beta.7" }
+acvm = { git = "https://github.com/noir-lang/noir", tag = "v1.0.0-beta.14" }
+noirc_abi = { git = "https://github.com/noir-lang/noir", tag = "v1.0.0-beta.14" }
+noirc_driver = { git = "https://github.com/noir-lang/noir", tag = "v1.0.0-beta.14" }
+noirc_artifacts = { git = "https://github.com/noir-lang/noir", tag = "v1.0.0-beta.14" }
+bn254_blackbox_solver = { git = "https://github.com/noir-lang/noir", tag = "v1.0.0-beta.14" }
+nargo = { git = "https://github.com/noir-lang/noir", tag = "v1.0.0-beta.14" }
 actix-multipart = "0.5.0"
 aes-gcm = "0.10.3"
 async-stripe = { version = "0.31", features = ["runtime-tokio-hyper"] }
@@ -59,8 +59,7 @@ async-trait = "0.1"
 async-recursion = "1.1.1"
 async-stream = "0.3.6"
 base64 = "0.21.5"
-bb_rs = { git = "https://github.com/polybase/aztec-packages", rev = "1a8f9ee136df2184458667f018b496b57226855f" } # v0.82.2-polybase
-# bb_rs = { path = "/Users/hwq/Documents/polybase/aztec-packages/barretenberg/bb_rs" }
+bb_rs = { package = "polybase_bb_rs", git = "https://github.com/zerosats/aztec-packages", rev = "12bf29794949b87c01346caa10e8b4fe40dbedaf" } # v0.82.2-polybase
 benchy = "0.1.1"
 bitvec = "1.0.1"
 blake2b_simd = "1.0"
@@ -88,7 +87,7 @@ dirs = "5.0.1"
 dotenvy = "0.15.7"
 eth-keystore = "0.5.0"
 ethereum-types = "0.14.1"
-ethnum = "1.5.0"
+ethnum = "1.5.3"
 expect-test = "1.4.1"
 eyre = "0.6"
 ff = "0.12.1"

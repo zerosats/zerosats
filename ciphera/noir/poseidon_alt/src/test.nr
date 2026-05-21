@@ -1,5 +1,5 @@
 use crate::hash_merge;
-use crate::poseidon::{hash_2, hash, permute};
+use crate::poseidon::{hash, hash_2, permute};
 
 #[test]
 fn test_hash_zeros() {

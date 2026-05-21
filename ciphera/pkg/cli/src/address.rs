@@ -35,21 +35,21 @@ pub fn citrea_ticker_from_code(currency: u8) -> String {
     }
 }
 
-pub fn citrea_currency_from_contract(contract: Element) -> u8 {
-    if contract == citrea_wcbtc_note_kind() {
+pub fn citrea_currency_from_contract(note_kind: Element) -> u8 {
+    if note_kind == citrea_wcbtc_note_kind() {
         return 1;
     }
-    if contract == citrea_usdc_note_kind() {
+    if note_kind == citrea_usdc_note_kind() {
         return 2;
     }
     unreachable!("only WCBTC and USDC tokens are supported")
 }
 
-pub fn citrea_ticker_from_contract(contract: Element) -> String {
-    if contract == citrea_wcbtc_note_kind() {
+pub fn citrea_ticker_from_contract(note_kind: Element) -> String {
+    if note_kind == citrea_wcbtc_note_kind() {
         return "WCBTC".to_string();
     }
-    if contract == citrea_usdc_note_kind() {
+    if note_kind == citrea_usdc_note_kind() {
         return "USDC".to_string();
     }
     unreachable!("only WCBTC and USDC tokens are supported")
@@ -66,8 +66,8 @@ impl From<&CipheraAddress> for Note {
         };
 
         Note {
-            kind: Element::new(2),
-            contract,
+            utxo_kind: Element::new(2),
+            note_kind: contract,
             address: value.public_key,
             psi,
             value: value.value,
@@ -79,7 +79,7 @@ impl From<&Note> for CipheraAddress {
     fn from(note: &Note) -> Self {
         Self {
             version: 0,
-            currency: citrea_currency_from_contract(note.contract),
+            currency: citrea_currency_from_contract(note.note_kind),
             public_key: note.address,
             psi: Some(note.psi),
             value: note.value,
@@ -189,8 +189,8 @@ mod tests {
     #[test]
     fn test_roundtrip_from_wcbtc_note() {
         let note = Note {
-            kind: Element::new(2),
-            contract: citrea_wcbtc_note_kind(),
+            utxo_kind: Element::new(2),
+            note_kind: citrea_wcbtc_note_kind(),
             address: hash_merge([Element::new(101), Element::ZERO]),
             psi: Element::ZERO,
             value: Element::new(1),
@@ -209,8 +209,8 @@ mod tests {
         println!("decoded: {decoded_note:?}");
 
         // Verify
-        assert_eq!(decoded_note.kind, note.kind);
-        assert_eq!(decoded_note.contract, note.contract);
+        assert_eq!(decoded_note.utxo_kind, note.utxo_kind);
+        assert_eq!(decoded_note.note_kind, note.note_kind);
         assert_eq!(decoded_note.value, note.value);
         assert_eq!(decoded_note.address, note.address);
         assert_eq!(decoded_note.psi, note.psi);
@@ -219,8 +219,8 @@ mod tests {
     #[test]
     fn test_roundtrip_from_usdc_note() {
         let note = Note {
-            kind: Element::new(2),
-            contract: citrea_usdc_note_kind(),
+            utxo_kind: Element::new(2),
+            note_kind: citrea_usdc_note_kind(),
             address: hash_merge([Element::new(101), Element::ZERO]),
             psi: Element::ZERO,
             value: Element::new(1),
@@ -239,8 +239,8 @@ mod tests {
         println!("decoded: {decoded_note:?}");
 
         // Verify
-        assert_eq!(decoded_note.kind, note.kind);
-        assert_eq!(decoded_note.contract, note.contract);
+        assert_eq!(decoded_note.utxo_kind, note.utxo_kind);
+        assert_eq!(decoded_note.note_kind, note.note_kind);
         assert_eq!(decoded_note.value, note.value);
         assert_eq!(decoded_note.address, note.address);
         assert_eq!(decoded_note.psi, note.psi);

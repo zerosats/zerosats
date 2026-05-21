@@ -241,8 +241,8 @@ async fn mint_and_transfer_alice_to_bob() {
     let bob_pk = Element::new(0xB0B);
     let bob_address = hash_merge([bob_pk, Element::ZERO]);
     let bob_note = Note {
-        kind: Element::new(2),
-        contract: bridged_polygon_usdc_note_kind(),
+        utxo_kind: Element::new(2),
+        note_kind: bridged_polygon_usdc_note_kind(),
         address: bob_address,
         psi: Element::new(0),
         value: Element::new(100),
@@ -647,9 +647,19 @@ async fn substitute_burn_to_address() {
 
     let wallet_address = rollup.signer_address;
 
+    // The claimer is not exercised by this test path; load a placeholder Claimer
+    // contract pointing at the rollup proxy address so the type checks.
+    let claimer = Client::new(&eth_node.rpc_url(), None)
+        .load_contract_from_str(
+            &hex::encode(rollup.address().as_bytes()),
+            include_str!("../../../burn-substitutor/abi/Claimer.sol/Claimer.json"),
+        )
+        .unwrap();
+
     let mut burn_substitutor = BurnSubstitutor::new(
         rollup.clone(),
         erc20.clone(),
+        claimer,
         server
             .base_url()
             .to_string()

@@ -223,8 +223,8 @@ impl Wallet {
         let self_address = hash_merge([pk, Element::ZERO]);
         InputNote::new(
             Note {
-                kind: origin_note.kind,
-                contract: origin_note.contract,
+                utxo_kind: origin_note.utxo_kind,
+                note_kind: origin_note.note_kind,
                 address: self_address,
                 psi: hash_merge([pk, pk]),
                 //psi: Element::secure_random(rand::thread_rng()),
@@ -351,7 +351,7 @@ impl Wallet {
     }
 
     fn spend_to(&mut self, note: &Note) -> Result<Utxo, WalletError> {
-        let ticker = citrea_ticker_from_contract(note.contract);
+        let ticker = citrea_ticker_from_contract(note.note_kind);
         let amount = self.get_note_amount(note)?;
 
         if amount > self.balance {
@@ -372,7 +372,7 @@ impl Wallet {
     }
 
     fn receive(&mut self, input_note: &InputNote) -> Result<Utxo, WalletError> {
-        let ticker = citrea_ticker_from_contract(input_note.note.contract);
+        let ticker = citrea_ticker_from_contract(input_note.note.note_kind);
         let amount = self.get_note_amount(&input_note.note)?;
         let received_note: InputNote = self.receive_note(amount, &ticker);
 
@@ -411,7 +411,7 @@ impl Wallet {
         evm_address: &Element,
         natively_substitute: bool,
     ) -> Result<Utxo, WalletError> {
-        let ticker = citrea_ticker_from_contract(burner_note.note.contract);
+        let ticker = citrea_ticker_from_contract(burner_note.note.note_kind);
 
         let b = self.pull_from_avail(&ticker, burner_note.to_owned())?;
         debug!(balance = b, "pulled first input note");
@@ -442,11 +442,11 @@ impl Wallet {
         let pk = self.gen_pk();
         let self_address = hash_merge([pk, Element::ZERO]);
 
-        let (kind, contract) = citrea_token_data(ticker);
+        let (utxo_kind, note_kind) = citrea_token_data(ticker);
 
         let note = Note {
-            kind,
-            contract,
+            utxo_kind,
+            note_kind,
             address: self_address,
             psi: hash_merge([pk, pk]),
             //psi: Element::secure_random(rand::thread_rng()),
@@ -493,7 +493,7 @@ impl Wallet {
     /// available notes. Use this when you already hold the `InputNote` value
     /// (e.g. a self-send burner note) rather than searching `pending` by address.
     fn add_to_avail(&mut self, input_note: InputNote) -> Result<(), WalletError> {
-        let ticker = citrea_ticker_from_contract(input_note.note.contract);
+        let ticker = citrea_ticker_from_contract(input_note.note.note_kind);
         self.push_to_avail(&ticker, input_note).map(|_| ())
     }
 
@@ -505,11 +505,11 @@ impl Wallet {
         let pk = self.gen_pk();
         let psi = self.gen_pk();
         let address = hash_merge([pk, Element::ZERO]);
-        let (kind, contract) = citrea_token_data(ticker);
+        let (utxo_kind, note_kind) = citrea_token_data(ticker);
 
         let note = Note {
-            kind,
-            contract,
+            utxo_kind,
+            note_kind,
             address,
             psi,
             value: Element::new(amount),
@@ -549,7 +549,7 @@ impl Wallet {
                     }
 
                     for n in new_notes {
-                        let ticker = citrea_ticker_from_contract(n.note.contract);
+                        let ticker = citrea_ticker_from_contract(n.note.note_kind);
                         let b = self.push_to_avail(&ticker, n.clone())?;
                         debug!(balance = b, "added note");
                     }
@@ -587,11 +587,11 @@ mod wallet_tests {
     }
 
     fn create_note_and_encode_address(amount: u64) -> String {
-        let (kind, contract) = citrea_token_data("WCBTC");
+        let (utxo_kind, note_kind) = citrea_token_data("WCBTC");
 
         let note = Note {
-            kind,
-            contract,
+            utxo_kind,
+            note_kind,
             address: hash_merge([Element::new(101), Element::ZERO]),
             psi: Element::ZERO,
             value: Element::new(amount),
@@ -604,8 +604,8 @@ mod wallet_tests {
 
     fn create_input_note(amount: u64) -> InputNote {
         let note = Note {
-            kind: Element::new(2),
-            contract: Element::ZERO,
+            utxo_kind: Element::new(2),
+            note_kind: Element::ZERO,
             address: Element::ZERO,
             psi: Element::ZERO,
             value: Element::from(amount),
@@ -1228,13 +1228,13 @@ mod wallet_tests {
 
     /// InputNote with a real WCBTC contract so `citrea_ticker_from_contract` resolves.
     fn create_wcbtc_input_note_with_contract(amount: u64) -> InputNote {
-        let (kind, contract) = citrea_token_data("WCBTC");
+        let (utxo_kind, note_kind) = citrea_token_data("WCBTC");
         let pk = Element::from(99999u64);
         let address = hash_merge([pk, Element::ZERO]);
         InputNote::new(
             Note {
-                kind,
-                contract,
+                utxo_kind,
+                note_kind,
                 address,
                 psi: hash_merge([pk, pk]),
                 value: Element::from(amount),
@@ -1265,11 +1265,11 @@ mod wallet_tests {
     /// so callers can compute its commitment for sync tests.
     fn add_pending_note(wallet: &mut Wallet, amount: u64) -> Note {
         let pk = Element::from(12345u64);
-        let (kind, contract) = citrea_token_data("WCBTC");
+        let (utxo_kind, note_kind) = citrea_token_data("WCBTC");
         let address = hash_merge([pk, Element::ZERO]);
         let note = Note {
-            kind,
-            contract,
+            utxo_kind,
+            note_kind,
             address,
             psi: hash_merge([pk, pk]),
             value: Element::from(amount),
@@ -1286,10 +1286,10 @@ mod wallet_tests {
     /// `import_note` can find and claim it by matching the address.
     fn make_importable_note(wallet: &mut Wallet, amount: u64) -> Note {
         let pk = Element::from(12345u64);
-        let (kind, contract) = citrea_token_data("WCBTC");
+        let (utxo_kind, note_kind) = citrea_token_data("WCBTC");
         let note = Note {
-            kind,
-            contract,
+            utxo_kind,
+            note_kind,
             address: hash_merge([pk, Element::ZERO]),
             psi: hash_merge([pk, pk]),
             value: Element::from(amount),
@@ -1408,12 +1408,12 @@ mod wallet_tests {
     #[test]
     fn test_burn_note_not_in_avail_returns_error() {
         let mut wallet = Wallet::random(5115, Some("test".to_string()));
-        let (kind, contract) = citrea_token_data("WCBTC");
+        let (utxo_kind, note_kind) = citrea_token_data("WCBTC");
         let pk = Element::from(12345u64);
         let input_note = InputNote::new(
             Note {
-                kind,
-                contract,
+                utxo_kind,
+                note_kind,
                 address: hash_merge([pk, Element::ZERO]),
                 psi: hash_merge([pk, pk]),
                 value: Element::from(1000u64),
@@ -1525,11 +1525,11 @@ mod wallet_tests {
     #[test]
     fn test_import_note_unknown_address_returns_error() {
         let mut wallet = Wallet::random(5115, Some("test".to_string()));
-        let (kind, contract) = citrea_token_data("WCBTC");
+        let (utxo_kind, note_kind) = citrea_token_data("WCBTC");
         // Address does not correspond to any pending note in the wallet.
         let note = Note {
-            kind,
-            contract,
+            utxo_kind,
+            note_kind,
             address: Element::from(99999u64),
             psi: Element::ZERO,
             value: Element::from(1000u64),
@@ -1548,8 +1548,8 @@ mod wallet_tests {
         let (kind_usdc, contract_usdc) = citrea_token_data("USDC");
         let unrelated_note = InputNote::new(
             Note {
-                kind: kind_usdc,
-                contract: contract_usdc,
+                utxo_kind: kind_usdc,
+                note_kind: contract_usdc,
                 address: hash_merge([pk_usdc, Element::ZERO]),
                 psi: hash_merge([pk_usdc, pk_usdc]),
                 value: Element::from(500u64),

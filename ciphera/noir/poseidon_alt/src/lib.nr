@@ -4,7 +4,7 @@ mod test;
 mod test_field_snapshot;
 
 // Re-export the main hash functions
-pub use poseidon::{hash_2, hash, permute, PoseidonSponge};
+pub use poseidon::{hash, hash_2, permute, PoseidonSponge};
 
 // Main hash_merge function to match the Rust implementation signature
 // This is the primary function used by hash-poseidon

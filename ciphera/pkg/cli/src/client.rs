@@ -349,7 +349,7 @@ impl NodeClient {
 
         println!("Note hash {:#x}, mint hash {:#x}", utxo.hash(), mint_hash);
 
-        let tx = rollup.mint(&mint_hash, &note.value, &note.contract).await?;
+        let tx = rollup.mint(&mint_hash, &note.value, &note.note_kind).await?;
 
         println!("\nSubmitted MINT tx {tx:#x}\n");
 

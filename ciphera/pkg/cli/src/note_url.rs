@@ -21,12 +21,13 @@ impl From<&CipheraURL> for InputNote {
         InputNote {
             secret_key: value.private_key,
             note: Note {
-                kind: Element::new(2),
-                contract,
+                utxo_kind: Element::new(2),
+                note_kind: contract,
                 address: hash_merge([value.private_key, Element::ZERO]),
                 psi: hash_merge([value.private_key, value.private_key]),
                 value: value.value,
             },
+            ..InputNote::default()
         }
     }
 }
@@ -34,7 +35,7 @@ impl From<&CipheraURL> for InputNote {
 impl From<&InputNote> for CipheraURL {
     fn from(note: &InputNote) -> Self {
         Self {
-            currency: citrea_currency_from_contract(note.note.contract),
+            currency: citrea_currency_from_contract(note.note.note_kind),
             private_key: note.secret_key,
             value: note.note.value,
         }
@@ -112,12 +113,13 @@ mod tests {
         let input_note = InputNote {
             secret_key: Element::new(101),
             note: Note {
-                kind: Element::new(2),
-                contract: citrea_wcbtc_note_kind(),
+                utxo_kind: Element::new(2),
+                note_kind: citrea_wcbtc_note_kind(),
                 address: hash_merge([Element::new(101), Element::ZERO]),
                 psi: Element::ZERO,
                 value: Element::new(1),
             },
+            ..InputNote::default()
         };
 
         let a: CipheraURL = (&input_note).into();
@@ -138,8 +140,8 @@ mod tests {
         println!("decoded: {decoded_note:?}");
 
         // Verify
-        assert_eq!(decoded_note.note.kind, input_note.note.kind);
-        assert_eq!(decoded_note.note.contract, input_note.note.contract);
+        assert_eq!(decoded_note.note.utxo_kind, input_note.note.utxo_kind);
+        assert_eq!(decoded_note.note.note_kind, input_note.note.note_kind);
         assert_eq!(decoded_note.note.value, input_note.note.value);
         assert_eq!(decoded_note.note.address, input_note.note.address);
     }
@@ -149,12 +151,13 @@ mod tests {
         let input_note = InputNote {
             secret_key: Element::new(101),
             note: Note {
-                kind: Element::new(2),
-                contract: citrea_usdc_note_kind(),
+                utxo_kind: Element::new(2),
+                note_kind: citrea_usdc_note_kind(),
                 address: hash_merge([Element::new(101), Element::ZERO]),
                 psi: Element::ZERO,
                 value: Element::MAX,
             },
+            ..InputNote::default()
         };
 
         let a: CipheraURL = (&input_note).into();
@@ -175,8 +178,8 @@ mod tests {
         println!("decoded: {decoded_note:?}");
 
         // Verify
-        assert_eq!(decoded_note.note.kind, input_note.note.kind);
-        assert_eq!(decoded_note.note.contract, input_note.note.contract);
+        assert_eq!(decoded_note.note.utxo_kind, input_note.note.utxo_kind);
+        assert_eq!(decoded_note.note.note_kind, input_note.note.note_kind);
         assert_eq!(decoded_note.note.value, input_note.note.value);
         assert_eq!(decoded_note.note.address, input_note.note.address);
     }

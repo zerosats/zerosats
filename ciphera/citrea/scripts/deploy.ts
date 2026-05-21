@@ -15,11 +15,11 @@ import {
   parseAbi,
 } from "viem";
 import { privateKeyToAccount, mnemonicToAccount } from "viem/accounts";
-import { deployBin, citreaDevChain, citreaTestChain } from "./shared";
+import { citreaDevChain, citreaTestChain } from "./shared";
 import IERC20Artifact from "../openzeppelin-contracts/token/ERC20/IERC20.json";
 
 // Auto-updated by generate_fixtures.sh - do not modify manually
-const AGG_AGG_VERIFICATION_KEY_HASH = "0x1a2fd848d2ce42026ddbda10d22bbdcad96c89eb501e2c55996c58f76d04840c";
+const AGG_AGG_VERIFICATION_KEY_HASH = "0x00e5fe01ac9f835298f3d54cb9247f25ffd22e8591e801cd523296a47e0d8305";
 
 const EIP1967_ADMIN_STORAGE_SLOT =
   "0xb53127684a568b3173ae13b9f8a6016e243e63b6e8ee1178d6a717850b5d6103";
@@ -74,7 +74,17 @@ function readAddressFromSlot(slotValue: `0x${string}` | undefined): `0x${string}
 
 async function main() {
   console.log("Initialization...");
-  let aggregateVerifierAddr = process.env.VERIFIER;
+  // Verifiers are deployed separately (see scripts/deploy-verifier.ts).
+  // The rollup deploy expects a pre-deployed aggregate verifier address
+  // via VERIFIER -- it never deploys the verifier itself.
+  const aggregateVerifierAddr = process.env.VERIFIER as
+    | `0x${string}`
+    | undefined;
+  if (!aggregateVerifierAddr) {
+    throw new Error(
+      "VERIFIER is not set. Deploy the aggregate verifier first via scripts/deploy-verifier.ts and pass its address as VERIFIER.",
+    );
+  }
   const isTestnet = process.env.IS_TESTNET === "1";
   let proverAddress = process.env.PROVER_ADDRESS as `0x${string}`;
   let validators =
@@ -84,9 +94,6 @@ async function main() {
   console.log("    Prover Address - ", proverAddress);
   console.log("    Validators - ", validators);
   console.log("    Verifier - ", aggregateVerifierAddr);
-
-  const maybeNoopVerifier = (verifier: string) =>
-    isTestnet ? verifier : "NoopVerifierHonk.bin";
 
   let account;
   let rpcUrl;
@@ -272,19 +279,9 @@ async function main() {
 
   console.log(`✅ ERC20 Contract: ${erc20Address}`);
 
-  if (!aggregateVerifierAddr) {
-    console.log("\n🔍 Deploying Verifier. Looking for binary file...");
-    aggregateVerifierAddr = await deployBin(
-      maybeNoopVerifier("noir/agg_agg_HonkVerifier.bin"),
-      publicClient,
-      walletClient,
-    );
-    console.log(`✅ Aggregate Verifier Contract: ${aggregateVerifierAddr}`);
-  } else {
-    console.log(
-      `✅ Re-using Aggregate Verifier Contract: ${aggregateVerifierAddr}`,
-    );
-  }
+  console.log(
+    `✅ Using pre-deployed Aggregate Verifier Contract: ${aggregateVerifierAddr}`,
+  );
 
   console.log("\n🔍 Deploying Rollup");
 

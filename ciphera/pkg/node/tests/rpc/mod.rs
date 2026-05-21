@@ -636,7 +636,7 @@ fn mint_with_note<'m, 't>(
     (
         async move {
             let tx = rollup
-                .mint(&utxo.mint_hash(), &note.value, &note.contract)
+                .mint(&utxo.mint_hash(), &note.value, &note.note_kind)
                 .await?;
 
             while rollup

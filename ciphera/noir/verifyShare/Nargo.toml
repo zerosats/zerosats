@@ -1,0 +1,10 @@
+[package]
+name = "verify_share"
+type = "bin"
+authors = [""]
+compiler_version = ">=0.36.0"
+
+[dependencies]
+common = { path = "../common" }
+signature_shamir = { path = "../signatureShamir" }
+poseidon = { tag = "v0.1.1", git = "https://github.com/noir-lang/poseidon" }

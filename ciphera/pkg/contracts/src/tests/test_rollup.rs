@@ -62,6 +62,7 @@ pub mod rollup {
             InputNote {
                 note: wn.note(),
                 secret_key: wn.wallet.pk,
+                ..InputNote::default()
             }
         }
 
@@ -106,12 +107,12 @@ pub mod rollup {
             get_address_for_private_key(self.pk)
         }
 
-        pub fn new_note(&self, amount: u64, contract: Element) -> Note {
+        pub fn new_note(&self, amount: u64, note_kind: Element) -> Note {
             Note {
-                kind: Element::new(2),
+                utxo_kind: Element::new(2),
                 value: Element::new(amount),
                 address: self.address(),
-                contract,
+                note_kind,
                 psi: Element::new(0),
             }
         }
