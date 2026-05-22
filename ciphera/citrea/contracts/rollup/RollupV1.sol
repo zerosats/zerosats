@@ -54,11 +54,6 @@ contract RollupV1 is
     OwnableUpgradeable,
     ReentrancyGuardUpgradeable
 {
-    /// @notice bn254 scalar field is 254 bits. Mask the top 2 bits of a
-    ///         256-bit hash so the result is guaranteed < 2^254 < field modulus.
-    uint256 private constant BN254_FIELD_MASK =
-    0x3fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff;
-
     using SafeERC20 for IERC20;
     event RollupVerified(uint256 indexed height, bytes32 root);
     event Minted(bytes32 indexed hash, bytes32 value, bytes32 note_kind);
@@ -464,6 +459,15 @@ contract RollupV1 is
         return rootHash;
     }
 
+    function addToken(bytes32 noteKind, address tokenAddress) public onlyOwner {
+        require(
+            tokens[noteKind] == address(0),
+            "RollupV1: Token already exists"
+        );
+
+        tokens[noteKind] = tokenAddress;
+    }
+
     // Owner-gated setters. After init, owner() is the timelock, so
     // every setter must be invoked via timelock propose+execute.
 
@@ -829,101 +833,6 @@ contract RollupV1 is
                         keccak256(
                 abi.encode(hash, burnAddress, noteKind, amount, burnBlockHeight)
             );
-    }
-
-    /// @notice Derive the bn254-safe burn address from a lightning preimage.
-    ///         sha256(preimage) truncated to 254 bits — sha256 because BOLT-11
-    ///         payment hashes are sha256(preimage), so this value matches the
-    ///         invoice's payment_hash (modulo the 2-bit field truncation) and
-    ///         what the prover circuit witnesses.
-    function lightningBurnAddress(bytes32 preimage) public pure returns (uint256) {
-        return uint256(sha256(abi.encodePacked(preimage))) & BN254_FIELD_MASK;
-    }
-
-    function substituteLightningBurn(
-        bytes32 preimage,
-        bytes32 note_kind,
-        bytes32 hash,
-        uint256 amount,
-        uint256 burnBlockHeight
-    ) public onlyBurnSubstitutor {
-        substituteLightningBurnTo(
-            preimage,
-            msg.sender,
-            note_kind,
-            hash,
-            amount,
-            burnBlockHeight
-        );
-    }
-
-    function substituteLightningBurnTo(
-        bytes32 preimage,
-        address substituteAddress,
-        bytes32 note_kind,
-        bytes32 hash,
-        uint256 amount,
-        uint256 burnBlockHeight
-    ) private {
-        // Derive burn address as a 254-bit field element from the preimage.
-        // This must match exactly what the prover circuit computes from the
-        // same preimage, otherwise rollup verification will not find this entry.
-        uint256 burnAddressField = lightningBurnAddress(preimage);
-
-        // Key off the full 254-bit field value, not a 160-bit address cast,
-        // so the on-chain key matches the circuit's burnAddress witness.
-        bytes32 substituteBurnKey = getSubstituteLightningBurnKey(
-            hash,
-            burnAddressField,
-            note_kind,
-            amount,
-            burnBlockHeight
-        );
-        require(
-            substitutedBurns[substituteBurnKey] == address(0),
-            "RollupV1: Burn already substituted"
-        );
-        require(
-            blockHeight < burnBlockHeight,
-            "RollupV1: Block height already rolled up"
-        );
-
-        address _token = tokens[note_kind];
-        require(_token != address(0), "RollupV1: Token not found for note kind");
-
-        // Lightning variant: no on-chain token transfer.
-        //
-        // The substitutor is reimbursed off-chain via the lightning payment
-        // settled against `preimage`. On rollup proof, the substitutor reclaims
-        // the gross `amount` from the original mint's balance held here;
-        // fee routing to feeSink happens inside verifyBurn as usual.
-        //
-        // No safeTransferFrom, no executeBurn payout, recording the
-        // substitution is the only on-chain side effect.
-
-        substitutedBurns[substituteBurnKey] = substituteAddress;
-    }
-
-    /// @notice Lightning sibling of getSubstituteBurnKey. Takes the burn address
-    ///         as a uint256 field element (254-bit) rather than an Ethereum address,
-    ///         since the lightning burn address is derived from a hash and does not
-    ///         fit in 160 bits.
-    function getSubstituteLightningBurnKey(
-        bytes32 hash,
-        uint256 burnAddressField,
-        bytes32 note_kind,
-        uint256 amount,
-        uint256 burnBlockHeight
-    ) internal pure returns (bytes32) {
-        return keccak256(
-            abi.encode(
-                hash,
-                burnAddressField,
-                note_kind,
-                amount,
-                burnBlockHeight
-            )
-        );
     }
 
     /////////////////
