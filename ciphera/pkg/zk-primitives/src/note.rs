@@ -165,6 +165,30 @@ impl Note {
         }
     }
 
+    /// HTLC note (kind 8) for the offramp-gateway flow where the spender
+    /// (the gateway) does not yet know the preimage when the note is built:
+    /// the address is derived directly from a Lightning `payment_hash`,
+    /// and the refund branch is bound to `recipient_address` -- the user's
+    /// `get_address_for_private_key(sk)`. The gateway learns the preimage
+    /// by paying the invoice; the user keeps the refund path if the gateway
+    /// fails to claim before the timelock window opens.
+    #[must_use]
+    pub fn new_htlc_for_recipient(
+        recipient_address: Element,
+        lock: &TimeLock,
+        payment_hash: [u8; 32],
+        note_kind: Element,
+        value: Element,
+    ) -> Self {
+        Self {
+            utxo_kind: Element::new(2),
+            note_kind,
+            address: Signature32Sha::address_from_hash(payment_hash),
+            psi: hash::hash_merge([recipient_address, lock.commitment()]),
+            value,
+        }
+    }
+
     /// Deterministic padding note, because circuits have a fixed note input size,
     /// and so we pad extra notes with zeros
     #[must_use]
@@ -335,6 +359,40 @@ mod tests {
 
         assert_eq!(note.address, expected_hashlock);
         assert_eq!(note.psi, expected_refund);
+    }
+
+    #[test]
+    fn new_htlc_for_recipient_matches_new_htlc() {
+        // The offramp gateway constructs the HTLC note from the user's
+        // address (derived from their sk) and the bolt11 payment_hash
+        // (SHA-256 of the preimage). The resulting note must be identical
+        // to `new_htlc` built by someone who happens to know the preimage.
+        let secret_key = Element::new(101);
+        let lock = TimeLock {
+            zero_block: [7u8; 32],
+            n_blocks: Element::new(2),
+        };
+        let note_kind = Element::new(8);
+        let value = Element::new(50);
+
+        let preimage_bytes = preimage();
+        let payment_hash = preimage_sha();
+        let user_address = get_address_for_private_key(secret_key);
+
+        let from_preimage = Note::new_htlc(secret_key, &lock, preimage_bytes, note_kind, value);
+        let from_hash = Note::new_htlc_for_recipient(
+            user_address,
+            &lock,
+            payment_hash,
+            note_kind,
+            value,
+        );
+
+        assert_eq!(from_preimage.address, from_hash.address);
+        assert_eq!(from_preimage.psi, from_hash.psi);
+        assert_eq!(from_preimage.value, from_hash.value);
+        assert_eq!(from_preimage.note_kind, from_hash.note_kind);
+        assert_eq!(from_preimage.utxo_kind, from_hash.utxo_kind);
     }
 
     #[test]

@@ -29,6 +29,7 @@ hash-poseidon = { path = "./pkg/hash-poseidon" }
 minimal-poseidon = { path = "./pkg/minimal-poseidon" }
 node = { path = "./pkg/node" }
 node-interface = { path = "./pkg/node-interface" }
+offramp-service = { path = "./pkg/offramp-service" }
 p2p2 = { path = "./pkg/p2p2" }
 primitives = { path = "./pkg/primitives" }
 prover = { path = "./pkg/prover" }
