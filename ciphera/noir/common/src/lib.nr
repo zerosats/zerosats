@@ -102,14 +102,14 @@ pub fn check_spend_conditions(input_note: InputNote) {
             assert(computed_hash == input_note.note.address, "Address is not owned by the owner");
         } else if input_note.spend_type == 3 {
             // SHA locked HTLC
+            let key_hash = get_secret_hash(input_note.secret_key);
             if input_note.preimage != [0; 32] {
                 let computed_sha_hash = sha256::digest(input_note.preimage);
                 let (low, high) = bytes_32_to_field_pair(computed_sha_hash);
 
-                let computed_hash = poseidon2::Poseidon2::hash([low, high], 2);
+                let computed_hash = poseidon2::Poseidon2::hash([key_hash, low, high], 3);
                 assert(computed_hash == input_note.note.address, "HTLC: computed hash does not match to SHA preimage");
             } else {
-                let key_hash = get_secret_hash(input_note.secret_key);
                 let commitment = get_timelock_commitment(input_note.time_proof.lock);
                 let timelocked_address = poseidon2::Poseidon2::hash([key_hash, commitment], 2);
 
