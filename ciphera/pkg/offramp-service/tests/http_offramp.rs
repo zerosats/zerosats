@@ -51,7 +51,7 @@ fn make_config(db_path: &std::path::Path) -> Config {
         phoenixd_api_password: "x".into(),
         mempool_url: "http://nope".into(),
         db_path: db_path.to_string_lossy().into(),
-        default_note_kind: Element::new(0xb7c),
+        ciphera_btc_note_kind: Element::new(0xb7c),
         service_evm_address: Element::new(0x1234),
         timelock_n_blocks: 2,
         quote_ttl_seconds: 600,

@@ -444,11 +444,20 @@ fn signature32_address(preimage: [u8; 32]) -> Element {
 // Poseidon of the SHA-256 digest's (high, low) 16-byte halves. Matches
 // `signature32sha` and the Noir kind-6 ownership check; also the encoding
 // of `note.psi` for the kind-8 hash-path.
-fn signature32sha_address(preimage: [u8; 32]) -> Element {
+fn signature32sha_address(secret_opt: Option<Element>, preimage: [u8; 32]) -> Element {
     let sha: [u8; 32] = Sha256::digest(preimage).into();
     let element = Element::from_be_bytes(sha);
     let (high, low) = element.decompose_be();
-    hash::hash_merge([high, low])
+
+    match secret_opt {
+        Some(secret_key) => {
+            let key_hash = get_address_for_private_key(secret_key);
+            hash::hash_merge([key_hash, high, low])
+        }
+        None => {
+            hash::hash_merge([high, low])
+        }
+    }
 }
 
 fn timelock_commitment(lock: &TimeLock) -> Element {
@@ -554,7 +563,7 @@ fn test_utxo_kind6_signature32sha_spend() {
     // Kind 6: ownership proven by revealing a SHA-256 preimage whose
     // digest hashes (under Poseidon, over high/low halves) to `note.address`.
     let preimage = shared_preimage_bytes();
-    let address = signature32sha_address(preimage);
+    let address = signature32sha_address(None, preimage);
     let kind6 = Element::new(6);
 
     let input_note = InputNote {
@@ -611,10 +620,10 @@ fn test_utxo_normal_timelocked_spend() {
 
 #[test]
 fn test_utxo_sha_htlc_hash_path() {
-    let (_, refund_address) = get_keypair(202);
+    let (secret_key, refund_address) = get_keypair(202);
 
     let preimage = shared_preimage_bytes();
-    let sha_address = signature32sha_address(preimage);
+    let sha_address = signature32sha_address(Some(secret_key), preimage);
     let note_kind = Element::new(8);
 
     // The address here is irrelevant for the hash path; pick something
@@ -628,7 +637,7 @@ fn test_utxo_sha_htlc_hash_path() {
             value: Element::new(50),
         },
         spend_type: 3,
-        secret_key: Element::ZERO,
+        secret_key,
         preimage,
         time_proof: pow_two_block_proof(),
     };

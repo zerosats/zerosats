@@ -35,8 +35,8 @@ pub struct Config {
 
     /// Default note kind to use when the client does not specify one
     /// (e.g. Citrea wrapped BTC). Plain hex Element.
-    #[arg(long, env = "DEFAULT_NOTE_KIND", value_parser = parse_element)]
-    pub default_note_kind: Element,
+    #[arg(long, env = "CIPHERA_BTC_NOTE_KIND", value_parser = parse_element)]
+    pub ciphera_btc_note_kind: Element,
 
     /// EVM address (20-byte hex, with or without 0x prefix) that SlowBurn
     /// payouts will be routed to.

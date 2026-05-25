@@ -57,8 +57,9 @@ pub async fn create_offramp(
     let amount_msat = invoice
         .amount_milli_satoshis()
         .ok_or_else(|| ApiError::BadRequest("bolt11 must specify an amount".into()))?;
-    let amount_sat = amount_msat / 1_000;
 
+    // use amount_sat only for config check
+    let amount_sat = amount_msat / 1_000;
     if amount_sat > state.config.max_amount_sat {
         return Err(ApiError::BadRequest(format!(
             "amount {amount_sat} sat exceeds cap {}",
@@ -73,14 +74,17 @@ pub async fn create_offramp(
 
     let note_kind = match &req.note_kind {
         Some(s) => Element::from_str(s)
-            .map_err(|e| ApiError::BadRequest(format!("invalid note_kind: {e}")))?,
-        None => state.config.default_note_kind,
+            .map_err(|e| ApiError::BadRequest(format!("invalid note_kind format: {e}")))?,
+        None => state.config.ciphera_btc_note_kind,
     };
 
-    // bolt11 value (sats) -> note value (wei, 1e10 multiplier turns sats into wei
-    // for a wrapped-BTC token with 18 decimals). The plan §6 calls for a
-    // fixed multiplier; this is the canonical sat->wei convention.
-    let value_wei = u128::from(amount_sat).checked_mul(10_000_000_000).ok_or_else(|| {
+    if note_kind != state.config.ciphera_btc_note_kind {
+        return Err(ApiError::BadRequest(format!("only Ciphera BTC note kind is allowed")));
+    }
+
+    // bolt11 value (milli-sats) -> note value (wei, 1e7 multiplier turns msats into wei
+    // for a wrapped-BTC token with 18 decimals). This is the canonical sat->wei convention.
+    let value_wei = u128::from(amount_msat).checked_mul(10_000_000).ok_or_else(|| {
         ApiError::BadRequest("amount overflow when converting sats to wei".into())
     })?;
     let amount = Element::from(value_wei);
