@@ -85,7 +85,7 @@ vk_hash_for() {
 # they can all be compiled before any hash is known.
 # ----------------------------------------------------------------------
 
-LEAF_PROGRAMS=("signature" "signature32" "signature32sha" "utxo")
+LEAF_PROGRAMS=("signature" "utxo")
 for name in "${LEAF_PROGRAMS[@]}"; do
   compile_package "$name"
   write_vk_for "$name"
