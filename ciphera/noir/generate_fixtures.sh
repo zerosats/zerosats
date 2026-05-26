@@ -6,7 +6,15 @@ NARGO=${NARGO:-nargo}
 
 # Detect repo root: in Docker, ciphera/ contents are at the git root.
 # Locally, they're under a ciphera/ subdirectory.
-REPO_ROOT=/workspace
+GIT_ROOT=$(git rev-parse --show-toplevel)
+if [ -d "$GIT_ROOT/noir" ]; then
+  REPO_ROOT="$GIT_ROOT"
+elif [ -d "$GIT_ROOT/ciphera/noir" ]; then
+  REPO_ROOT="$GIT_ROOT/ciphera"
+else
+  echo "ERROR: Cannot find noir/ directory under $GIT_ROOT or $GIT_ROOT/ciphera/"
+  exit 1
+fi
 BACKEND=${BACKEND:-bb}
 
 # Clean target so every artifact in this run is fresh.
@@ -70,6 +78,42 @@ vk_hash_for() {
     "$REPO_ROOT/fixtures/keys/${name}_key")
 }
 
+# Portable thousand-separator: locales with grouping aren't guaranteed
+# inside the build image, so do it with sed. Used by both the circuits
+# table and the badge generation step downstream.
+fmt_thousands() {
+  echo "$1" | sed -E ':a;s/([0-9])([0-9]{3})(\b|,)/\1,\2\3/;ta'
+}
+
+# Per-circuit complexity stats, populated as each circuit is compiled.
+# ACIR_OPS  : Noir-level ACIR opcode count    (what `nargo compile` produces)
+# HONK_GATES: UltraHonk circuit size in gates (proving-time complexity)
+# VK_BYTES  : size of the on-disk verification key, in bytes
+declare -A ACIR_OPS
+declare -A HONK_GATES
+declare -A VK_BYTES
+
+# Capture static complexity for a compiled package. The same `bb gates`
+# invocation must use the oracle hash the verifier expects, otherwise
+# the gate count for agg_agg (keccak) differs from the figure printed
+# in the on-chain verifier path.
+record_circuit_stats() {
+  local name="$1"; shift
+  local stats
+  stats=$($BACKEND gates --scheme ultra_honk "$@" \
+    -b "$REPO_ROOT/fixtures/programs/${name}.json" 2>/dev/null \
+    | jq -r '.functions[0] | "\(.acir_opcodes) \(.circuit_size)"')
+  if [[ -z "$stats" || "$stats" == "null null" ]]; then
+    echo "WARN: could not extract gate stats for $name" >&2
+    ACIR_OPS[$name]="?"
+    HONK_GATES[$name]="?"
+  else
+    ACIR_OPS[$name]="${stats%% *}"
+    HONK_GATES[$name]="${stats##* }"
+  fi
+  VK_BYTES[$name]=$(wc -c < "$REPO_ROOT/fixtures/keys/${name}_key" | tr -d ' ')
+}
+
 # ----------------------------------------------------------------------
 # Stage 1 — leaf circuits and the inner-most recursion target (utxo).
 #
@@ -81,6 +125,7 @@ LEAF_PROGRAMS=("signature" "utxo")
 for name in "${LEAF_PROGRAMS[@]}"; do
   compile_package "$name"
   write_vk_for "$name"
+  record_circuit_stats "$name"
 done
 
 # ----------------------------------------------------------------------
@@ -99,6 +144,7 @@ update_noir_hash "$REPO_ROOT/noir/agg_utxo/src/main.nr" \
 
 compile_package agg_utxo
 write_vk_for agg_utxo
+record_circuit_stats agg_utxo
 
 # ----------------------------------------------------------------------
 # Stage 3 — propagate agg_utxo's VK hash into agg_agg's source BEFORE
@@ -116,6 +162,7 @@ update_noir_hash "$REPO_ROOT/noir/agg_agg/src/main.nr" \
 compile_package agg_agg
 # agg_agg is verified on-chain by Solidity, so use the keccak oracle.
 write_vk_for agg_agg --oracle_hash keccak
+record_circuit_stats agg_agg --oracle_hash keccak
 
 # ----------------------------------------------------------------------
 # Stage 4 — propagate agg_agg's VK hash into the Rust + TypeScript
@@ -198,5 +245,113 @@ printf '%s' "$LIB_BYTECODE" > "$REPO_ROOT/citrea/contracts/noir/agg_agg_ZKTransc
 
 jq ".contracts[\"$SOURCE_KEY\"][\"HonkVerifier\"].evm.bytecode.linkReferences" "$SOLC_OUTPUT" \
   > "$REPO_ROOT/citrea/contracts/noir/agg_agg_HonkVerifier.linkrefs.json"
+
+# ----------------------------------------------------------------------
+# Stage 5 — refresh the Circuits block in the root README so the table
+# always reflects the freshly-minted verification keys. The block lives
+# between `<!-- circuits:start -->` and `<!-- circuits:end -->` markers
+# so it can be rewritten atomically without disturbing surrounding prose.
+# ----------------------------------------------------------------------
+
+declare -A CIRCUIT_ROLE=(
+  [signature]="Signature leaf"
+  [signature32]="Signature leaf (32-byte message)"
+  [signature32sha]="Signature leaf (sha256 message)"
+  [utxo]="UTXO leaf (recursion base)"
+  [agg_utxo]="1-level aggregator"
+  [agg_agg]="Top-level aggregator (on-chain verifier)"
+)
+declare -A CIRCUIT_ORACLE=(
+  [signature]="poseidon"
+  [signature32]="poseidon"
+  [signature32sha]="poseidon"
+  [utxo]="poseidon"
+  [agg_utxo]="poseidon"
+  [agg_agg]="keccak"
+)
+
+# Reuse hashes that earlier stages already computed; only fetch fresh
+# ones for the leaf signature circuits that were not previously needed
+# for VK-hash propagation.
+declare -A CIRCUIT_VK_OUT=(
+  [utxo]="$UTXO_VK_OUT"
+  [agg_utxo]="$AGG_UTXO_VK_OUT"
+  [agg_agg]="$AGG_AGG_VK_OUT"
+)
+
+CIRCUIT_ORDER=(signature signature32 signature32sha utxo agg_utxo agg_agg)
+
+README_BLOCK=$(mktemp)
+trap 'rm -f "$SOLC_INPUT" "$SOLC_OUTPUT" "$README_BLOCK"' EXIT
+
+GENERATED_AT=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+{
+  echo "<!-- circuits:start -->"
+  echo ""
+  echo "_Auto-generated by \`noir/generate_fixtures.sh\` — last refreshed ${GENERATED_AT}._"
+  echo ""
+  echo "| Circuit | Role | Oracle | ACIR opcodes | UltraHonk gates | VK bytes | Verification key (hex) |"
+  echo "|---------|------|--------|-------------:|----------------:|---------:|------------------------|"
+  for name in "${CIRCUIT_ORDER[@]}"; do
+    vk_out="${CIRCUIT_VK_OUT[$name]:-}"
+    if [[ -z "$vk_out" ]]; then
+      vk_out=$(vk_hash_for "$name")
+    fi
+    hex_hash=$(echo "$vk_out" | extract_hex)
+    short="${hex_hash:0:10}…${hex_hash: -8}"
+    acir_fmt=$(fmt_thousands "${ACIR_OPS[$name]:-?}")
+    gates_fmt=$(fmt_thousands "${HONK_GATES[$name]:-?}")
+    vk_fmt=$(fmt_thousands "${VK_BYTES[$name]:-?}")
+    echo "| \`$name\` | ${CIRCUIT_ROLE[$name]} | ${CIRCUIT_ORACLE[$name]} | ${acir_fmt} | ${gates_fmt} | ${vk_fmt} | \`$short\` |"
+  done
+  echo ""
+  echo "**ACIR opcodes** are the Noir-frontend instruction count; **UltraHonk gates** is the prover-time circuit size after black-box expansion. Wall-clock prove/verify timings are machine-dependent — see \`cargo bench -p zk-circuits\` for canonical numbers on tracked hardware."
+  echo ""
+  echo "<!-- circuits:end -->"
+} > "$README_BLOCK"
+
+BLOCK_FILE="$README_BLOCK" perl -i -0777 -pe '
+  open(my $fh, "<", $ENV{BLOCK_FILE}) or die "cannot open block file: $!";
+  local $/; my $block = <$fh>; close $fh;
+  chomp $block;
+  unless (s|<!-- circuits:start -->.*?<!-- circuits:end -->|$block|s) {
+    die "circuits markers not found in README; expected <!-- circuits:start --> ... <!-- circuits:end -->";
+  }
+' "$REPO_ROOT/README.md"
+
+echo "📝 Updated Circuits section in $REPO_ROOT/README.md"
+
+# Refresh the dynamic complexity badges. shields.io path syntax: spaces
+# render with %20, underscores must be doubled, and we encode the
+# thousand-separator comma as %2C so the badge text reads naturally.
+BADGE_BLOCK=$(mktemp)
+trap 'rm -f "$SOLC_INPUT" "$SOLC_OUTPUT" "$README_BLOCK" "$BADGE_BLOCK"' EXIT
+
+badge_value() {
+  fmt_thousands "$1" | sed 's/,/%2C/g'
+}
+
+ACIR_BADGE_VAL=$(badge_value "${ACIR_OPS[utxo]:-0}")
+GATES_BADGE_VAL=$(badge_value "${HONK_GATES[utxo]:-0}")
+VK_BADGE_VAL=$(badge_value "${VK_BYTES[utxo]:-0}")
+
+{
+  echo "<!-- badges:start -->"
+  echo "![Utxo ACIR](https://img.shields.io/badge/utxo%20ACIR-${ACIR_BADGE_VAL}-0066ff)"
+  echo "![Utxo gates](https://img.shields.io/badge/utxo%20gates-${GATES_BADGE_VAL}-1f6feb)"
+  echo "![Utxo VK bytes](https://img.shields.io/badge/utxo%20VK%20bytes-${VK_BADGE_VAL}-7c3aed)"
+  echo "<!-- badges:end -->"
+} > "$BADGE_BLOCK"
+
+BLOCK_FILE="$BADGE_BLOCK" perl -i -0777 -pe '
+  open(my $fh, "<", $ENV{BLOCK_FILE}) or die "cannot open badge block file: $!";
+  local $/; my $block = <$fh>; close $fh;
+  chomp $block;
+  unless (s|<!-- badges:start -->.*?<!-- badges:end -->|$block|s) {
+    die "badges markers not found in README; expected <!-- badges:start --> ... <!-- badges:end -->";
+  }
+' "$REPO_ROOT/README.md"
+
+echo "🏷️  Updated complexity badges in $REPO_ROOT/README.md"
 
 echo "Successfully generated programs, keys, and Solidity verifier"
