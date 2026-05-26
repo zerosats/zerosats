@@ -6,9 +6,9 @@
 ![solidity](https://img.shields.io/badge/solidity-0.8.28-363636)
 ![git-lfs](https://img.shields.io/badge/git--lfs-required-d62828)
 <!-- badges:start -->
-![Utxo ACIR](https://img.shields.io/badge/agg__agg%20ACIR-40%2C371-0066ff)
-![Utxo gates](https://img.shields.io/badge/agg__agg%20gates-140%2C337-1f6feb)
-![Utxo VK bytes](https://img.shields.io/badge/agg__agg%20VK%20bytes-3%2C680-7c3aed)
+![Utxo ACIR](https://img.shields.io/badge/utxo%20ACIR-40%2C371-0066ff)
+![Utxo gates](https://img.shields.io/badge/utxo%20gates-140%2C337-1f6feb)
+![Utxo VK bytes](https://img.shields.io/badge/utxo%20VK%20bytes-3%2C680-7c3aed)
 <!-- badges:end -->
 
 
