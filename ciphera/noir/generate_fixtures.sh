@@ -331,15 +331,15 @@ badge_value() {
   fmt_thousands "$1" | sed 's/,/%2C/g'
 }
 
-ACIR_BADGE_VAL=$(badge_value "${ACIR_OPS[agg_agg]:-0}")
-GATES_BADGE_VAL=$(badge_value "${HONK_GATES[agg_agg]:-0}")
-VK_BADGE_VAL=$(badge_value "${VK_BYTES[agg_agg]:-0}")
+ACIR_BADGE_VAL=$(badge_value "${ACIR_OPS[utxo]:-0}")
+GATES_BADGE_VAL=$(badge_value "${HONK_GATES[utxo]:-0}")
+VK_BADGE_VAL=$(badge_value "${VK_BYTES[utxo]:-0}")
 
 {
   echo "<!-- badges:start -->"
-  echo "![agg_agg ACIR](https://img.shields.io/badge/agg__agg%20ACIR-${ACIR_BADGE_VAL}-0066ff)"
-  echo "![agg_agg gates](https://img.shields.io/badge/agg__agg%20gates-${GATES_BADGE_VAL}-1f6feb)"
-  echo "![agg_agg VK bytes](https://img.shields.io/badge/agg__agg%20VK%20bytes-${VK_BADGE_VAL}-7c3aed)"
+  echo "![Utxo ACIR](https://img.shields.io/badge/utxo%20ACIR-${ACIR_BADGE_VAL}-0066ff)"
+  echo "![Utxo gates](https://img.shields.io/badge/utxo%20gates-${GATES_BADGE_VAL}-1f6feb)"
+  echo "![Utxo VK bytes](https://img.shields.io/badge/utxo%20VK%20bytes-${VK_BADGE_VAL}-7c3aed)"
   echo "<!-- badges:end -->"
 } > "$BADGE_BLOCK"
 
