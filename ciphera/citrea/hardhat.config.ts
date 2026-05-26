@@ -31,13 +31,16 @@ const config: HardhatUserConfig = {
     citreaTestnet: {
       type: "http",
       chainId: 5115,
-      url: "https://rpc.testnet.citrea.xyz",
+      // Override the public RPC by setting CITREA_TESTNET_RPC_URL in your env.
+      url: configVariable("CITREA_TESTNET_RPC_URL"),
       accounts: { mnemonic: configVariable("MNEMONIC") },
     },
     citreaMainnet: {
       type: "http",
       chainId: 4114,
-      url: `https://citrea-mainnet.g.alchemy.com/v2/${configVariable("ALCHEMY_MAINNET_API_KEY")}`,
+      // Mainnet RPC is mandatory and operator-supplied. Suggested template:
+      //   https://citrea-mainnet.g.alchemy.com/v2/<ALCHEMY_KEY>
+      url: configVariable("CITREA_MAINNET_RPC_URL"),
       accounts: { mnemonic: configVariable("MNEMONIC") },
     },
   },

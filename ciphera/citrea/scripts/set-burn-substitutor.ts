@@ -1,94 +1,103 @@
+// Add or remove a burn-substitutor allowlist entry on the rollup. Always
+// dispatched via the rollup's TimelockController.
+
 import rollupV1Artifact from "../artifacts/contracts/rollup/RollupV1.sol/RollupV1.json";
-import { network } from "hardhat";
 import {
-    createWalletClient,
-    encodeFunctionData,
-    getContract,
-    http,
+  createPublicClient,
+  createWalletClient,
+  encodeFunctionData,
+  getContract,
+  http,
 } from "viem";
-import { mnemonicToAccount } from "viem/accounts";
+import { mnemonicToAccount, privateKeyToAccount } from "viem/accounts";
 import {
-    citreaTestChain,
-    parseTimelockMode,
-    timelockDispatch,
+  assertChainId,
+  parseNetwork,
+  parseTimelockMode,
+  requireEnv,
+  resolveRpcUrl,
+  timelockDispatch,
 } from "./shared";
 
-const { viem } = await network.connect({
-    network: "citreaTestnet",
-    chainId: 5115,
-});
-
-const ROLLUP_ADDRESS = process.env.ROLLUP_ADDRESS as `0x${string}`;
-const BURN_SUBSTITUTOR = process.env.BURN_SUBSTITUTOR as `0x${string}`;
-const ACTION = (process.env.ACTION || "").toLowerCase(); // "add" | "remove"
-const SALT = process.env.TIMELOCK_SALT as `0x${string}` | undefined;
-
 async function main() {
-    if (!ROLLUP_ADDRESS) throw new Error("ROLLUP_ADDRESS env var is not set");
-    if (!BURN_SUBSTITUTOR) throw new Error("BURN_SUBSTITUTOR env var is not set");
-    if (ACTION !== "add" && ACTION !== "remove") {
-        throw new Error("ACTION env var must be either 'add' or 'remove'");
-    }
-    const mode = parseTimelockMode(process.env.MODE);
+  const profile = parseNetwork(process.env.NETWORK);
+  const rpcUrl = resolveRpcUrl(profile);
+  const rollupAddress = requireEnv("ROLLUP_ADDRESS") as `0x${string}`;
+  const burnSubstitutor = requireEnv("BURN_SUBSTITUTOR") as `0x${string}`;
+  const action = requireEnv("ACTION").toLowerCase();
+  if (action !== "add" && action !== "remove") {
+    throw new Error("ACTION env var must be either 'add' or 'remove'");
+  }
+  const mode = parseTimelockMode(process.env.MODE);
+  const salt = process.env.TIMELOCK_SALT as `0x${string}` | undefined;
 
-    const seed = process.env.MNEMONIC;
-    if (!seed) throw new Error("MNEMONIC env var is not set");
-    const account = mnemonicToAccount(seed);
-    const rpcUrl = process.env.TESTNET_RPC_URL || "https://rpc.testnet.citrea.xyz";
+  const account =
+    profile.name === "dev"
+      ? privateKeyToAccount(requireEnv("PRIVATE_KEY") as `0x${string}`)
+      : mnemonicToAccount(requireEnv("MNEMONIC"));
 
-    const publicClient = await viem.getPublicClient();
+  const publicClient = createPublicClient({
+    chain: {
+      ...profile.chain,
+      rpcUrls: {
+        default: { http: [rpcUrl] },
+        public: { http: [rpcUrl] },
+      },
+    },
+    transport: http(rpcUrl, { timeout: 60_000, retryCount: 3 }),
+  });
 
-    const senderClient = createWalletClient({
-        account,
-        chain: {
-            ...citreaTestChain,
-            rpcUrls: {
-                default: { http: [rpcUrl] },
-                public: { http: [rpcUrl] },
-            },
-        },
-        transport: http(rpcUrl, {
-            timeout: 60000,
-            retryCount: 3,
-        }),
-    });
+  await assertChainId(publicClient, profile.chainId, "set-burn-substitutor");
 
-    console.log("Wallet address:   ", senderClient.account.address);
-    console.log("Rollup address:   ", ROLLUP_ADDRESS);
-    console.log("Action:           ", ACTION);
-    console.log("Burn substitutor: ", BURN_SUBSTITUTOR);
-    console.log("Mode:             ", mode);
+  const walletClient = createWalletClient({
+    account,
+    chain: {
+      ...profile.chain,
+      rpcUrls: {
+        default: { http: [rpcUrl] },
+        public: { http: [rpcUrl] },
+      },
+    },
+    transport: http(rpcUrl, { timeout: 60_000, retryCount: 3 }),
+  });
 
-    const rollup = getContract({
-        address: ROLLUP_ADDRESS,
-        abi: rollupV1Artifact.abi,
-        client: { public: publicClient, wallet: senderClient },
-    });
+  console.log("Network:         ", profile.name);
+  console.log("Wallet address:  ", account.address);
+  console.log("Rollup address:  ", rollupAddress);
+  console.log("Action:          ", action);
+  console.log("Burn substitutor:", burnSubstitutor);
+  console.log("Mode:            ", mode);
 
-    const timelock = (await rollup.read.timelock()) as `0x${string}`;
+  const rollup = getContract({
+    address: rollupAddress,
+    abi: rollupV1Artifact.abi,
+    client: { public: publicClient, wallet: walletClient },
+  });
 
-    const functionName =
-        ACTION === "add" ? "addBurnSubstitutor" : "removeBurnSubstitutor";
-    const data = encodeFunctionData({
-        abi: rollupV1Artifact.abi,
-        functionName,
-        args: [BURN_SUBSTITUTOR],
-    });
+  const timelock = (await rollup.read.timelock()) as `0x${string}`;
 
-    await timelockDispatch({
-        publicClient,
-        walletClient: senderClient,
-        timelock,
-        target: ROLLUP_ADDRESS,
-        data,
-        mode,
-        salt: SALT,
-    });
+  const functionName =
+    action === "add" ? "addBurnSubstitutor" : "removeBurnSubstitutor";
+  const data = encodeFunctionData({
+    abi: rollupV1Artifact.abi,
+    functionName,
+    args: [burnSubstitutor],
+  });
+
+  await timelockDispatch({
+    publicClient,
+    walletClient,
+    timelock,
+    target: rollupAddress,
+    data,
+    mode,
+    salt,
+  });
 }
 
 main()
-    .then(() => process.exit(0))
-    .catch((error) => {
-        console.error("Fatal error:", error);
-        process.exit(1);
-    });
+  .then(() => process.exit(0))
+  .catch((error) => {
+    console.error("Fatal error:", error);
+    process.exit(1);
+  });

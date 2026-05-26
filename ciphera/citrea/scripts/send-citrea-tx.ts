@@ -1,26 +1,67 @@
-import { network } from "hardhat";
+// Smoke transaction: sends 1 wei to self on the configured network.
+// Mostly useful for confirming RPC reachability and key configuration.
 
-const { viem } = await network.connect({
-  network: "citreaTestnet",
-  chainId: 5115,
-});
+import { createPublicClient, createWalletClient, http } from "viem";
+import { mnemonicToAccount, privateKeyToAccount } from "viem/accounts";
+import {
+  assertChainId,
+  parseNetwork,
+  requireEnv,
+  resolveRpcUrl,
+} from "./shared";
 
-console.log("Sending transaction using the OP chain type");
+async function main() {
+  const profile = parseNetwork(process.env.NETWORK);
+  const rpcUrl = resolveRpcUrl(profile);
 
-const publicClient = await viem.getPublicClient();
-const [senderClient] = await viem.getWalletClients();
+  const account =
+    profile.name === "dev"
+      ? privateKeyToAccount(requireEnv("PRIVATE_KEY") as `0x${string}`)
+      : mnemonicToAccount(requireEnv("MNEMONIC"));
 
-console.log("Sending 1 wei from", senderClient.account.address, "to itself");
+  const publicClient = createPublicClient({
+    chain: {
+      ...profile.chain,
+      rpcUrls: {
+        default: { http: [rpcUrl] },
+        public: { http: [rpcUrl] },
+      },
+    },
+    transport: http(rpcUrl, { timeout: 30_000, retryCount: 3 }),
+  });
 
-console.log("Sending L2 transaction");
-const tx = await senderClient.sendTransaction({
-  to: senderClient.account.address,
-  value: 1n,
-});
+  await assertChainId(publicClient, profile.chainId, "send-citrea-tx");
 
-const receipt = await publicClient.waitForTransactionReceipt({ hash: tx });
+  const walletClient = createWalletClient({
+    account,
+    chain: {
+      ...profile.chain,
+      rpcUrls: {
+        default: { http: [rpcUrl] },
+        public: { http: [rpcUrl] },
+      },
+    },
+    transport: http(rpcUrl, { timeout: 30_000, retryCount: 3 }),
+  });
 
-if (receipt.status !== "success") {
-  throw new Error("Transaction reverted");
+  console.log(`Network: ${profile.name} (chainId=${profile.chainId})`);
+  console.log(`Sending 1 wei from ${account.address} to itself`);
+
+  const tx = await walletClient.sendTransaction({
+    to: account.address,
+    value: 1n,
+  });
+
+  const receipt = await publicClient.waitForTransactionReceipt({ hash: tx });
+  if (receipt.status !== "success") {
+    throw new Error("Transaction reverted");
+  }
+  console.log(`✅ Confirmed in block ${receipt.blockNumber}`);
 }
-console.log("Transaction sent successfully");
+
+main()
+  .then(() => process.exit(0))
+  .catch((error) => {
+    console.error("Fatal error:", error);
+    process.exit(1);
+  });

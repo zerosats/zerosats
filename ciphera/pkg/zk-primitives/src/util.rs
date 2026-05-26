@@ -150,34 +150,80 @@ pub fn bridged_polygon_usdc_note_kind() -> Element {
     generate_note_kind_bridge_evm(chain, address)
 }
 
-/// Generates a note kind element for WCBTC on Citrea Testnet.
+/// Citrea network the note kind targets. Determines both the embedded
+/// chain id and the canonical wrapped-cBTC address baked into the note kind.
 ///
-/// # Returns
-///
-/// An Element representing the note kind for Wrapped CBTC on Citrea with:
-/// - note_kind_format: 2
-/// - chain: 5115 (Citrea Testnet)
-/// - address: 0x4370e27F7d91D9341bFf232d7Ee8bdfE3a9933a0
-#[must_use]
-pub fn citrea_wcbtc_note_kind() -> Element {
-    let chain = 5115u64; // Citrea testnet
-    let address =
-        H160::from_slice(&hex::decode("4370e27F7d91D9341bFf232d7Ee8bdfE3a9933a0").unwrap());
-
-    generate_note_kind_bridge_evm(chain, address)
+/// Devnet is intentionally not represented: it has no canonical WCBTC
+/// deployment and devnet flows construct note kinds from runtime-discovered
+/// addresses via [`generate_note_kind_bridge_evm`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum CitreaNetwork {
+    /// Citrea testnet (chain id 5115).
+    Testnet,
+    /// Citrea mainnet (chain id 4114).
+    Mainnet,
 }
 
-/// Generates a note kind element for USDC on Citrea Testnet.
+impl CitreaNetwork {
+    /// EVM chain id for this network.
+    #[must_use]
+    pub const fn chain_id(self) -> u64 {
+        match self {
+            Self::Testnet => 5115,
+            Self::Mainnet => 4114,
+        }
+    }
+
+    /// Canonical wrapped-cBTC (WCBTC) ERC20 address for this network.
+    /// Must stay in lock-step with `scripts/shared.ts::wcbtcAddressFor` on
+    /// the contract side — both files reference the same deployment.
+    #[must_use]
+    pub fn wcbtc_address(self) -> H160 {
+        let hex = match self {
+            Self::Testnet => "4370e27F7d91D9341bFf232d7Ee8bdfE3a9933a0",
+            Self::Mainnet => "3100000000000000000000000000000000000006",
+        };
+        H160::from_slice(&hex::decode(hex).expect("static hex"))
+    }
+
+    /// Recover a network from its EVM chain id, if known. Returns `None`
+    /// for any unrecognised chain (including devnet).
+    #[must_use]
+    pub const fn try_from_chain_id(chain_id: u64) -> Option<Self> {
+        match chain_id {
+            5115 => Some(Self::Testnet),
+            4114 => Some(Self::Mainnet),
+            _ => None,
+        }
+    }
+}
+
+/// Generates a note kind element for WCBTC on the chosen Citrea network.
+///
+/// Layout (per [`generate_note_kind_bridge_evm`]):
+/// - note_kind_format: 2 (ETH-based bridged asset)
+/// - chain: 5115 (testnet) or 4114 (mainnet)
+/// - address: `CitreaNetwork::wcbtc_address()` for the chosen network
+#[must_use]
+pub fn citrea_wcbtc_note_kind(network: CitreaNetwork) -> Element {
+    generate_note_kind_bridge_evm(network.chain_id(), network.wcbtc_address())
+}
+
+/// Generates a note kind element for USDC on Citrea testnet.
+///
+/// USDC has no canonical mainnet deployment on Citrea yet, so this helper
+/// is testnet-only. When a mainnet USDC contract is registered, add a
+/// `CitreaNetwork`-parameterised variant alongside this one.
 ///
 /// # Returns
 ///
-/// An Element representing the note kind for USDC on Citrea with:
+/// An Element representing the note kind for USDC on Citrea testnet with:
 /// - note_kind_format: 2
-/// - chain: 5115 (Citrea Testnet)
-/// - address: 0x52f74a8f9bdd29f77a5efd7f6cb44dcf6906a4b6 (not checked, used only for tests)
+/// - chain: 5115
+/// - address: 0x52f74a8f9bdd29f77a5efd7f6cb44dcf6906a4b6 (test fixture)
 #[must_use]
-pub fn citrea_usdc_note_kind() -> Element {
-    let chain = 5115u64; // Citrea testnet
+pub fn citrea_testnet_usdc_note_kind() -> Element {
+    let chain = CitreaNetwork::Testnet.chain_id();
     let address =
         H160::from_slice(&hex::decode("52f74a8f9bdd29f77a5efd7f6cb44dcf6906a4b6").unwrap());
 
@@ -320,30 +366,59 @@ mod tests {
     }
 
     #[test]
-    fn test_wrapped_citrea_testnet_note_kind() {
-        let chain = 5115_u64; // Citrea chain
-        let token =
-            H160::from_slice(&hex::decode("4370e27F7d91D9341bFf232d7Ee8bdfE3a9933a0").unwrap()); // Token Contract
-        let result = generate_note_kind_bridge_evm(chain, token);
+    fn test_citrea_network_chain_ids() {
+        assert_eq!(CitreaNetwork::Testnet.chain_id(), 5115);
+        assert_eq!(CitreaNetwork::Mainnet.chain_id(), 4114);
+    }
 
+    #[test]
+    fn test_citrea_network_try_from_chain_id() {
+        assert_eq!(
+            CitreaNetwork::try_from_chain_id(5115),
+            Some(CitreaNetwork::Testnet)
+        );
+        assert_eq!(
+            CitreaNetwork::try_from_chain_id(4114),
+            Some(CitreaNetwork::Mainnet)
+        );
+        assert_eq!(CitreaNetwork::try_from_chain_id(5655), None); // devnet
+        assert_eq!(CitreaNetwork::try_from_chain_id(1), None);
+    }
+
+    #[test]
+    fn test_citrea_testnet_wcbtc_note_kind() {
+        let result = citrea_wcbtc_note_kind(CitreaNetwork::Testnet);
         let result_bytes = result.to_be_bytes();
 
-        println!("{:?}", result.to_hex());
-
-        // Check note_kind_format is in bytes 0-2
         assert_eq!(&result_bytes[0..2], &(2u16).to_be_bytes());
-
-        // Check chain is in bytes 2-10 (big endian)
-        // 137 (Polygon) = 0x89, so as u64 big endian = [0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x89]
-        let expected_chain_bytes = 5115u64.to_be_bytes();
-        assert_eq!(&result_bytes[2..10], &expected_chain_bytes);
-
-        // Check address is in bytes 10-30
+        assert_eq!(&result_bytes[2..10], &5115u64.to_be_bytes());
         let expected_address_bytes =
             hex::decode("4370e27F7d91D9341bFf232d7Ee8bdfE3a9933a0").unwrap();
         assert_eq!(&result_bytes[10..30], &expected_address_bytes[..]);
-
-        // Check last 2 bytes are zero (padding)
         assert_eq!(&result_bytes[30..32], &[0u8; 2]);
+    }
+
+    #[test]
+    fn test_citrea_mainnet_wcbtc_note_kind() {
+        let result = citrea_wcbtc_note_kind(CitreaNetwork::Mainnet);
+        let result_bytes = result.to_be_bytes();
+
+        assert_eq!(&result_bytes[0..2], &(2u16).to_be_bytes());
+        assert_eq!(&result_bytes[2..10], &4114u64.to_be_bytes());
+        let expected_address_bytes =
+            hex::decode("3100000000000000000000000000000000000006").unwrap();
+        assert_eq!(&result_bytes[10..30], &expected_address_bytes[..]);
+        assert_eq!(&result_bytes[30..32], &[0u8; 2]);
+    }
+
+    #[test]
+    fn test_testnet_and_mainnet_wcbtc_note_kinds_differ() {
+        // Sanity: the two networks must not collide. A single note_kind
+        // value must never resolve to a different token on a different
+        // network.
+        assert_ne!(
+            citrea_wcbtc_note_kind(CitreaNetwork::Testnet),
+            citrea_wcbtc_note_kind(CitreaNetwork::Mainnet),
+        );
     }
 }
