@@ -3,7 +3,7 @@
 ![status](https://img.shields.io/badge/status-pre--mainnet-f5b800)
 ![noir](https://img.shields.io/badge/noir-%E2%89%A50.36-0066ff)
 ![proof](https://img.shields.io/badge/proof%20system-UltraHonk-1f6feb)
-![solidity](https://img.shields.io/badge/solidity-0.8.29-363636)
+![solidity](https://img.shields.io/badge/solidity-0.8.28-363636)
 ![git-lfs](https://img.shields.io/badge/git--lfs-required-d62828)
 <!-- badges:start -->
 ![Utxo ACIR](https://img.shields.io/badge/agg__agg%20ACIR-40%2C371-0066ff)
