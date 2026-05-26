@@ -42,13 +42,121 @@ export const citreaTestChain = {
     default: { http: [""] }, // Will be set dynamically
     public: { http: [""] },
   },
-  // Add default gas configuration
   fees: {
     defaultPriorityFee: parseGwei("0.5"),
     baseFeeMultiplier: 1.1,
   },
 } as const;
 
+export const citreaMainChain = {
+  id: 4114,
+  name: "Citrea Mainnet",
+  network: "citreaMainnet",
+  nativeCurrency: {
+    decimals: 18,
+    name: "Citrea Bitcoin",
+    symbol: "cBTC",
+  },
+  rpcUrls: {
+    default: { http: [""] },
+    public: { http: [""] },
+  },
+  fees: {
+    defaultPriorityFee: parseGwei("0.5"),
+    baseFeeMultiplier: 1.1,
+  },
+} as const;
+
+export type NetworkName = "dev" | "test" | "main";
+
+export interface NetworkProfile {
+  name: NetworkName;
+  chain: typeof citreaDevChain | typeof citreaTestChain | typeof citreaMainChain;
+  chainId: number;
+  defaultRpcUrl: string;
+  // Wrapped-cBTC token. Mainnet value MUST be set before mainnet deploys.
+  // `null` means "no canonical value — operator must pass ERC20_ADDRESS".
+  wcbtcAddress: `0x${string}` | null;
+}
+
+const NETWORK_PROFILES: Record<NetworkName, NetworkProfile> = {
+  dev: {
+    name: "dev",
+    chain: citreaDevChain,
+    chainId: 5655,
+    defaultRpcUrl: "http://localhost:12345",
+    wcbtcAddress: null,
+  },
+  test: {
+    name: "test",
+    chain: citreaTestChain,
+    chainId: 5115,
+    defaultRpcUrl: "https://rpc.testnet.citrea.xyz",
+    wcbtcAddress: "0x4370e27F7d91D9341bFf232d7Ee8bdfE3a9933a0",
+  },
+  main: {
+    name: "main",
+    chain: citreaMainChain,
+    chainId: 4114,
+    // Operator must supply RPC_URL on mainnet — no public default to avoid
+    // accidentally routing prod traffic through an unintended endpoint.
+    defaultRpcUrl: "",
+    // Must be filled in before any mainnet deploy is attempted.
+    wcbtcAddress: "0x3100000000000000000000000000000000000006",
+  },
+};
+
+export function parseNetwork(raw: string | undefined): NetworkProfile {
+  if (!raw || raw.trim() === "") {
+    throw new Error(
+      "NETWORK env var is required. Set NETWORK=dev|test|main.",
+    );
+  }
+  const key = raw.trim().toLowerCase() as NetworkName;
+  const profile = NETWORK_PROFILES[key];
+  if (!profile) {
+    throw new Error(`Unknown NETWORK '${raw}'. Use one of: dev, test, main.`);
+  }
+  return profile;
+}
+
+export function resolveRpcUrl(profile: NetworkProfile): string {
+  const fromEnv = process.env.RPC_URL?.trim();
+  if (fromEnv) return fromEnv;
+  if (!profile.defaultRpcUrl) {
+    throw new Error(
+      `RPC_URL is required for NETWORK=${profile.name} (no default available).`,
+    );
+  }
+  return profile.defaultRpcUrl;
+}
+
+export function wcbtcAddressFor(profile: NetworkProfile): `0x${string}` {
+  if (!profile.wcbtcAddress) {
+    throw new Error(
+      `No canonical WCBTC address registered for NETWORK=${profile.name}. ` +
+        `Pass ERC20_ADDRESS explicitly or update wcbtcAddress in shared.ts.`,
+    );
+  }
+  return profile.wcbtcAddress;
+}
+
+export async function assertChainId(
+  publicClient: PublicClient,
+  expected: number,
+  label: string,
+): Promise<void> {
+  const actual = await publicClient.getChainId();
+  if (actual !== expected) {
+    throw new Error(
+      `${label}: connected chainId=${actual}, refusing to operate. ` +
+        `Expected chainId=${expected}.`,
+    );
+  }
+}
+
+// Back-compat: testnet WCBTC address still exported for any caller that hasn't
+// migrated to wcbtcAddressFor(). New code should use the network-aware helper.
 export const WCBTC_ADDRESS = "0x4370e27F7d91D9341bFf232d7Ee8bdfE3a9933a0" as const;
 
 export const WCBTC_ABI = [
@@ -85,15 +193,48 @@ export const WCBTC_ABI = [
   },
 ] as const;
 
+// Solidity link placeholders look like `__$<34 hex>$__` in the textual bin.
+// Discovering them automatically (rather than hardcoding per-script) means a
+// VK regeneration that changes the keccak prefix doesn't silently mis-link.
+const SOLC_PLACEHOLDER_RE = /__\$[0-9a-fA-F]{34}\$__/g;
+
+export function discoverPlaceholders(bin: string): string[] {
+  const matches = bin.match(SOLC_PLACEHOLDER_RE);
+  if (!matches) return [];
+  return Array.from(new Set(matches));
+}
+
 export function linkBin(
   bin: string,
   links: Record<string, `0x${string}`>,
 ): string {
   for (const [placeholder, address] of Object.entries(links)) {
+    if (!bin.includes(placeholder)) {
+      throw new Error(
+        `linkBin: placeholder ${placeholder} not found in bin. ` +
+          `Regenerate contracts/noir/*.linkrefs.json or pass the placeholder ` +
+          `actually emitted by the current solc.`,
+      );
+    }
     const addr = address.slice(2).toLowerCase().padStart(40, "0");
     bin = bin.split(placeholder).join(addr);
   }
+  // No placeholders should remain after linking.
+  const leftover = discoverPlaceholders(bin);
+  if (leftover.length > 0) {
+    throw new Error(
+      `linkBin: ${leftover.length} unlinked placeholder(s) remain after substitution: ${leftover.join(", ")}`,
+    );
+  }
   return bin;
+}
+
+export function requireEnv(name: string): string {
+  const v = process.env[name];
+  if (!v || v.trim() === "") {
+    throw new Error(`${name} env var is required`);
+  }
+  return v.trim();
 }
 
 export const TIMELOCK_ABI = [

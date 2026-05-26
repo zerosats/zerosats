@@ -75,11 +75,13 @@ pub async fn create_offramp(
     let note_kind = match &req.note_kind {
         Some(s) => Element::from_str(s)
             .map_err(|e| ApiError::BadRequest(format!("invalid note_kind format: {e}")))?,
-        None => state.config.ciphera_btc_note_kind,
+        None => state.default_note_kind,
     };
 
-    if note_kind != state.config.ciphera_btc_note_kind {
-        return Err(ApiError::BadRequest(format!("only Ciphera BTC note kind is allowed")));
+    if note_kind != state.default_note_kind {
+        return Err(ApiError::BadRequest(
+            "only the configured Citrea WCBTC note kind is allowed".to_string(),
+        ));
     }
 
     // bolt11 value (milli-sats) -> note value (wei, 1e7 multiplier turns msats into wei

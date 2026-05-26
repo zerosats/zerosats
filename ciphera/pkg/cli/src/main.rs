@@ -19,7 +19,14 @@ use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::Path;
 use std::str::FromStr;
-use zk_primitives::{InputNote, Note, citrea_usdc_note_kind, citrea_wcbtc_note_kind};
+use zk_primitives::{
+    CitreaNetwork, InputNote, Note, citrea_testnet_usdc_note_kind, citrea_wcbtc_note_kind,
+};
+
+/// CLI is hardcoded to Citrea testnet today (see
+/// `client::client_tests::CHAIN_ID`). When the CLI grows a `--network` flag
+/// this constant should be threaded through the surrounding code paths.
+const CLI_NETWORK: CitreaNetwork = CitreaNetwork::Testnet;
 
 #[derive(Parser, Debug)]
 #[command(name = "ciphera-cli")]
@@ -1117,8 +1124,14 @@ async fn handle_release_slow_burn(
     // remaining note_kind across the supported tokens by recomputing the
     // key and matching it against the indexed `key` topic.
     let candidate_kinds: Vec<(&str, H256)> = vec![
-        ("WCBTC", convert_element_to_h256(&citrea_wcbtc_note_kind())),
-        ("USDC", convert_element_to_h256(&citrea_usdc_note_kind())),
+        (
+            "WCBTC",
+            convert_element_to_h256(&citrea_wcbtc_note_kind(CLI_NETWORK)),
+        ),
+        (
+            "USDC",
+            convert_element_to_h256(&citrea_testnet_usdc_note_kind()),
+        ),
     ];
 
     let mut matched: Option<(&str, H256)> = None;

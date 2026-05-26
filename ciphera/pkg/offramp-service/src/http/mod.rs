@@ -5,6 +5,7 @@ use crate::clients::ChainTipClient;
 use crate::config::Config;
 use crate::db::DbPool;
 use actix_web::web;
+use element::Element;
 use std::sync::Arc;
 
 /// Shared state injected into every actix handler.
@@ -13,6 +14,9 @@ pub struct AppState {
     pub config: Arc<Config>,
     pub db: DbPool,
     pub chain_tip: Arc<dyn ChainTipClient>,
+    /// Resolved default note kind — `Config::resolved_default_note_kind`
+    /// evaluated once at startup so handlers don't re-resolve on each request.
+    pub default_note_kind: Element,
 }
 
 pub fn configure_routes(state: AppState) -> impl FnOnce(&mut web::ServiceConfig) {

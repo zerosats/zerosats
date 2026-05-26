@@ -1,8 +1,13 @@
+// Deploy the rollup proxy + initialize + transfer ProxyAdmin ownership to
+// the in-contract timelock. Mainnet-shaped: no devnet key fallback, every
+// non-default input is explicit, every post-deploy invariant is verified
+// against the chain before exit.
+
 import rollupV1Artifact from "../artifacts/contracts/rollup/RollupV1.sol/RollupV1.json";
 import aliceTokenArtifact from "../artifacts/contracts/helper/AliceERC20.sol/AliceERC20.json";
-
 import proxyArtifact from "../openzeppelin-contracts/contracts/proxy/transparent/TransparentUpgradeableProxy.sol/TransparentUpgradeableProxy.json";
 
+import { readFile } from "fs/promises";
 import {
   createPublicClient,
   createWalletClient,
@@ -10,16 +15,18 @@ import {
   formatEther,
   encodeFunctionData,
   getContract,
-  formatUnits,
   maxUint256,
   parseAbi,
 } from "viem";
-import { privateKeyToAccount, mnemonicToAccount } from "viem/accounts";
-import { citreaDevChain, citreaTestChain } from "./shared";
+import { mnemonicToAccount, privateKeyToAccount } from "viem/accounts";
+import {
+  assertChainId,
+  parseNetwork,
+  requireEnv,
+  resolveRpcUrl,
+  wcbtcAddressFor,
+} from "./shared";
 import IERC20Artifact from "../openzeppelin-contracts/token/ERC20/IERC20.json";
-
-// Auto-updated by generate_fixtures.sh - do not modify manually
-const AGG_AGG_VERIFICATION_KEY_HASH = "0x0070170dcc7ad428aceab8724ef8ea429eb8baa18a1dc7f687d5ec3536f11fcc";
 
 const EIP1967_ADMIN_STORAGE_SLOT =
   "0xb53127684a568b3173ae13b9f8a6016e243e63b6e8ee1178d6a717850b5d6103";
@@ -29,15 +36,54 @@ const PROXY_ADMIN_ABI = parseAbi([
   "function transferOwnership(address newOwner)",
 ]);
 
+const IERC20_METADATA_ABI = parseAbi([
+  "function totalSupply() view returns (uint256)",
+  "function decimals() view returns (uint8)",
+]);
+
 const ONE_HOUR_SECONDS = 3_600n;
 const SEVEN_DAYS_SECONDS = 7n * 24n * ONE_HOUR_SECONDS;
 const DEFAULT_PER_MINT_CAP_WEI = 1_000_000_000_000_000n; // 0.001 token
 const DEFAULT_GLOBAL_TVL_CAP_WEI = 10_000_000_000_000_000_000n; // 10 token
 const SATS_TO_WEI = 10_000_000_000n; // 18-dec BTC wrappers
-const DEFAULT_BURN_FEE_WEI = 300n * SATS_TO_WEI; // 300 sats
-const MAX_BURN_FEE_WEI = 3_000n * SATS_TO_WEI; // 3000 sats
+const DEFAULT_BURN_FEE_WEI = 300n * SATS_TO_WEI;
+const MAX_BURN_FEE_WEI = 3_000n * SATS_TO_WEI;
 
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
+
+// Encoded noteKind seed for the initial token. Canonical layout (must match
+// the noir circuits — see pkg/zk-primitives::note_kind):
+//   bytes 0..1   : 0x0002 (kind discriminator)
+//   bytes 2..7   : zero pad
+//   bytes 8..9   : chainId (big-endian uint16)
+//   bytes 10..29 : token address (20 bytes)
+//   bytes 30..31 : 0x0000 (trailing pad)
+// The contract's `initialize` enforces the address slice at bytes 10..29.
+// Operators can override entirely via INITIAL_NOTE_KIND env if the noir
+// circuits are regenerated with a different layout.
+function deriveInitialNoteKind(
+  chainId: number,
+  tokenAddress: `0x${string}`,
+): `0x${string}` {
+  const prefix = "0002000000000000" + chainId.toString(16).padStart(4, "0");
+  const tokenHex = tokenAddress.slice(2).toLowerCase().padStart(40, "0");
+  const tail = "0000";
+  return `0x${prefix}${tokenHex}${tail}`.toLowerCase() as `0x${string}`;
+}
+
+// Extract bytes 10..29 from a 32-byte 0x-prefixed noteKind, returned as a
+// 0x-prefixed 20-byte lowercase hex string. Matches the address slice the
+// contract validates against.
+function noteKindAddressSlice(noteKind: `0x${string}`): `0x${string}` {
+  const stripped = noteKind.slice(2).toLowerCase();
+  if (stripped.length !== 64) {
+    throw new Error(
+      `INITIAL_NOTE_KIND must be 32 bytes (got ${stripped.length / 2})`,
+    );
+  }
+  // Hex chars 20..59 inclusive = bytes 10..29 = 40 hex chars.
+  return ("0x" + stripped.slice(20, 60)) as `0x${string}`;
+}
 
 function parseBigIntEnv(name: string, fallback: bigint): bigint {
   const value = process.env[name];
@@ -65,105 +111,89 @@ function parseAddressListEnv(
   return parsed;
 }
 
-function readAddressFromSlot(slotValue: `0x${string}` | undefined): `0x${string}` {
+function readAddressFromSlot(
+  slotValue: `0x${string}` | undefined,
+): `0x${string}` {
   if (!slotValue || slotValue.length < 66) {
     throw new Error(`Unexpected slot value: ${slotValue}`);
   }
   return `0x${slotValue.slice(26)}` as `0x${string}`;
 }
 
-async function main() {
-  console.log("Initialization...");
-  // Verifiers are deployed separately (see scripts/deploy-verifier.ts).
-  // The rollup deploy expects a pre-deployed aggregate verifier address
-  // via VERIFIER -- it never deploys the verifier itself.
-  const aggregateVerifierAddr = process.env.VERIFIER as
-    | `0x${string}`
-    | undefined;
-  if (!aggregateVerifierAddr) {
+async function readVkHash(): Promise<`0x${string}`> {
+  const override = process.env.AGG_AGG_VERIFICATION_KEY_HASH;
+  if (override) {
+    if (!override.startsWith("0x") || override.length !== 66) {
+      throw new Error(
+        `AGG_AGG_VERIFICATION_KEY_HASH must be 32-byte 0x-prefixed hex`,
+      );
+    }
+    return override as `0x${string}`;
+  }
+  const path = "contracts/noir/agg_agg_vk_hash.json";
+  const raw = await readFile(path).catch((e) => {
     throw new Error(
-      "VERIFIER is not set. Deploy the aggregate verifier first via scripts/deploy-verifier.ts and pass its address as VERIFIER.",
+      `Cannot read ${path}: ${e}. Set AGG_AGG_VERIFICATION_KEY_HASH env to override.`,
+    );
+  });
+  const parsed = JSON.parse(raw.toString());
+  const hash = parsed.vkHash ?? parsed.hash ?? parsed.aggAggVkHash;
+  if (!hash || typeof hash !== "string" || !hash.startsWith("0x")) {
+    throw new Error(
+      `${path} did not contain a 'vkHash' field with a 0x-prefixed hash`,
     );
   }
-  const isTestnet = process.env.IS_TESTNET === "1";
-  let proverAddress = process.env.PROVER_ADDRESS as `0x${string}`;
-  let validators =
-    process.env.VALIDATORS?.split(",") ?? ([] as Array<`0x${string}`>);
+  return hash as `0x${string}`;
+}
 
-  console.log("    Citrea Testnet - ", isTestnet);
-  console.log("    Prover Address - ", proverAddress);
-  console.log("    Validators - ", validators);
-  console.log("    Verifier - ", aggregateVerifierAddr);
+async function main() {
+  console.log("Initialization...");
 
-  let account;
-  let rpcUrl;
-  let walletClient;
+  const profile = parseNetwork(process.env.NETWORK);
+  const rpcUrl = resolveRpcUrl(profile);
 
-  if (isTestnet) {
-    let seed = process.env.MNEMONIC as string;
-    account = mnemonicToAccount(seed);
-    rpcUrl = "https://rpc.testnet.citrea.xyz";
-    if (proverAddress === undefined)
-      throw new Error("PROVER_ADDRESS is not set");
-    if (validators.length === 0) throw new Error("VALIDATORS is not set");
-
-    walletClient = createWalletClient({
-      account,
-      chain: {
-        ...citreaTestChain,
-        rpcUrls: {
-          default: { http: [rpcUrl] },
-          public: { http: [rpcUrl] },
-        },
-      },
-      transport: http(rpcUrl, {
-        timeout: 60000,
-        retryCount: 3,
-      }),
-    });
-  } else {
-    const privateKey =
-      "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
-    account = privateKeyToAccount(privateKey as `0x${string}`);
-    rpcUrl = process.env.TESTING_URL || "http://localhost:12345";
-
-    if (proverAddress === undefined) {
-      proverAddress = account.address;
+  // Mainnet requires explicit confirmation of the chainId we are about to
+  // sign against — protects against ENV mis-config or RPC switcheroo.
+  if (profile.name === "main") {
+    const confirm = process.env.CONFIRM;
+    if (confirm !== String(profile.chainId)) {
+      throw new Error(
+        `CONFIRM must equal chainId ${profile.chainId} to run deploy.ts on mainnet`,
+      );
     }
-
-    if (validators.length === 0) {
-      validators = [account.address];
-    }
-
-    walletClient = createWalletClient({
-      account,
-      chain: {
-        ...citreaDevChain,
-        rpcUrls: {
-          default: { http: [rpcUrl] },
-          public: { http: [rpcUrl] },
-        },
-      },
-      transport: http(rpcUrl, {
-        timeout: 30000,
-        retryCount: 3,
-      }),
-    });
   }
 
+  const aggregateVerifierAddr = requireEnv("VERIFIER") as `0x${string}`;
+  const account =
+    profile.name === "dev"
+      ? privateKeyToAccount(requireEnv("PRIVATE_KEY") as `0x${string}`)
+      : mnemonicToAccount(requireEnv("MNEMONIC"));
+
+  let proverAddress: `0x${string}` =
+    (process.env.PROVER_ADDRESS as `0x${string}`) || account.address;
+  let validators: `0x${string}`[] = parseAddressListEnv("VALIDATORS", [
+    account.address,
+  ]);
+
+  console.log(`    Network         - ${profile.name}`);
+  console.log(`    Chain ID        - ${profile.chainId}`);
+  console.log(`    Prover address  - ${proverAddress}`);
+  console.log(`    Validators      - ${validators.join(",")}`);
+  console.log(`    Verifier        - ${aggregateVerifierAddr}`);
+
   let ownerAddress = account.address;
-  console.log("    Owner - ", ownerAddress);
+  console.log(`    Owner           - ${ownerAddress}`);
 
   let burnerAddress = process.env.BURNER_ADDRESS as `0x${string}` | undefined;
-  if (isTestnet) {
-    if (!burnerAddress) throw new Error("BURNER_ADDRESS is not set");
+  if (profile.name === "main" || profile.name === "test") {
+    if (!burnerAddress) throw new Error("BURNER_ADDRESS is required");
   } else if (!burnerAddress) {
     burnerAddress = ownerAddress;
   }
   if (burnerAddress === ZERO_ADDRESS) {
     throw new Error("BURNER_ADDRESS cannot be zero address");
   }
-  console.log("    Burner - ", burnerAddress);
+  console.log(`    Burner          - ${burnerAddress}`);
 
   // Init config: secure defaults overridable via env vars.
   const perMintCap = parseBigIntEnv(
@@ -185,14 +215,12 @@ async function main() {
     "TIMELOCK_MIN_DELAY_SECONDS",
     ONE_HOUR_SECONDS,
   );
-  const timelockProposers = parseAddressListEnv(
-    "TIMELOCK_PROPOSERS",
-    [ownerAddress],
-  );
-  const timelockExecutors = parseAddressListEnv(
-    "TIMELOCK_EXECUTORS",
-    [ownerAddress],
-  );
+  const timelockProposers = parseAddressListEnv("TIMELOCK_PROPOSERS", [
+    ownerAddress,
+  ]);
+  const timelockExecutors = parseAddressListEnv("TIMELOCK_EXECUTORS", [
+    ownerAddress,
+  ]);
 
   if (feeSink === ZERO_ADDRESS) {
     throw new Error("FEE_SINK cannot be zero address");
@@ -203,127 +231,142 @@ async function main() {
     );
   }
 
-  console.log("🚀 Connecting to Citrea...");
-  console.log(`    Using URL: ${rpcUrl}`);
+  console.log(`🚀 Connecting to Citrea (${rpcUrl})...`);
 
-  // Create clients with dynamic RPC URL
   const publicClient = createPublicClient({
     chain: {
-      ...(isTestnet ? citreaTestChain : citreaDevChain),
+      ...profile.chain,
       rpcUrls: {
         default: { http: [rpcUrl] },
         public: { http: [rpcUrl] },
       },
     },
-    transport: http(rpcUrl, {
-      timeout: 30000,
-      retryCount: 3,
-    }),
+    transport: http(rpcUrl, { timeout: 30_000, retryCount: 3 }),
   });
 
-  // Test basic connectivity
-  console.log("\n🔍 Testing connection...");
-  const chainId = await publicClient.getChainId();
-  console.log(`✅ Chain ID: ${chainId}`);
+  await assertChainId(publicClient, profile.chainId, "deploy");
+
+  const walletClient = createWalletClient({
+    account,
+    chain: {
+      ...profile.chain,
+      rpcUrls: {
+        default: { http: [rpcUrl] },
+        public: { http: [rpcUrl] },
+      },
+    },
+    transport: http(rpcUrl, { timeout: 60_000, retryCount: 3 }),
+  });
 
   const blockNumber = await publicClient.getBlockNumber();
   console.log(`✅ Block Number: ${blockNumber}`);
-
-  // Check account balance
-  let balance = await publicClient.getBalance({
-    address: account.address,
-  });
+  let balance = await publicClient.getBalance({ address: account.address });
   console.log(`✅ Account: ${account.address}`);
   console.log(`✅ Balance: ${formatEther(balance)} cBTC`);
 
-  // Get gas price
-  const gasPrice = await publicClient.getGasPrice();
-  console.log(
-    `✅ Gas Price: ${gasPrice} wei, ${formatUnits(gasPrice, 9)} GWei`,
-  );
-  const latestBlock = await publicClient.getBlock({ blockTag: "latest" });
-  const baseFee = latestBlock.baseFeePerGas;
-  if (!baseFee) {
-    throw new Error("Network doesn't support EIP-1559");
+  // ── Preflight ──
+  const verifierCode = await publicClient.getCode({
+    address: aggregateVerifierAddr,
+  });
+  if (!verifierCode || verifierCode === "0x") {
+    throw new Error(
+      `No bytecode at VERIFIER=${aggregateVerifierAddr} — deploy verifier first`,
+    );
   }
-  console.log(`✅ Base Fee: ${baseFee}`);
 
-  console.log("\n🎉 Connection successful!");
+  const vkHash = await readVkHash();
+  console.log(`✅ Verifier code:    ${(verifierCode.length - 2) / 2} bytes`);
+  console.log(`✅ Aggregate VK hash: ${vkHash}`);
 
-  let erc20Address;
-  let receipt;
-
-  if (isTestnet) {
-    erc20Address = process.env.ERC20_ADDRESS || "0x4370e27F7d91D9341bFf232d7Ee8bdfE3a9933a0";
-    console.log(`✅ Using wrapped cBTC token`);
-  } else {
-    console.log("\n🔍 Deploying ERC20. Looking for binary file...");
-
+  // Resolve the ERC20 token address.
+  let erc20Address: `0x${string}`;
+  if (profile.name === "dev") {
+    console.log("\n🔍 Devnet: deploying fixture ERC20...");
     const erc20Tx = await walletClient.deployContract({
       abi: aliceTokenArtifact.abi,
       bytecode: aliceTokenArtifact.bytecode,
       args: [maxUint256],
     });
-
-    receipt = await publicClient.waitForTransactionReceipt({
+    const erc20Receipt = await publicClient.waitForTransactionReceipt({
       hash: erc20Tx,
     });
-
-    if (receipt.status !== "success") {
+    if (erc20Receipt.status !== "success") {
       throw new Error("ERC20 deploy reverted");
     }
-    console.log(`✅ Transaction confirmed in block`);
-    erc20Address = receipt.contractAddress;
-    console.log(`✅ ERC20 Deployed`);
+    erc20Address = erc20Receipt.contractAddress!;
+  } else {
+    const fromEnv = process.env.ERC20_ADDRESS as `0x${string}` | undefined;
+    erc20Address = fromEnv ?? wcbtcAddressFor(profile);
   }
+  console.log(`✅ ERC20 token: ${erc20Address}`);
 
-  console.log(`✅ ERC20 Contract: ${erc20Address}`);
+  const erc20Code = await publicClient.getCode({ address: erc20Address });
+  if (!erc20Code || erc20Code === "0x") {
+    throw new Error(`No bytecode at ERC20_ADDRESS=${erc20Address}`);
+  }
+  const tokenMeta = getContract({
+    address: erc20Address,
+    abi: IERC20_METADATA_ABI,
+    client: { public: publicClient },
+  });
+  const decimals = (await tokenMeta.read.decimals()) as number;
+  if (decimals !== 18) {
+    throw new Error(
+      `ERC20 at ${erc20Address} reports decimals=${decimals}; expected 18`,
+    );
+  }
+  await tokenMeta.read.totalSupply(); // sanity-call, throws if missing.
+
+  // Initial noteKind: env override wins; otherwise derive from chain + token.
+  const initialNoteKind =
+    (process.env.INITIAL_NOTE_KIND as `0x${string}` | undefined) ??
+    deriveInitialNoteKind(profile.chainId, erc20Address);
+  const noteKindAddrSlice = noteKindAddressSlice(initialNoteKind);
+  if (noteKindAddrSlice !== erc20Address.toLowerCase()) {
+    throw new Error(
+      `INITIAL_NOTE_KIND bytes 10..29 (${noteKindAddrSlice}) do not match ERC20 address (${erc20Address.toLowerCase()})`,
+    );
+  }
+  console.log(`✅ Initial noteKind: ${initialNoteKind}`);
 
   console.log(
-    `✅ Using pre-deployed Aggregate Verifier Contract: ${aggregateVerifierAddr}`,
+    `\n🔍 Init params: perMintCap=${perMintCap} globalTvlCap=${globalTvlCap}`,
+  );
+  console.log(
+    `   openProvingDelay=${openProvingDelay}s burnFee=${burnFee} wei feeSink=${feeSink}`,
+  );
+  console.log(
+    `   timelockDelay=${timelockMinDelay}s proposers=${timelockProposers.join(",")} executors=${timelockExecutors.join(",")}`,
   );
 
-  console.log("\n🔍 Deploying Rollup");
-
-  const rollupV1 = await walletClient.deployContract({
+  // ── Deploy implementation ──
+  console.log("\n🔍 Deploying Rollup implementation...");
+  const rollupV1Tx = await walletClient.deployContract({
     abi: rollupV1Artifact.abi,
     bytecode: rollupV1Artifact.bytecode,
   });
-
-  console.log(`📝 Transaction hash: ${rollupV1}`);
-
-  receipt = await publicClient.waitForTransactionReceipt({
-    hash: rollupV1,
+  let receipt = await publicClient.waitForTransactionReceipt({
+    hash: rollupV1Tx,
   });
-
   if (receipt.status !== "success") {
     throw new Error("RollupV1 implementation deploy reverted");
   }
-  console.log(`✅ Transaction confirmed in block`);
-
-  let rollupAddress = receipt.contractAddress;
-
+  const rollupAddress = receipt.contractAddress!;
   console.log(`✅ Rollup Contract (Implementation): ${rollupAddress}`);
 
-  console.log(
-    `\n🔍 Init params: perMintCap=${perMintCap} globalTvlCap=${globalTvlCap} openProvingDelay=${openProvingDelay}s burnFee=${burnFee} wei`,
-  );
-  console.log(`    feeSink=${feeSink}`);
-  console.log(
-    `    timelockDelay=${timelockMinDelay}s proposers=${timelockProposers.join(",")} executors=${timelockExecutors.join(",")}`,
-  );
-
+  // ── Deploy proxy + initialize ──
   const rollupInitializeCalldata = encodeFunctionData({
     abi: rollupV1Artifact.abi,
     functionName: "initialize",
     args: [
       ownerAddress,
-      burnerAddress, // escrowManager — overridable later via setEscrowManager
+      burnerAddress,
       erc20Address,
+      initialNoteKind,
       aggregateVerifierAddr,
       proverAddress,
       validators,
-      AGG_AGG_VERIFICATION_KEY_HASH,
+      vkHash,
       perMintCap,
       globalTvlCap,
       openProvingDelay,
@@ -340,21 +383,16 @@ async function main() {
     bytecode: proxyArtifact.bytecode,
     args: [rollupAddress, ownerAddress, rollupInitializeCalldata],
   });
-
-  console.log(`📝 Transaction hash: ${rollupProxyTx}`);
-
   receipt = await publicClient.waitForTransactionReceipt({
     hash: rollupProxyTx,
   });
-
   if (receipt.status !== "success") {
     throw new Error("RollupV1 proxy deploy reverted");
   }
-  console.log(`✅ Transaction confirmed in block`);
-  let rollupProxyAddr = receipt.contractAddress;
-
+  const rollupProxyAddr = receipt.contractAddress!;
   console.log(`✅ Rollup Contract (Proxy): ${rollupProxyAddr}`);
 
+  // ── ProxyAdmin discovery + handoff ──
   const adminSlot = await publicClient.getStorageAt({
     address: rollupProxyAddr,
     slot: EIP1967_ADMIN_STORAGE_SLOT,
@@ -373,23 +411,26 @@ async function main() {
     abi: IERC20Artifact.abi,
     client: { public: publicClient, wallet: walletClient },
   });
-  console.log(`✅ Obtained ERC20 contract: ${erc20Address}`);
 
-  console.log("\n🔍 Approving ERC20 spending for proxy...");
-
-  let hash = await aliceToken.write.approve([rollupProxyAddr, maxUint256], {
-    gas: 1_000_000n,
-  });
-
-  receipt = await publicClient.waitForTransactionReceipt({
-    hash: hash,
-  });
-
-  if (receipt.status !== "success") {
-    throw new Error("ERC20 approve reverted");
+  // Approve the proxy on the operator's behalf so the operator can mint
+  // immediately. (Mainnet operators that don't intend to mint can skip
+  // this by setting SKIP_OPERATOR_APPROVAL=1.)
+  if (process.env.SKIP_OPERATOR_APPROVAL !== "1") {
+    console.log("\n🔍 Approving ERC20 spending for proxy...");
+    const approveHash = await aliceToken.write.approve(
+      [rollupProxyAddr, maxUint256],
+      { gas: 1_000_000n },
+    );
+    const approveReceipt = await publicClient.waitForTransactionReceipt({
+      hash: approveHash,
+    });
+    if (approveReceipt.status !== "success") {
+      throw new Error("ERC20 approve reverted");
+    }
+    console.log(`✅ Approved maxUint256: ${approveHash}`);
   }
-  console.log(`✅ Approved maxUint256 to ${rollupProxyAddr}: ${hash}`);
 
+  // ── Verify ownership invariants ──
   const timelockAddress = (await rollup.read.timelock()) as `0x${string}`;
   const rollupOwner = (await rollup.read.owner()) as `0x${string}`;
   if (rollupOwner.toLowerCase() !== timelockAddress.toLowerCase()) {
@@ -397,7 +438,7 @@ async function main() {
       `Rollup owner mismatch after init. owner=${rollupOwner} timelock=${timelockAddress}`,
     );
   }
-  console.log(`✅ Rollup owner now timelock: ${timelockAddress}`);
+  console.log(`✅ Rollup owner is timelock: ${timelockAddress}`);
 
   const proxyAdmin = getContract({
     address: proxyAdminAddress,
@@ -425,7 +466,9 @@ async function main() {
     if (transferReceipt.status !== "success") {
       throw new Error("ProxyAdmin transferOwnership reverted");
     }
-    console.log(`✅ ProxyAdmin ownership transferred to timelock: ${transferHash}`);
+    console.log(
+      `✅ ProxyAdmin ownership transferred to timelock: ${transferHash}`,
+    );
   } else {
     console.log("✅ ProxyAdmin ownership already timelocked");
   }
@@ -438,15 +481,63 @@ async function main() {
   }
   console.log(`✅ ProxyAdmin owner now timelock: ${proxyAdminOwnerAfter}`);
 
-  // Machine-readable output for the test harness
+  // ── Post-deploy readback. Every value below comes from the chain, not
+  // the inputs — mismatches throw before we print DEPLOY_OUTPUT. ──
+  const onChainToken = (await rollup.read.token()) as `0x${string}`;
+  // zkVerifierKeys is a public bytes32[] array; the seed VK hash is index 0.
+  const onChainVerifierKeyHash = (await rollup.read.zkVerifierKeys([
+    0n,
+  ])) as `0x${string}`;
+  const onChainPerMint = (await rollup.read.perMintCap()) as bigint;
+  const onChainTvl = (await rollup.read.globalTvlCap()) as bigint;
+  const onChainOpenDelay = (await rollup.read.openProvingDelay()) as bigint;
+  const onChainBurnFee = (await rollup.read.burnFee()) as bigint;
+  const onChainFeeSink = (await rollup.read.feeSink()) as `0x${string}`;
+  const onChainSubstitutor = (await rollup.read.burnSubstitutors([
+    ownerAddress,
+  ])) as boolean;
+
+  const mismatches: string[] = [];
+  if (onChainToken.toLowerCase() !== erc20Address.toLowerCase())
+    mismatches.push(`token (got=${onChainToken} want=${erc20Address})`);
+  if (onChainVerifierKeyHash.toLowerCase() !== vkHash.toLowerCase())
+    mismatches.push(
+      `vkHash (got=${onChainVerifierKeyHash} want=${vkHash})`,
+    );
+  if (onChainPerMint !== perMintCap)
+    mismatches.push(`perMintCap (got=${onChainPerMint} want=${perMintCap})`);
+  if (onChainTvl !== globalTvlCap)
+    mismatches.push(`globalTvlCap (got=${onChainTvl} want=${globalTvlCap})`);
+  if (onChainOpenDelay !== openProvingDelay)
+    mismatches.push(
+      `openProvingDelay (got=${onChainOpenDelay} want=${openProvingDelay})`,
+    );
+  if (onChainBurnFee !== burnFee)
+    mismatches.push(`burnFee (got=${onChainBurnFee} want=${burnFee})`);
+  if (onChainFeeSink.toLowerCase() !== feeSink.toLowerCase())
+    mismatches.push(`feeSink (got=${onChainFeeSink} want=${feeSink})`);
+  if (!onChainSubstitutor)
+    mismatches.push(`burnSubstitutors[owner] should be true after init`);
+
+  if (mismatches.length > 0) {
+    throw new Error(
+      `Post-deploy readback failed:\n - ${mismatches.join("\n - ")}`,
+    );
+  }
+  console.log("✅ Post-deploy readback OK");
+
+  // Machine-readable output for downstream automation.
   console.log(
     `DEPLOY_OUTPUT=${JSON.stringify({
+      network: profile.name,
+      chainId: profile.chainId,
       rollupProxy: rollupProxyAddr,
       rollupImplementation: rollupAddress,
       rollupOwner,
       timelock: timelockAddress,
       proxyAdmin: proxyAdminAddress,
       proxyAdminOwner: proxyAdminOwnerAfter,
+      initialNoteKind,
       perMintCap: perMintCap.toString(),
       globalTvlCap: globalTvlCap.toString(),
       openProvingDelaySeconds: openProvingDelay.toString(),
@@ -455,37 +546,9 @@ async function main() {
       burner: burnerAddress,
       erc20: erc20Address,
       verifier: aggregateVerifierAddr,
+      vkHash,
     })}`,
   );
-
-  /*
-    // Example transaction (uncomment to test)
-
-    console.log("\n💸 Sending test transaction...");
-    const hash = await walletClient.sendTransaction({
-      to: "0xE00fa9663e1060D4a70d2f534ef4Cee477f895dE", // Second hardhat account
-      value: parseEther("1"),
-      gas: 21000n,
-      gasPrice: gasPrice,
-    });
-
-    console.log(`📝 Transaction hash: ${hash}`);
-
-    const receipt = await publicClient.waitForTransactionReceipt({
-      hash,
-      timeout: 30000,
-    });
-
-    console.log(`✅ Transaction confirmed in block: ${receipt.blockNumber}`);
-    console.log(`✅ Gas used: ${receipt.gasUsed}`);
-    console.log(`✅ Status: ${receipt.status}`);
-
-    balance = await publicClient.getBalance({
-      address: "0xE00fa9663e1060D4a70d2f534ef4Cee477f895dE",
-    });
-    console.log(`✅ Account: 0xE00fa9663e1060D4a70d2f534ef4Cee477f895dE`);
-    console.log(`✅ Balance: ${formatEther(balance)} cBTC`);
-      */
 }
 
 main()

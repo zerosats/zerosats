@@ -21,6 +21,14 @@ async fn main() -> eyre::Result<()> {
 
     let config = Arc::new(Config::parse());
 
+    // Resolve the default WCBTC note kind once at startup so request
+    // handlers don't have to re-evaluate the Citrea-network → note-kind
+    // mapping on every call. Fails fast on misconfiguration.
+    let default_note_kind = config
+        .resolved_default_note_kind()
+        .map_err(|e| eyre::eyre!("note kind config: {e}"))?;
+    tracing::info!(?default_note_kind, "resolved default note kind");
+
     let pool = db::connect(&config.db_path).await?;
 
     let chain_tip = Arc::new(MempoolClient::new(config.mempool_url.clone()));
@@ -46,6 +54,7 @@ async fn main() -> eyre::Result<()> {
         config: config.clone(),
         db: pool,
         chain_tip,
+        default_note_kind,
     };
 
     tracing::info!(%bind, "starting offramp-service HTTP server");

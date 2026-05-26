@@ -43,6 +43,12 @@ fn mint_bolt11(amount_msat: u64) -> String {
         .to_string()
 }
 
+/// Test fixture default note kind. The actual value doesn't matter — handlers
+/// only compare it against whatever the `AppState` exposes.
+fn test_note_kind() -> Element {
+    Element::new(0xb7c)
+}
+
 fn make_config(db_path: &std::path::Path) -> Config {
     Config {
         bind: "127.0.0.1:0".into(),
@@ -51,7 +57,8 @@ fn make_config(db_path: &std::path::Path) -> Config {
         phoenixd_api_password: "x".into(),
         mempool_url: "http://nope".into(),
         db_path: db_path.to_string_lossy().into(),
-        ciphera_btc_note_kind: Element::new(0xb7c),
+        citrea_network: None,
+        ciphera_btc_note_kind: Some(test_note_kind()),
         service_evm_address: Element::new(0x1234),
         timelock_n_blocks: 2,
         quote_ttl_seconds: 600,
@@ -69,6 +76,7 @@ async fn post_offramp_persists_quote() {
         config: Arc::new(make_config(&db_path)),
         db: pool,
         chain_tip: Arc::new(FixedTip([0x7; 32])),
+        default_note_kind: test_note_kind(),
     };
     let app = test::init_service(
         App::new().service(web::scope("").configure(configure_routes(state))),
@@ -107,6 +115,7 @@ async fn cancel_pending_quote_transitions_to_cancelled() {
         config: Arc::new(make_config(&db_path)),
         db: pool,
         chain_tip: Arc::new(FixedTip([0x7; 32])),
+        default_note_kind: test_note_kind(),
     };
     let app = test::init_service(
         App::new().service(web::scope("").configure(configure_routes(state))),
@@ -141,6 +150,7 @@ async fn rejects_invalid_bolt11() {
         config: Arc::new(make_config(&db_path)),
         db: pool,
         chain_tip: Arc::new(FixedTip([0x7; 32])),
+        default_note_kind: test_note_kind(),
     };
     let app = test::init_service(
         App::new().service(web::scope("").configure(configure_routes(state))),

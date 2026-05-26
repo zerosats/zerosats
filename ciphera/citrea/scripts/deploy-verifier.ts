@@ -1,81 +1,101 @@
-import rollupV1Artifact from "../artifacts/contracts/rollup/RollupV1.sol/RollupV1.json";
-import { network } from "hardhat";
-import {createWalletClient, formatEther, http} from "viem";
-import {mnemonicToAccount} from "viem/accounts";
-import {citreaTestChain, deployBin} from "./shared";
+// Deploy the aggregate Honk verifier (and its ZKTranscriptLib dependency) to
+// the configured network. The solc library placeholder is auto-discovered
+// from the bin file so VK regenerations that shift the keccak prefix do not
+// silently mis-link.
 
-// Placeholder embedded by solc for ZKTranscriptLib in agg_agg_HonkVerifier
-const AGG_AGG_TRANSCRIPT_PLACEHOLDER = "__$e6391f3e4b1839f34ea5577896c8005de7$__";
-
-const { viem } = await network.connect({
-    network: "citreaTestnet",
-    chainId: 5115,
-});
-
-const ROLLUP_ADDRESS = process.env.ROLLUP_ADDRESS as `0x${string}`;
-const NEW_ESCROW_MANAGER = process.env.NEW_ESCROW_MANAGER as `0x${string}`;
+import { readFile } from "fs/promises";
+import { createPublicClient, createWalletClient, formatEther, http } from "viem";
+import { mnemonicToAccount, privateKeyToAccount } from "viem/accounts";
+import {
+  assertChainId,
+  deployBin,
+  discoverPlaceholders,
+  parseNetwork,
+  requireEnv,
+  resolveRpcUrl,
+} from "./shared";
 
 async function main() {
-    const seed = process.env.MNEMONIC;
-    if (!seed) throw new Error("MNEMONIC env var is not set");
-    let account = mnemonicToAccount(seed);
-    const rpcUrl = process.env.TESTNET_RPC_URL || "https://rpc.testnet.citrea.xyz";
+  const profile = parseNetwork(process.env.NETWORK);
+  const rpcUrl = resolveRpcUrl(profile);
 
-    const publicClient = await viem.getPublicClient();
+  const account =
+    profile.name === "dev"
+      ? privateKeyToAccount(requireEnv("PRIVATE_KEY") as `0x${string}`)
+      : mnemonicToAccount(requireEnv("MNEMONIC"));
 
-    let senderClient = createWalletClient({
-        account,
-        chain: {
-            ...citreaTestChain,
-            rpcUrls: {
-                default: { http: [rpcUrl] },
-                public: { http: [rpcUrl] },
-            },
-        },
-        transport: http(rpcUrl, {
-            timeout: 60000,
-            retryCount: 3,
-        }),
-    });
+  const publicClient = createPublicClient({
+    chain: {
+      ...profile.chain,
+      rpcUrls: {
+        default: { http: [rpcUrl] },
+        public: { http: [rpcUrl] },
+      },
+    },
+    transport: http(rpcUrl, { timeout: 60_000, retryCount: 3 }),
+  });
 
-    console.log("Wallet address:", senderClient.account.address);
+  await assertChainId(publicClient, profile.chainId, "deploy-verifier");
 
-    console.log("\n🔍 Testing connection...");
-    const chainId = await publicClient.getChainId();
-    console.log(`✅ Chain ID: ${chainId}`);
+  const walletClient = createWalletClient({
+    account,
+    chain: {
+      ...profile.chain,
+      rpcUrls: {
+        default: { http: [rpcUrl] },
+        public: { http: [rpcUrl] },
+      },
+    },
+    transport: http(rpcUrl, { timeout: 60_000, retryCount: 3 }),
+  });
 
-    const blockNumber = await publicClient.getBlockNumber();
-    console.log(`✅ Block Number: ${blockNumber}`);
+  console.log("Network:        ", profile.name);
+  console.log("Wallet address: ", account.address);
+  console.log("Chain ID:       ", profile.chainId);
+  console.log("Block:          ", await publicClient.getBlockNumber());
+  console.log(
+    "Balance:        ",
+    formatEther(await publicClient.getBalance({ address: account.address })),
+    "cBTC",
+  );
 
-    // Check account balance
-    let balance = await publicClient.getBalance({
-        address: account.address,
-    });
-    console.log(`✅ Account: ${account.address}`);
-    console.log(`✅ Balance: ${formatEther(balance)} cBTC`);
+  // 1. Deploy the transcript library first.
+  console.log("\n🔍 Deploying agg_agg ZKTranscriptLib...");
+  const aggAggTranscriptAddr = await deployBin(
+    "noir/agg_agg_ZKTranscriptLib.bin",
+    publicClient,
+    walletClient,
+  );
+  console.log(`✅ agg_agg ZKTranscriptLib: ${aggAggTranscriptAddr}`);
 
-    console.log("\n🔍 Looking for binary files and deploying contracts...");
-
-    const aggAggTranscriptAddr = await deployBin(
-        "noir/agg_agg_ZKTranscriptLib.bin",
-        publicClient,
-        senderClient,
+  // 2. Auto-discover the link placeholder from the verifier bin.
+  const verifierBin = (
+    await readFile("contracts/noir/agg_agg_HonkVerifier.bin")
+  )
+    .toString()
+    .trimEnd();
+  const placeholders = discoverPlaceholders(verifierBin);
+  if (placeholders.length !== 1) {
+    throw new Error(
+      `Expected exactly one library placeholder in agg_agg_HonkVerifier.bin, found ${placeholders.length}: ${placeholders.join(", ")}`,
     );
-    console.log(`✅ agg_agg ZKTranscriptLib: ${aggAggTranscriptAddr}`);
+  }
+  const [placeholder] = placeholders;
+  console.log(`🔗 Linking placeholder ${placeholder} → ${aggAggTranscriptAddr}`);
 
-    const aggregateVerifierAddr = await deployBin(
-        "noir/agg_agg_HonkVerifier.bin",
-        publicClient,
-        senderClient,
-        { [AGG_AGG_TRANSCRIPT_PLACEHOLDER]: aggAggTranscriptAddr },
-    );
-
-    console.log(`✅ Aggregate Verifier Contract: ${aggregateVerifierAddr}`);
+  // 3. Deploy the verifier with the library address linked in.
+  const aggregateVerifierAddr = await deployBin(
+    "noir/agg_agg_HonkVerifier.bin",
+    publicClient,
+    walletClient,
+    { [placeholder]: aggAggTranscriptAddr },
+  );
+  console.log(`✅ Aggregate Verifier Contract: ${aggregateVerifierAddr}`);
 }
 
 main()
-    .then(() => process.exit(0))
-    .catch((error) => {
-        console.error("Fatal error:", error);
-        process.exit(1);
-    });
+  .then(() => process.exit(0))
+  .catch((error) => {
+    console.error("Fatal error:", error);
+    process.exit(1);
+  });

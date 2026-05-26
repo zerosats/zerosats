@@ -120,7 +120,7 @@ contract RollupV1 is
     uint256 private validatorSetIndex;
 
     // Burn substitutors
-    mapping(address => bool) private burnSubstitutors;
+    mapping(address => bool) public burnSubstitutors;
 
     address public escrowManager;
 
@@ -197,6 +197,13 @@ contract RollupV1 is
      * @param escrowManager_ Address authorised to call mintClaimed /
      *        burnClaimed on behalf of off-chain settlement.
      * @param tokenAddress_ Primary ERC20 (single-token policy).
+     * @param initialNoteKind_ 32-byte noteKind seed for the primary
+     *        token. The 20 bytes at offsets 10..29 MUST equal
+     *        `tokenAddress_` (the canonical noteKind layout is
+     *        `[2-byte kind][6 zero][2-byte chainId][20-byte address][2 zero]`).
+     *        `initialize` rejects mismatches to prevent the rollup from
+     *        being deployed with a noteKind that points at the wrong
+     *        token, which would silently brick mint/burn.
      * @param verifierAddress_ Aggregate ZK verifier contract.
      * @param prover_ Initial prover address.
      * @param initialValidators_ Initial validator set (validFrom = 0).
@@ -219,6 +226,7 @@ contract RollupV1 is
         address owner_,
         address escrowManager_,
         address tokenAddress_,
+        bytes32 initialNoteKind_,
         address verifierAddress_,
         address prover_,
         address[] calldata initialValidators_,
@@ -233,6 +241,16 @@ contract RollupV1 is
         address[] calldata timelockExecutors_
     ) public initializer {
         require(feeSink_ != address(0), "RollupV1: invalid fee sink");
+        // Bytes 10..29 of the noteKind encode the primary token address
+        // (the noir circuits embed the address at offset 10 with 2-byte
+        // trailing padding at offsets 30..31). Reject any mismatch —
+        // deploying with a noteKind that points at a different token
+        // would land mints in tokens[<wrong-key>] and silently break
+        // mint/burn for everyone.
+        require(
+            address(uint160(uint256(initialNoteKind_) >> 16)) == tokenAddress_,
+            "RollupV1: noteKind/token mismatch"
+        );
         require(burnFee_ <= MAX_BURN_FEE, "RollupV1: burn fee too high");
         require(
             openProvingDelay_ >= 7 days,
@@ -289,9 +307,7 @@ contract RollupV1 is
         _setRootHash(
             0x0577b5b4aa3eaba75b2a919d5d7c63b7258aa507d38e346bf2ff1d48790379ff
         );
-        tokens[
-            0x000200000000000013fb4370e27F7d91D9341bFf232d7Ee8bdfE3a9933a00000
-        ] = tokenAddress_;
+        tokens[initialNoteKind_] = tokenAddress_;
         burnSubstitutors[owner_] = true;
         escrowManager = escrowManager_;
 
