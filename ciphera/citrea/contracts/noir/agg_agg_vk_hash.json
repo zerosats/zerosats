@@ -1,0 +1,4 @@
+{
+  "comment": "Aggregate-of-aggregates Honk verifier verification-key hash. This file is the single source of truth read by scripts/deploy.ts. Regenerate from pkg/prover and overwrite the vkHash field as part of any noir/circuit change. Operators can override at deploy time with AGG_AGG_VERIFICATION_KEY_HASH env.",
+  "vkHash": "0x09fcff6d73bfee8ed96de0adfb22dcb5261deede656c63d4734941e5b3e96335"
+}

@@ -174,17 +174,39 @@ echo "Verification key hash for agg_agg:"
 echo "$AGG_AGG_VK_OUT" | sed 's/^/  /'
 AGG_AGG_VK_HASH_HEX=$(echo "$AGG_AGG_VK_OUT" | extract_hex)
 
-echo "Updating citrea/scripts/deploy.ts AGG_AGG_VERIFICATION_KEY_HASH=$AGG_AGG_VK_HASH_HEX"
-echo "Updating pkg/contracts/src/rollup.rs AGG_AGG_VERIFICATION_KEY_HASH=$AGG_AGG_VK_HASH_HEX"
+# The hash has two live consumers:
+#   1. citrea/contracts/noir/agg_agg_vk_hash.json — read at deploy time by
+#      citrea/scripts/deploy.ts (the inlined `const` was removed; the
+#      JSON file is now the single source of truth on the TS side).
+#   2. pkg/contracts/src/rollup.rs — Rust const referenced by the prover.
+# Earlier revisions of this script tried to perl-substitute a `const`
+# inside deploy.ts that no longer exists, so the TS side silently
+# drifted while the Rust side updated correctly. Always write both.
 
+AGG_AGG_VK_HASH_JSON="$REPO_ROOT/citrea/contracts/noir/agg_agg_vk_hash.json"
+echo "Updating $AGG_AGG_VK_HASH_JSON vkHash=$AGG_AGG_VK_HASH_HEX"
+if [[ ! -f "$AGG_AGG_VK_HASH_JSON" ]]; then
+  echo "ERROR: $AGG_AGG_VK_HASH_JSON missing — deploy.ts requires it" >&2
+  exit 1
+fi
+JSON_TMP=$(mktemp)
+jq --arg h "$AGG_AGG_VK_HASH_HEX" '.vkHash = $h' "$AGG_AGG_VK_HASH_JSON" > "$JSON_TMP"
+mv "$JSON_TMP" "$AGG_AGG_VK_HASH_JSON"
+
+echo "Updating pkg/contracts/src/rollup.rs AGG_AGG_VERIFICATION_KEY_HASH=$AGG_AGG_VK_HASH_HEX"
 # Use -0777 (slurp the whole file) so the substitution survives a
-# rustfmt/prettier-induced newline between `=` and `"`. The lookbehind
-# form fails silently on multi-line declarations -- exactly the failure
+# rustfmt-induced newline between `=` and `"`. The lookbehind form
+# fails silently on multi-line declarations -- exactly the failure
 # mode that left pkg/contracts/src/rollup.rs frozen at a stale hash.
-perl -i -0777 -pe "s/(const AGG_AGG_VERIFICATION_KEY_HASH\s*=\s*\")[^\"]*(\")/\${1}${AGG_AGG_VK_HASH_HEX}\${2}/" \
-  "$REPO_ROOT/citrea/scripts/deploy.ts"
+ROLLUP_RS="$REPO_ROOT/pkg/contracts/src/rollup.rs"
 perl -i -0777 -pe "s/(AGG_AGG_VERIFICATION_KEY_HASH:\s*&str\s*=\s*\")[^\"]*(\")/\${1}${AGG_AGG_VK_HASH_HEX}\${2}/" \
-  "$REPO_ROOT/pkg/contracts/src/rollup.rs"
+  "$ROLLUP_RS"
+# Fail loudly if the substitution didn't land — same drift-detection
+# rationale as the JSON write above.
+if ! grep -q "\"${AGG_AGG_VK_HASH_HEX}\"" "$ROLLUP_RS"; then
+  echo "ERROR: failed to write AGG_AGG_VERIFICATION_KEY_HASH into $ROLLUP_RS" >&2
+  exit 1
+fi
 
 $BACKEND write_solidity_verifier --scheme ultra_honk \
   -k "$REPO_ROOT/fixtures/keys/agg_agg_key" \

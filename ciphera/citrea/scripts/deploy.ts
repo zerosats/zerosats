@@ -184,16 +184,16 @@ async function main() {
   let ownerAddress = account.address;
   console.log(`    Owner           - ${ownerAddress}`);
 
-  let burnerAddress = process.env.BURNER_ADDRESS as `0x${string}` | undefined;
+  let claimerAddress = process.env.CLAIMER_ADDRESS as `0x${string}` | undefined;
   if (profile.name === "main" || profile.name === "test") {
-    if (!burnerAddress) throw new Error("BURNER_ADDRESS is required");
-  } else if (!burnerAddress) {
-    burnerAddress = ownerAddress;
+    if (!claimerAddress) throw new Error("CLAIMER_ADDRESS is required");
+  } else if (!claimerAddress) {
+    claimerAddress = ownerAddress;
   }
-  if (burnerAddress === ZERO_ADDRESS) {
-    throw new Error("BURNER_ADDRESS cannot be zero address");
+  if (claimerAddress === ZERO_ADDRESS) {
+    throw new Error("CLAIMER_ADDRESS cannot be zero address");
   }
-  console.log(`    Burner          - ${burnerAddress}`);
+  console.log(`    Claimer          - ${claimerAddress}`);
 
   // Init config: secure defaults overridable via env vars.
   const perMintCap = parseBigIntEnv(
@@ -360,7 +360,7 @@ async function main() {
     functionName: "initialize",
     args: [
       ownerAddress,
-      burnerAddress,
+      claimerAddress,
       erc20Address,
       initialNoteKind,
       aggregateVerifierAddr,
@@ -543,7 +543,7 @@ async function main() {
       openProvingDelaySeconds: openProvingDelay.toString(),
       burnFeeWei: burnFee.toString(),
       feeSink,
-      burner: burnerAddress,
+      burner: claimerAddress,
       erc20: erc20Address,
       verifier: aggregateVerifierAddr,
       vkHash,
