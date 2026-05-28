@@ -1,4 +1,5 @@
 mod agg_agg;
+mod agg_escrow;
 mod agg_utxo;
 mod escrow;
 mod migrate;
@@ -12,17 +13,13 @@ mod utxo;
 
 use std::io::Read;
 
+pub use agg_escrow::*;
 pub use agg_utxo::*;
 use base64::Engine;
+pub use escrow::*;
 use flate2::read::GzDecoder;
 // pub use migrate::*;
 pub use utxo::*;
-// `escrow::*` is intentionally not re-exported yet: nothing else in
-// this crate consumes `ESCROW_VERIFICATION_KEY` / `BEscrowInputNote`
-// today, so a glob `pub use` would trigger `unused_imports`. When
-// `agg_escrow.rs` lands and pulls in `ESCROW_VERIFICATION_KEY{,_HASH}`
-// (mirroring how `agg_utxo.rs` pulls in `UTXO_VERIFICATION_KEY`),
-// re-add `pub use escrow::*;` here.
 
 fn get_bytecode_from_program(program_json: &str) -> Vec<u8> {
     let mut program = serde_json::from_str::<serde_json::Value>(program_json).unwrap();

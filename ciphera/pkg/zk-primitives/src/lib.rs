@@ -11,6 +11,7 @@
 
 mod address;
 mod agg_agg;
+mod agg_escrow;
 mod agg_utxo;
 mod burn;
 mod escrow;
@@ -30,6 +31,7 @@ mod utxo;
 
 pub use address::*;
 pub use agg_agg::*;
+pub use agg_escrow::*;
 pub use agg_utxo::*;
 pub use burn::*;
 pub use escrow::*;

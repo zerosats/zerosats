@@ -3,9 +3,9 @@ use flate2::{Compression, write::GzEncoder};
 use std::io::Write;
 use std::str::FromStr;
 use zk_primitives::{
-    AggAgg, AggUtxo, Escrow, EscrowInputNote, InputNote, MerklePath, Note, TimeLock, TimeProof,
-    ToBytes, Utxo, UtxoKind, UtxoProof, UtxoProofBundleWithMerkleProofs,
-    get_address_for_private_key,
+    AggAgg, AggEscrow, AggLeafSource, AggUtxo, Escrow, EscrowInputNote, EscrowProof,
+    EscrowProofBundleWithMerkleProofs, InputNote, MerklePath, Note, TimeLock, TimeProof, ToBytes,
+    Utxo, UtxoKind, UtxoProof, UtxoProofBundleWithMerkleProofs, get_address_for_private_key,
 };
 
 use crate::{Prove, Result, Verify};
@@ -32,11 +32,11 @@ pub fn compress_proof(proof: &impl ToBytes) -> Vec<u8> {
     proof_gz
 }
 
-pub fn prove_proof<P: Prove>(proof_input: &P) -> Result<P::Proof> {
+pub fn prove_proof<P: Prove>(proof_input: &P, proof_type: &str) -> Result<P::Proof> {
     let start = std::time::Instant::now();
     let proof = proof_input.prove().unwrap();
     let end = std::time::Instant::now() - start;
-    println!("Proving completed in {end:?}");
+    println!("Proving {proof_type} completed in {end:?}");
     let proof_gz = compress_proof(&proof);
     println!(
         "Proof size: {:?} (compressed: {:?})",
@@ -46,7 +46,7 @@ pub fn prove_proof<P: Prove>(proof_input: &P) -> Result<P::Proof> {
     Ok(proof)
 }
 
-pub fn verify_proof(proof: &impl Verify) {
+pub fn verify_proof(proof: &impl Verify, proof_type: &str) {
     let start = std::time::Instant::now();
     let result = proof.verify();
     let duration = start.elapsed();
@@ -57,12 +57,12 @@ pub fn verify_proof(proof: &impl Verify) {
         result.err()
     );
 
-    println!("Proof verification completed in {duration:?}");
+    println!("Proof {proof_type} verification completed in {duration:?}");
 }
 
-pub fn prove_and_verify<P: Prove>(proof_input: &P) -> Result<P::Proof> {
-    let proof = prove_proof(proof_input)?;
-    verify_proof(&proof);
+pub fn prove_and_verify<P: Prove>(proof_input: &P, proof_type: &str) -> Result<P::Proof> {
+    let proof = prove_proof(proof_input, proof_type)?;
+    verify_proof(&proof, proof_type);
     Ok(proof)
 }
 
@@ -81,7 +81,7 @@ fn test_utxo() {
         [output_note1, output_note2],
     );
 
-    prove_and_verify(&utxo).unwrap();
+    prove_and_verify(&utxo, "utxo").unwrap();
 }
 
 fn process_utxo_for_agg_generic(
@@ -229,7 +229,7 @@ fn test_agg_utxo() {
 
     let (utxo1_proof, p1, p2, p3, p4, utxo1_new_root) =
         process_utxo_for_agg(&mut tree, &utxo1).unwrap();
-    verify_proof(&utxo1_proof);
+    verify_proof(&utxo1_proof, "utxo");
 
     let agg_utxo1 = AggUtxo::new(
         [
@@ -241,7 +241,7 @@ fn test_agg_utxo() {
         utxo1_new_root,
     );
 
-    prove_and_verify(&agg_utxo1).unwrap();
+    prove_and_verify(&agg_utxo1, "agg_utxo").unwrap();
 }
 
 #[test]
@@ -279,7 +279,7 @@ fn test_agg_agg() {
 
     let (utxo1_proof, p1_1, p1_2, p1_3, p1_4, utxo1_new_root) =
         process_utxo_for_agg(&mut tree, &utxo1).unwrap();
-    verify_proof(&utxo1_proof);
+    verify_proof(&utxo1_proof, "utxo");
 
     let agg_utxo1 = AggUtxo::new(
         [
@@ -290,7 +290,7 @@ fn test_agg_agg() {
         utxo1_old_root,
         utxo1_new_root,
     );
-    let agg_utxo1_proof = prove_and_verify(&agg_utxo1).unwrap();
+    let agg_utxo1_proof = prove_and_verify(&agg_utxo1, "agg_utxo").unwrap();
 
     let utxo2_input_note1 = InputNote {
         note: utxo1_output_note1.clone(),
@@ -318,7 +318,7 @@ fn test_agg_agg() {
 
     let (utxo2_proof, p2_1, p2_2, p2_3, p2_4, utxo2_new_root) =
         process_utxo_for_agg(&mut tree, &utxo2).unwrap();
-    verify_proof(&utxo2_proof);
+    verify_proof(&utxo2_proof, "utxo");
 
     let agg_utxo2 = AggUtxo::new(
         [
@@ -329,11 +329,11 @@ fn test_agg_agg() {
         utxo2_old_root,
         utxo2_new_root,
     );
-    let agg_utxo2_proof = prove_and_verify(&agg_utxo2).unwrap();
+    let agg_utxo2_proof = prove_and_verify(&agg_utxo2, "agg_utxo").unwrap();
 
     let agg_agg = AggAgg::new([agg_utxo1_proof, agg_utxo2_proof]);
 
-    prove_and_verify(&agg_agg).unwrap();
+    prove_and_verify(&agg_agg, "agg_agg").unwrap();
 }
 
 #[test]
@@ -365,7 +365,7 @@ fn test_alt_agg_utxo() {
 
     let (mint_proof, mp1, mp2, mp3, mp4, _) =
         process_utxo_for_agg_generic(&mut tree, &mint_utxo).unwrap();
-    verify_proof(&mint_proof);
+    verify_proof(&mint_proof, "utxo");
 
     // --- UTXO 2: Burn (mint outputs as inputs, padding outputs) ---
     let burn_address = Element::new(0xDeadBeef);
@@ -387,7 +387,7 @@ fn test_alt_agg_utxo() {
 
     let (burn_proof, bp1, bp2, bp3, bp4, _) =
         process_utxo_for_agg_generic(&mut tree, &burn_utxo).unwrap();
-    verify_proof(&burn_proof);
+    verify_proof(&burn_proof, "utxo");
 
     // --- UTXO 3: SlowBurn (pre-inserted inputs, padding outputs) ---
     let slow_utxo = Utxo::new_burn_no_sub(
@@ -397,7 +397,7 @@ fn test_alt_agg_utxo() {
 
     let (slow_proof, np1, np2, np3, np4, new_root) =
         process_utxo_for_agg_generic(&mut tree, &slow_utxo).unwrap();
-    verify_proof(&slow_proof);
+    verify_proof(&slow_proof, "utxo");
 
     let agg_utxo = AggUtxo::new(
         [
@@ -409,7 +409,7 @@ fn test_alt_agg_utxo() {
         new_root,
     );
 
-    prove_and_verify(&agg_utxo).unwrap();
+    prove_and_verify(&agg_utxo, "agg_utxo").unwrap();
 }
 
 // =====================================================================
@@ -531,7 +531,7 @@ fn pow_two_block_lock() -> TimeLock {
 }
 
 #[test]
-fn test_utxo_signature32_spend() {
+fn test_escrow_signature32_spend() {
     // Kind 5: ownership proven by a 32-byte preimage whose Poseidon
     // hash (over its high/low 16-byte halves), Equals `note.address`.
     let preimage = shared_preimage_bytes();
@@ -556,7 +556,7 @@ fn test_utxo_signature32_spend() {
         burn_address: None,
     };
 
-    prove_and_verify(&escrow).unwrap();
+    prove_and_verify(&escrow, "escrow").unwrap();
 }
 
 #[test]
@@ -585,11 +585,11 @@ fn test_escrow_signature32sha_spend() {
         burn_address: None,
     };
 
-    prove_and_verify(&escrow).unwrap();
+    prove_and_verify(&escrow,"escrow").unwrap();
 }
 
 #[test]
-fn test_utxo_normal_timelocked_spend() {
+fn test_escrow_normal_timelocked_spend() {
     let (secret_key, normal_address) = get_keypair(101);
 
     assert_eq!(normal_address, Element::from_str("0x22d68b303a6a3d416959fb363795548966049a655418ebd9eb6a818fd6d2e27b").unwrap());
@@ -616,11 +616,11 @@ fn test_utxo_normal_timelocked_spend() {
         burn_address: None,
     };
 
-    prove_and_verify(&escrow).unwrap();
+    prove_and_verify(&escrow, "escrow").unwrap();
 }
 
 #[test]
-fn test_utxo_sha_htlc_hash_path() {
+fn test_escrow_sha_htlc_hash_path() {
     let (secret_key, refund_address) = get_keypair(202);
 
     let preimage = shared_preimage_bytes();
@@ -653,11 +653,11 @@ fn test_utxo_sha_htlc_hash_path() {
         burn_address: None,
     };
 
-    prove_and_verify(&escrow).unwrap();
+    prove_and_verify(&escrow, "escrow").unwrap();
 }
 
 #[test]
-fn test_utxo_sha_htlc_refund_path() {
+fn test_escrow_sha_htlc_refund_path() {
     let (secret_key, refund_address) = get_keypair(202);
     let lock = pow_two_block_lock();
     let timelocked_address = timelock_address(secret_key, &lock);
@@ -687,5 +687,180 @@ fn test_utxo_sha_htlc_refund_path() {
         burn_address: None,
     };
 
-    prove_and_verify(&escrow).unwrap();
+    prove_and_verify(&escrow, "escrow").unwrap();
+}
+
+// Same shape as `process_utxo_for_agg` but takes an `Escrow` and
+// returns an `EscrowProof`. Removes input commitments / inserts output
+// commitments and emits the four Merkle paths in
+// (input0, input1, output0, output1) order.
+fn process_escrow_for_agg(
+    tree: &mut smirk::Tree<161, ()>,
+    escrow: &Escrow,
+) -> Result<(
+    EscrowProof,
+    MerklePath<161>,
+    MerklePath<161>,
+    MerklePath<161>,
+    MerklePath<161>,
+    Element,
+)> {
+    let escrow_proof = escrow.prove()?;
+
+    let p1: MerklePath<161> = MerklePath::new(
+        tree.path_for(escrow.input_notes[0].note.commitment())
+            .siblings
+            .to_vec(),
+    );
+    tree.remove(escrow.input_notes[0].note.commitment())
+        .unwrap();
+
+    let p2: MerklePath<161> = MerklePath::new(
+        tree.path_for(escrow.input_notes[1].note.commitment())
+            .siblings
+            .to_vec(),
+    );
+    tree.remove(escrow.input_notes[1].note.commitment())
+        .unwrap();
+
+    tree.insert(escrow.output_notes[0].commitment(), ()).unwrap();
+    let p3: MerklePath<161> = MerklePath::new(
+        tree.path_for(escrow.output_notes[0].commitment())
+            .siblings
+            .to_vec(),
+    );
+
+    tree.insert(escrow.output_notes[1].commitment(), ()).unwrap();
+    let p4: MerklePath<161> = MerklePath::new(
+        tree.path_for(escrow.output_notes[1].commitment())
+            .siblings
+            .to_vec(),
+    );
+
+    let new_root = tree.root_hash();
+
+    Ok((escrow_proof, p1, p2, p3, p4, new_root))
+}
+
+// End-to-end coverage for the heterogeneous-batch path:
+//
+//   utxo Send   -> agg_utxo   (slot 0 of agg_agg, source = AggUtxo)
+//   escrow Send -> agg_escrow (slot 1 of agg_agg, source = AggEscrow)
+//
+// The same Merkle tree threads through both flows: utxo consumes its
+// poseidon-key inputs first (old_root -> mid_root), then escrow
+// consumes its signature32 inputs starting from mid_root and emits
+// new_root. `agg_agg` then verifies both 1-level proofs against their
+// respective verification keys via per-slot `sources`.
+#[test]
+fn test_agg_agg_utxo_and_escrow_mixed() {
+    let (secret_key, address) = get_keypair(101);
+    let mut tree = smirk::Tree::<161, ()>::new();
+
+    // Stage 1: utxo input notes (poseidon-key path).
+    let utxo_input_note1 = InputNote {
+        note: send_note(60, address, Element::new(1)),
+        secret_key,
+        ..InputNote::default()
+    };
+    tree.insert(utxo_input_note1.note.commitment(), ()).unwrap();
+
+    let utxo_input_note2 = InputNote {
+        note: send_note(40, address, Element::new(2)),
+        secret_key,
+        ..InputNote::default()
+    };
+    tree.insert(utxo_input_note2.note.commitment(), ()).unwrap();
+
+    // Stage 2: pre-insert the escrow input notes (signature32 path).
+    // They have to exist in `old_root` because escrow only supports
+    // Send today; there is no mint path that could conjure them up.
+    let preimage = shared_preimage_bytes();
+    let sig32_address = signature32_address(preimage);
+    let escrow_note_kind = Element::new(1);
+
+    let escrow_input_note1 = EscrowInputNote {
+        note: note(35, sig32_address, Element::new(10), escrow_note_kind),
+        spend_type: 1,
+        secret_key: Element::ZERO,
+        preimage,
+        ..EscrowInputNote::default()
+    };
+    tree.insert(escrow_input_note1.note.commitment(), ())
+        .unwrap();
+
+    let escrow_input_note2 = EscrowInputNote {
+        note: note(15, sig32_address, Element::new(11), escrow_note_kind),
+        spend_type: 1,
+        secret_key: Element::ZERO,
+        preimage,
+        ..EscrowInputNote::default()
+    };
+    tree.insert(escrow_input_note2.note.commitment(), ())
+        .unwrap();
+
+    let old_root = tree.root_hash();
+
+    // Stage 3: utxo Send (60 + 40 = 70 + 30).
+    let utxo_output_note1 = send_note(70, address, Element::new(3));
+    let utxo_output_note2 = send_note(30, address, Element::new(4));
+
+    let utxo = Utxo {
+        input_notes: [utxo_input_note1.clone(), utxo_input_note2.clone()],
+        output_notes: [utxo_output_note1.clone(), utxo_output_note2.clone()],
+        kind: UtxoKind::Send,
+        burn_address: None,
+    };
+
+    let (utxo_proof, up1, up2, up3, up4, mid_root) =
+        process_utxo_for_agg(&mut tree, &utxo).unwrap();
+    verify_proof(&utxo_proof, "utxo");
+
+    let agg_utxo = AggUtxo::new(
+        [
+            UtxoProofBundleWithMerkleProofs::new(utxo_proof, &[up1, up2, up3, up4]),
+            UtxoProofBundleWithMerkleProofs::default(),
+            UtxoProofBundleWithMerkleProofs::default(),
+        ],
+        old_root,
+        mid_root,
+    );
+    let agg_utxo_proof = prove_and_verify(&agg_utxo, "agg_utxo").unwrap();
+
+    // Stage 4: escrow Send (35 + 15 = 30 + 20). Spend the two
+    // signature32-locked notes that were planted in old_root.
+    let escrow_output_note1 = note(30, address, Element::new(5), escrow_note_kind);
+    let escrow_output_note2 = note(20, address, Element::new(6), escrow_note_kind);
+
+    let escrow = Escrow {
+        kind: UtxoKind::Send,
+        input_notes: [escrow_input_note1.clone(), escrow_input_note2.clone()],
+        output_notes: [escrow_output_note1.clone(), escrow_output_note2.clone()],
+        burn_address: None,
+    };
+
+    let (escrow_proof, ep1, ep2, ep3, ep4, new_root) =
+        process_escrow_for_agg(&mut tree, &escrow).unwrap();
+    verify_proof(&escrow_proof, "escrow");
+
+    let agg_escrow = AggEscrow::new(
+        [
+            EscrowProofBundleWithMerkleProofs::new(escrow_proof, &[ep1, ep2, ep3, ep4]),
+            EscrowProofBundleWithMerkleProofs::default(),
+            EscrowProofBundleWithMerkleProofs::default(),
+        ],
+        mid_root,
+        new_root,
+    );
+    let agg_escrow_proof = prove_and_verify(&agg_escrow, "agg_escrow").unwrap();
+
+    // Stage 5: top-level agg_agg with heterogeneous sources. The
+    // `AggEscrowProof` newtype exists so `prove_and_verify` dispatches
+    // to the agg_escrow verification key above; unwrap it here because
+    // `AggAgg` already tracks per-slot provenance via `sources`.
+    let agg_agg = AggAgg::new_mixed(
+        [agg_utxo_proof, agg_escrow_proof.into_inner()],
+        [AggLeafSource::AggUtxo, AggLeafSource::AggEscrow],
+    );
+    prove_and_verify(&agg_agg, "agg_agg_mixed").unwrap();
 }

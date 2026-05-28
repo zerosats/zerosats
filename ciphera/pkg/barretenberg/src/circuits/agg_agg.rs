@@ -1,4 +1,7 @@
-use super::{AGG_UTXO_VERIFICATION_KEY, AGG_UTXO_VERIFICATION_KEY_HASH};
+use super::{
+    AGG_ESCROW_VERIFICATION_KEY, AGG_ESCROW_VERIFICATION_KEY_HASH, AGG_UTXO_VERIFICATION_KEY,
+    AGG_UTXO_VERIFICATION_KEY_HASH,
+};
 use crate::Result;
 use crate::backend::DefaultBackend;
 use crate::circuits::get_bytecode_from_program;
@@ -16,7 +19,8 @@ use noirc_driver::CompiledProgram;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use zk_primitives::{
-    AggAgg, AggAggProof, AggAggProofBytes, AggAggPublicInput, AggUtxoProof, bytes_to_elements,
+    AggAgg, AggAggProof, AggAggProofBytes, AggAggPublicInput, AggLeafSource, AggUtxoProof,
+    bytes_to_elements,
 };
 
 const PROGRAM: &str = include_str!("../../../../fixtures/programs/agg_agg.json");
@@ -93,6 +97,10 @@ pub struct AggAggInput {
     pub old_root: Base,
     pub new_root: Base,
     pub commit_hash: Base,
+    /// Per-slot identification of which 1-level aggregator produced
+    /// each proof. Drives the per-slot verification key selection in
+    /// `From<AggAggInput> for InputMap`.
+    pub sources: [AggLeafSource; 2],
 }
 
 impl From<&AggAgg> for AggAggInput {
@@ -106,6 +114,7 @@ impl From<&AggAgg> for AggAggInput {
             old_root: agg_agg.old_root().to_base(),
             new_root: agg_agg.new_root().to_base(),
             commit_hash: agg_agg.commit_hash().to_base(),
+            sources: agg_agg.sources,
         }
     }
 }
@@ -129,30 +138,35 @@ impl From<AggAggInput> for InputMap {
     fn from(value: AggAggInput) -> Self {
         let mut map = InputMap::new();
 
-        // agg_agg now consumes one verification key per slot so it can
-        // accept either an agg_utxo or an agg_utxo2 proof in either slot
-        // (see noir/agg_agg/src/main.nr). The existing Rust prover always
-        // batches agg_utxo proofs, so both slots get the same key/hash
-        // here -- swap one of the entries for AGG_UTXO2's key+hash to
-        // build a heterogeneous batch.
-        let agg_utxo_vk_fields: Vec<InputValue> = AGG_UTXO_VERIFICATION_KEY
-            .0
-            .iter()
-            .cloned()
-            .map(InputValue::Field)
-            .collect();
+        // agg_agg consumes one verification key per slot so it can
+        // accept either an `agg_utxo` or an `agg_escrow` proof in either
+        // slot (see noir/agg_agg/src/main.nr). The Rust prover decides
+        // which key to bind to each slot from `AggAgg::sources`; for
+        // legacy `AggAgg::new(proofs)` call sites both sources default
+        // to `AggLeafSource::AggUtxo`, preserving the original
+        // homogeneous-batch behaviour.
+        let key_for = |source: AggLeafSource| -> InputValue {
+            let vk = match source {
+                AggLeafSource::AggUtxo => &*AGG_UTXO_VERIFICATION_KEY,
+                AggLeafSource::AggEscrow => &*AGG_ESCROW_VERIFICATION_KEY,
+            };
+            InputValue::Vec(vk.0.iter().cloned().map(InputValue::Field).collect())
+        };
+        let hash_for = |source: AggLeafSource| -> Base {
+            match source {
+                AggLeafSource::AggUtxo => AGG_UTXO_VERIFICATION_KEY_HASH.0,
+                AggLeafSource::AggEscrow => AGG_ESCROW_VERIFICATION_KEY_HASH.0,
+            }
+        };
         map.insert(
             "verification_keys".to_owned(),
-            InputValue::Vec(vec![
-                InputValue::Vec(agg_utxo_vk_fields.clone()),
-                InputValue::Vec(agg_utxo_vk_fields),
-            ]),
+            InputValue::Vec(vec![key_for(value.sources[0]), key_for(value.sources[1])]),
         );
         map.insert(
             "verification_key_hashes".to_owned(),
             InputValue::Vec(vec![
-                InputValue::Field(AGG_UTXO_VERIFICATION_KEY_HASH.0),
-                InputValue::Field(AGG_UTXO_VERIFICATION_KEY_HASH.0),
+                InputValue::Field(hash_for(value.sources[0])),
+                InputValue::Field(hash_for(value.sources[1])),
             ]),
         );
 
