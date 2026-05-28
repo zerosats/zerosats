@@ -28,14 +28,14 @@ pub fn get_note_commitment(note: Note) -> Field {
     }
 }
 
-pub fn get_address(secret_key: Field) -> Field {
+pub fn get_secret_hash(secret_key: Field) -> Field {
     poseidon2::Poseidon2::hash([secret_key, 0], 2)
 }
 
 pub fn check_input_note_ownership(input_note: InputNote) {
     if (input_note.note.value != 0) {
         assert(
-            get_address(input_note.secret_key) == input_note.note.address,
+            get_secret_hash(input_note.secret_key) == input_note.note.address,
             "Input note is not owned by the owner",
         );
     }
@@ -70,4 +70,119 @@ pub fn is_one_of(value: Field, one_of: [Field]) -> bool {
         }
     }
     is_one_of
+}
+
+use bitcoin::check_pow_chain;
+
+pub struct TimeLock {
+    pub zero_block: [u8; 32],
+    pub n_blocks: Field,
+}
+
+pub struct TimeProof {
+    pub lock: TimeLock,
+    // Note, only 2 blocks timelock is accepted right now. Increase for production usage
+    pub headers: [[u8; 80]; 2],
+}
+
+pub struct EscrowNote {
+    pub note: Note,
+    // Note commit spend_type to note hash to fix spending condition.
+    pub spend_type: u8,
+    pub secret_key: Field,
+    pub preimage: [u8; 32],
+    pub time_proof: TimeProof,
+}
+
+pub fn timelock_is_active(lock: TimeLock) -> bool {
+    let mut result = false;
+    for i in 0..32 {
+        if lock.zero_block[i] != 0 {
+            result = true
+        };
+    }
+    result
+}
+
+pub fn get_timelock_commitment(lock: TimeLock) -> Field {
+    let (low, high) = bytes_32_to_field_pair(lock.zero_block);
+    let zero_block_hash = poseidon2::Poseidon2::hash([low, high], 2);
+     poseidon2::Poseidon2::hash([zero_block_hash, lock.n_blocks], 2)
+}
+
+pub fn check_spend_conditions(input_note: EscrowNote) {
+    if input_note.note.value != 0 {
+        if input_note.spend_type == 0 {
+            let key_hash = get_secret_hash(input_note.secret_key);
+
+            if timelock_is_active(input_note.time_proof.lock) {
+                let commitment = get_timelock_commitment(input_note.time_proof.lock);
+                let timelocked_committment = poseidon2::Poseidon2::hash([key_hash, commitment], 2);
+
+                assert( timelocked_committment == input_note.note.psi, "Wrong timelock commitment");
+
+                // Not fool-proof. Not checking min difficulty to save on circuit constraints
+                assert(
+                    check_pow_chain(
+                        input_note.time_proof.headers,
+                        input_note.time_proof.lock.zero_block,
+                        input_note.time_proof.lock.n_blocks
+                    ),
+                    "Input note is locked"
+                );
+            } else {
+                assert(key_hash == input_note.note.address, "Input note is not owned by the owner");
+            }
+        } else if input_note.spend_type == 1 {
+            // signature32
+            let (low, high) = bytes_32_to_field_pair(input_note.preimage);
+
+            let computed_hash = poseidon2::Poseidon2::hash([low, high], 2);
+            assert(computed_hash == input_note.note.address, "Address is not owned by the owner");
+        } else if input_note.spend_type == 2 {
+            // signature32sha
+            let computed_sha_hash = sha256::digest(input_note.preimage);
+            let (low, high) = bytes_32_to_field_pair(computed_sha_hash);
+
+            let computed_hash = poseidon2::Poseidon2::hash([low, high], 2);
+            assert(computed_hash == input_note.note.address, "Address is not owned by the owner");
+        } else if input_note.spend_type == 3 {
+            // SHA locked HTLC
+            let key_hash = get_secret_hash(input_note.secret_key);
+            if input_note.preimage != [0; 32] {
+                let computed_sha_hash = sha256::digest(input_note.preimage);
+                let (low, high) = bytes_32_to_field_pair(computed_sha_hash);
+
+                let computed_hash = poseidon2::Poseidon2::hash([key_hash, low, high], 3);
+                assert(computed_hash == input_note.note.address, "HTLC: computed hash does not match to SHA preimage");
+            } else {
+                let commitment = get_timelock_commitment(input_note.time_proof.lock);
+                let timelocked_address = poseidon2::Poseidon2::hash([key_hash, commitment], 2);
+
+                assert(
+                            timelocked_address == input_note.note.psi,
+                            "HTLC: wrong refund commitment",
+                        );
+
+                // Not fool-proof. Not checking min difficulty to save on circuit constraints
+                assert(
+                    check_pow_chain(input_note.time_proof.headers, input_note.time_proof.lock.zero_block, input_note.time_proof.lock.n_blocks),
+                    "HTLC: timelocked"
+                    );
+            }
+        } else {
+            assert(false, "Invalid spend type")
+        }
+    }
+    // Padding note passes check
+}
+
+pub fn bytes_32_to_field_pair(bytes: [u8; 32]) -> (Field, Field) {
+  let mut low_bytes = [0u8; 16];
+  let mut high_bytes = [0u8; 16];
+  for i in 0..16 {
+      low_bytes[i] = bytes[i];
+      high_bytes[i] = bytes[i + 16];
+  }
+  (Field::from_be_bytes::<16>(low_bytes), Field::from_be_bytes::<16>(high_bytes))
 }

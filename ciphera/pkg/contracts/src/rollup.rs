@@ -28,7 +28,7 @@ use web3::{
 };
 
 pub const AGG_AGG_VERIFICATION_KEY_HASH: &str =
-    "0x20a4d4218fd058e2290c97fd80f6c769fd1c0c644014b9d5653773bfd2a9d073";
+    "0x23a308fcf919d7d56f983922850caf94ea6091e58b6a5f886b6f347d21f895e3";
 
 /// Maximum number of blocks to scan in a single getLogs call.
 /// Citrea RPC API enforces a 1000-block limit for event scanning.

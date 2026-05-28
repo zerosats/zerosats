@@ -7,10 +7,13 @@
 // key) is the `escrow_sentinel` constraint below. Replace that constraint
 // with the real alternative-kind logic you want; the sentinel exists only
 // so the first build produces a VK that differs from `utxo`'s.
-use common::{check_commitment, check_input_note_ownership, InputNote, Note};
+use common::{
+    bytes_32_to_field_pair, check_commitment, check_spend_conditions, get_note_commitment,
+    get_secret_hash, get_timelock_commitment, EscrowNote, Note, TimeLock, TimeProof,
+};
 
 fn main(
-    input_notes: [InputNote; 2],
+    input_notes: [EscrowNote; 2],
     output_notes: [Note; 2],
     _pmessage4: Field,
     commitments: pub [Field; 4],
@@ -49,8 +52,8 @@ fn main(
         assert(false, "Invalid kind");
     }
 
-    check_input_note_ownership(input_notes[0]);
-    check_input_note_ownership(input_notes[1]);
+    check_spend_conditions(input_notes[0]);
+    check_spend_conditions(input_notes[1]);
 }
 
 fn is_multiple_kinds(notes: [Note; 4]) -> (bool, Field) {

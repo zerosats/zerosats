@@ -1,5 +1,5 @@
 use common::{
-    check_commitment, check_input_note_ownership, get_address, get_note_commitment, InputNote, Note,
+    check_commitment, check_input_note_ownership, get_secret_hash, get_note_commitment, InputNote, Note,
 };
 use poseidon::poseidon2;
 
@@ -139,7 +139,7 @@ fn bridged_note_kind() -> Field {
 #[test]
 fn test_send_two_inputs_two_outputs() {
     let pk: Field = 101;
-    let address = get_address(pk);
+    let address = get_secret_hash(pk);
 
     // Inputs
     let note_1 = Note { kind: bridged_note_kind(), value: 10, address, psi: 1 };
@@ -169,7 +169,7 @@ fn test_send_two_inputs_two_outputs() {
 #[test]
 fn test_send_one_input_two_outputs() {
     let pk: Field = 101;
-    let address = get_address(pk);
+    let address = get_secret_hash(pk);
 
     // Inputs
     let note_1 = Note { kind: bridged_note_kind(), value: 10, address, psi: 1 };
@@ -199,7 +199,7 @@ fn test_send_one_input_two_outputs() {
 #[test]
 fn test_send_two_inputs_one_output() {
     let pk: Field = 101;
-    let address = get_address(pk);
+    let address = get_secret_hash(pk);
 
     // Inputs
     let note_1 = Note { kind: bridged_note_kind(), value: 10, address, psi: 1 };
@@ -229,7 +229,7 @@ fn test_send_two_inputs_one_output() {
 #[test(should_fail)]
 fn test_send_diff_kinds() {
     let pk: Field = 101;
-    let address = get_address(pk);
+    let address = get_secret_hash(pk);
 
     // Inputs
     let note_1 = Note { kind: bridged_note_kind(), value: 15, address, psi: 1 };
@@ -259,7 +259,7 @@ fn test_send_diff_kinds() {
 #[test]
 fn test_mint() {
     let pk: Field = 101;
-    let address = get_address(pk);
+    let address = get_secret_hash(pk);
 
     // Inputs
     let note_1 = Note { kind: bridged_note_kind(), value: 15, address, psi: 1 };
@@ -293,7 +293,7 @@ fn test_mint() {
 #[test]
 fn test_burn() {
     let pk: Field = 101;
-    let address = get_address(pk);
+    let address = get_secret_hash(pk);
 
     // Inputs
     let note_1 = Note { kind: bridged_note_kind(), value: 15, address, psi: 1 };
@@ -323,7 +323,7 @@ fn test_burn() {
 #[test]
 fn test_send_zero_value() {
     let pk: Field = 101;
-    let address = get_address(pk);
+    let address = get_secret_hash(pk);
 
     // Inputs - both zero value notes
     let note_1 = Note { kind: bridged_note_kind(), value: 0, address, psi: 1 };
@@ -352,7 +352,7 @@ fn test_send_zero_value() {
 #[test]
 fn test_mint_with_padding_input() {
     let pk: Field = 101;
-    let address = get_address(pk);
+    let address = get_secret_hash(pk);
 
     // Inputs - one real note, one padding
     let note_1 = Note { kind: bridged_note_kind(), value: 5, address, psi: 1 };
@@ -385,7 +385,7 @@ fn test_mint_with_padding_input() {
 #[test]
 fn test_burn_single_input() {
     let pk: Field = 101;
-    let address = get_address(pk);
+    let address = get_secret_hash(pk);
 
     // Inputs - one real note, one padding
     let note_1 = Note { kind: bridged_note_kind(), value: 15, address, psi: 1 };
@@ -413,7 +413,7 @@ fn test_burn_single_input() {
 #[test]
 fn test_burn_no_sub() {
     let pk: Field = 101;
-    let address = get_address(pk);
+    let address = get_secret_hash(pk);
 
     // Inputs
     let note_1 = Note { kind: bridged_note_kind(), value: 15, address, psi: 1 };
@@ -443,7 +443,7 @@ fn test_burn_no_sub() {
 #[test]
 fn test_burn_no_sub_single_input() {
     let pk: Field = 101;
-    let address = get_address(pk);
+    let address = get_secret_hash(pk);
 
     // Inputs - one real note, one padding
     let note_1 = Note { kind: bridged_note_kind(), value: 15, address, psi: 1 };
@@ -472,7 +472,7 @@ fn test_burn_no_sub_single_input() {
 #[test(should_fail)]
 fn test_burn_no_sub_invalid_addr() {
     let pk: Field = 101;
-    let address = get_address(pk);
+    let address = get_secret_hash(pk);
 
     // Inputs
     let note_1 = Note { kind: bridged_note_kind(), value: 15, address, psi: 1 };
@@ -502,7 +502,7 @@ fn test_burn_no_sub_invalid_addr() {
 #[test(should_fail)]
 fn test_mint_different_kinds() {
     let pk: Field = 101;
-    let address = get_address(pk);
+    let address = get_secret_hash(pk);
 
     // Inputs - mix of different kinds
     let note_1 = Note { kind: bridged_note_kind(), value: 5, address, psi: 1 };
@@ -535,7 +535,7 @@ fn test_mint_different_kinds() {
 #[test]
 fn test_send_large_values() {
     let pk: Field = 101;
-    let address = get_address(pk);
+    let address = get_secret_hash(pk);
 
     // Test with larger values (but still within 240-bit constraint)
     let large_value = 1000000000;
@@ -567,7 +567,7 @@ fn test_send_large_values() {
 #[test]
 fn test_mint_same_kind() {
     let pk: Field = 101;
-    let address = get_address(pk);
+    let address = get_secret_hash(pk);
 
     // Inputs - same kind
     let note_1 = Note { kind: bridged_note_kind(), value: 5, address, psi: 1 };
@@ -600,7 +600,7 @@ fn test_mint_same_kind() {
 #[test(should_fail)]
 fn test_overflow_input_first_note() {
     let pk: Field = 101;
-    let address = get_address(pk);
+    let address = get_secret_hash(pk);
 
     // Create a value that exceeds 240 bits
     // 2^240 = 1766847064778384329583297500742918515827483896875618958121606201292619776
@@ -634,7 +634,7 @@ fn test_overflow_input_first_note() {
 #[test(should_fail)]
 fn test_overflow_input_second_note() {
     let pk: Field = 101;
-    let address = get_address(pk);
+    let address = get_secret_hash(pk);
 
     // Create a value that exceeds 240 bits
     let overflow_value = 1766847064778384329583297500742918515827483896875618958121606201292619777;
@@ -667,7 +667,7 @@ fn test_overflow_input_second_note() {
 #[test(should_fail)]
 fn test_overflow_output_first_note() {
     let pk: Field = 101;
-    let address = get_address(pk);
+    let address = get_secret_hash(pk);
 
     // Create a value that exceeds 240 bits
     let overflow_value = 1766847064778384329583297500742918515827483896875618958121606201292619777;
@@ -700,7 +700,7 @@ fn test_overflow_output_first_note() {
 #[test(should_fail)]
 fn test_overflow_output_second_note() {
     let pk: Field = 101;
-    let address = get_address(pk);
+    let address = get_secret_hash(pk);
 
     // Create a value that exceeds 240 bits
     let overflow_value = 1766847064778384329583297500742918515827483896875618958121606201292619777;
@@ -733,7 +733,7 @@ fn test_overflow_output_second_note() {
 #[test]
 fn test_max_allowed_value() {
     let pk: Field = 101;
-    let address = get_address(pk);
+    let address = get_secret_hash(pk);
 
     // Use a value that is exactly at the 240-bit limit (2^240 - 1)
     let max_value = 1766847064778384329583297500742918515827483896875618958121606201292619775;
@@ -766,7 +766,7 @@ fn test_max_allowed_value() {
 #[test(should_fail)]
 fn test_msg_value_overflow() {
     let pk: Field = 101;
-    let address = get_address(pk);
+    let address = get_secret_hash(pk);
 
     // Create a value that exceeds 240 bits
     let overflow_value = 1766847064778384329583297500742918515827483896875618958121606201292619777;
