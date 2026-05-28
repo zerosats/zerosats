@@ -3,8 +3,9 @@ use flate2::{Compression, write::GzEncoder};
 use std::io::Write;
 use std::str::FromStr;
 use zk_primitives::{
-    AggAgg, AggUtxo, EscrowInputNote, InputNote, MerklePath, Note, TimeLock, TimeProof, ToBytes, Utxo, UtxoKind,
-    UtxoProof, UtxoProofBundleWithMerkleProofs, get_address_for_private_key,
+    AggAgg, AggUtxo, Escrow, EscrowInputNote, InputNote, MerklePath, Note, TimeLock, TimeProof,
+    ToBytes, Utxo, UtxoKind, UtxoProof, UtxoProofBundleWithMerkleProofs,
+    get_address_for_private_key,
 };
 
 use crate::{Prove, Result, Verify};
@@ -545,7 +546,7 @@ fn test_utxo_signature32_spend() {
         ..EscrowInputNote::default()
     };
 
-    let utxo = Utxo {
+    let escrow = Escrow {
         kind: UtxoKind::Send,
         input_notes: [input_note, EscrowInputNote::padding_note()],
         output_notes: [
@@ -555,11 +556,11 @@ fn test_utxo_signature32_spend() {
         burn_address: None,
     };
 
-    prove_and_verify(&utxo).unwrap();
+    prove_and_verify(&escrow).unwrap();
 }
 
 #[test]
-fn test_utxo_kind6_signature32sha_spend() {
+fn test_escrow_signature32sha_spend() {
     // Kind 6: ownership proven by revealing a SHA-256 preimage whose
     // digest hashes (under Poseidon, over high/low halves) to `note.address`.
     let preimage = shared_preimage_bytes();
@@ -574,7 +575,7 @@ fn test_utxo_kind6_signature32sha_spend() {
         ..EscrowInputNote::default()
     };
 
-    let utxo = Utxo {
+    let escrow = Escrow {
         kind: UtxoKind::Send,
         input_notes: [input_note, EscrowInputNote::padding_note()],
         output_notes: [
@@ -584,7 +585,7 @@ fn test_utxo_kind6_signature32sha_spend() {
         burn_address: None,
     };
 
-    prove_and_verify(&utxo).unwrap();
+    prove_and_verify(&escrow).unwrap();
 }
 
 #[test]
@@ -605,7 +606,7 @@ fn test_utxo_normal_timelocked_spend() {
         time_proof: pow_two_block_proof(),
     };
 
-    let utxo = Utxo {
+    let escrow = Escrow {
         kind: UtxoKind::Send,
         input_notes: [input_note, EscrowInputNote::padding_note()],
         output_notes: [
@@ -615,7 +616,7 @@ fn test_utxo_normal_timelocked_spend() {
         burn_address: None,
     };
 
-    prove_and_verify(&utxo).unwrap();
+    prove_and_verify(&escrow).unwrap();
 }
 
 #[test]
@@ -642,7 +643,7 @@ fn test_utxo_sha_htlc_hash_path() {
         time_proof: pow_two_block_proof(),
     };
 
-    let utxo = Utxo {
+    let escrow = Escrow {
         kind: UtxoKind::Send,
         input_notes: [input_note, EscrowInputNote::padding_note()],
         output_notes: [
@@ -652,7 +653,7 @@ fn test_utxo_sha_htlc_hash_path() {
         burn_address: None,
     };
 
-    prove_and_verify(&utxo).unwrap();
+    prove_and_verify(&escrow).unwrap();
 }
 
 #[test]
@@ -665,7 +666,7 @@ fn test_utxo_sha_htlc_refund_path() {
     let input_note = EscrowInputNote {
         note: Note {
             utxo_kind: Element::new(2),
-            note_kind: note_kind,
+            note_kind,
             address: refund_address,
             psi: timelocked_address, // unconstrained on this path
             value: Element::new(60),
@@ -676,7 +677,7 @@ fn test_utxo_sha_htlc_refund_path() {
         time_proof: pow_two_block_proof(),
     };
 
-    let utxo = Utxo {
+    let escrow = Escrow {
         kind: UtxoKind::Send,
         input_notes: [input_note, EscrowInputNote::padding_note()],
         output_notes: [
@@ -686,5 +687,5 @@ fn test_utxo_sha_htlc_refund_path() {
         burn_address: None,
     };
 
-    prove_and_verify(&utxo).unwrap();
+    prove_and_verify(&escrow).unwrap();
 }
