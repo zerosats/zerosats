@@ -31,12 +31,24 @@ mkdir -p "$REPO_ROOT/fixtures/keys"
 # Usage: update_noir_hash <file> <global_name> <new_value>
 #
 # Uses -0777 (slurp the whole file) so the substitution survives a
-# `nargo fmt`-induced newline between `=` and the literal -- the
-# fixed-length lookbehind form silently no-ops on wrapped declarations
-# (same failure mode as the Rust/TS perl calls below).
+# `nargo fmt`-induced newline between `=` and the literal. The post
+# write `grep -E` is critical: perl's `s///` returns success even when
+# it matches zero times, so a typo'd `var`, a wrapped declaration the
+# regex misses, a renamed global, or any other mismatch silently leaves
+# the file unchanged. Without this check the stale value rides through
+# the next compile, the resulting agg_agg VK ends up keyed against a
+# stale leaf hash, and downstream consumers (the on-chain registered
+# `verifierKeyHash_`, the Rust prover const, the lazy_static computed
+# from the embedded key bytes) drift apart -- producing the
+# `RollupV1: ZK verifier not allowed` revert from a brand-new deploy.
 update_noir_hash() {
   local file="$1" var="$2" hash="$3"
   perl -i -0777 -pe "s/(global ${var}:\s*Field\s*=\s*)\d+(\s*;)/\${1}${hash}\${2}/" "$file"
+  if ! grep -qE "global[[:space:]]+${var}[[:space:]]*:[[:space:]]*Field[[:space:]]*=[[:space:]]*${hash}[[:space:]]*;" "$file"; then
+    echo "ERROR: update_noir_hash failed to write 'global ${var} = ${hash}' into ${file}" >&2
+    echo "       (regex did not match -- check for typo, renamed global, or formatter-induced wrap)" >&2
+    exit 1
+  fi
 }
 
 # Extract the u256 decimal hash from vk_hash output.
@@ -187,13 +199,13 @@ echo "Updating noir/agg_agg/src/main.nr AGG_UTXO_VERIFICATION_KEY_HASH=$AGG_UTXO
 update_noir_hash "$REPO_ROOT/noir/agg_agg/src/main.nr" \
   AGG_UTXO_VERIFICATION_KEY_HASH "$AGG_UTXO_VK_HASH"
 
-agg_escrow_VK_OUT=$(vk_hash_for agg_escrow)
+AGG_ESCROW_VK_OUT=$(vk_hash_for agg_escrow)
 echo "Verification key hash for agg_escrow:"
-echo "$agg_escrow_VK_OUT" | sed 's/^/  /'
-agg_escrow_VK_HASH=$(echo "$agg_escrow_VK_OUT" | extract_u256)
-echo "Updating noir/agg_agg/src/main.nr agg_escrow_VERIFICATION_KEY_HASH=$agg_escrow_VK_HASH"
+echo "$AGG_ESCROW_VK_OUT" | sed 's/^/  /'
+AGG_ESCROW_VK_HASH=$(echo "$AGG_ESCROW_VK_OUT" | extract_u256)
+echo "Updating noir/agg_agg/src/main.nr AGG_ESCROW_VERIFICATION_KEY_HASH=$AGG_ESCROW_VK_HASH"
 update_noir_hash "$REPO_ROOT/noir/agg_agg/src/main.nr" \
-  agg_escrow_VERIFICATION_KEY_HASH "$agg_escrow_VK_HASH"
+  AGG_ESCROW_VERIFICATION_KEY_HASH "$AGG_ESCROW_VK_HASH"
 
 compile_package agg_agg
 # agg_agg is verified on-chain by Solidity, so use the keccak oracle.
@@ -341,7 +353,7 @@ declare -A CIRCUIT_VK_OUT=(
   [utxo]="$UTXO_VK_OUT"
   [escrow]="$ESCROW_VK_OUT"
   [agg_utxo]="$AGG_UTXO_VK_OUT"
-  [agg_escrow]="$agg_escrow_VK_OUT"
+  [agg_escrow]="$AGG_ESCROW_VK_OUT"
   [agg_agg]="$AGG_AGG_VK_OUT"
 )
 
