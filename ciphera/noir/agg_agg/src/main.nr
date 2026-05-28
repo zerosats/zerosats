@@ -1,7 +1,18 @@
 use dep::std;
 use poseidon::poseidon2;
 
+// agg_agg accepts a heterogeneous batch: each of its two child slots can be
+// either an `agg_utxo` proof (original `utxo` leaves) or an `agg_escrow` proof
+// (alternative `escrow` leaves). The two child circuits have identical
+// public-input shape, proof size, and aggregation structure -- the only
+// difference is which leaf VK each one accepts -- so they are
+// interchangeable inside `agg_agg` once we let the prover declare per-slot
+// which child VK is being used.
+//
+// The on-chain public inputs (`old_root`, `new_root`, `commit_hash`,
+// `messages`) are unchanged, so the Solidity HonkVerifier ABI is untouched.
 global AGG_UTXO_VERIFICATION_KEY_HASH: Field = 3798507185556691269237895706526353312852291328634099462512602675102578351493;
+global agg_escrow_VERIFICATION_KEY_HASH: Field = 2282876808575894689033932656235541083284321417051824642190471828613008555713;
 
 struct UtxoAggProof {
     proof: [Field; 508],
@@ -11,8 +22,8 @@ struct UtxoAggProof {
 }
 
 fn main(
-    verification_key: [Field; 115],
-    verification_key_hash: Field,
+    verification_keys: [[Field; 115]; 2],
+    verification_key_hashes: [Field; 2],
     utxo_agg_proofs: [UtxoAggProof; 2],
     old_root: pub Field,
     new_root: pub Field,
@@ -20,8 +31,17 @@ fn main(
     // 6 proofs, 6 per proof
     messages: pub [Field; 30],
 ) {
-    // Hardcode verification_key_hash for agg_utxo proof
-    assert(verification_key_hash == AGG_UTXO_VERIFICATION_KEY_HASH, "only agg_utxo proof allowed");
+    // Each slot's declared VK hash must be one of the two known
+    // 1-level-aggregator VKs. Asserting membership rather than equality
+    // is what makes a heterogeneous batch legal; a homogeneous batch
+    // (the existing prover path) passes the same hash in both slots and
+    // also satisfies this check.
+    for i in 0..2 {
+        let h = verification_key_hashes[i];
+        let is_a = h == AGG_UTXO_VERIFICATION_KEY_HASH;
+        let is_b = h == agg_escrow_VERIFICATION_KEY_HASH;
+        assert(is_a | is_b, "vk_hash must be agg_utxo or agg_escrow");
+    }
 
     let mut root = old_root;
     let mut first_public_inputs: [Field; 18] = [0; 18];
@@ -53,23 +73,36 @@ fn main(
             first_public_inputs = public_inputs;
         }
 
+        // Padding slot fallback (`proof.old_root == 0`) must reuse slot 0's
+        // verification key alongside slot 0's proof bytes and public
+        // inputs, otherwise verify_proof_with_type would mix a slot-1 VK
+        // with slot-0 proof bytes and fail.
+        let is_padding = proof.old_root == 0;
         std::verify_proof_with_type(
-            verification_key,
-            if proof.old_root != 0 {
-                proof.proof
+            if is_padding {
+                verification_keys[0]
             } else {
+                verification_keys[i]
+            },
+            if is_padding {
                 utxo_agg_proofs[0].proof
-            },
-            if proof.old_root != 0 {
-                public_inputs
             } else {
-                first_public_inputs
+                proof.proof
             },
-            verification_key_hash,
+            if is_padding {
+                first_public_inputs
+            } else {
+                public_inputs
+            },
+            if is_padding {
+                verification_key_hashes[0]
+            } else {
+                verification_key_hashes[i]
+            },
             7,
         );
 
-        if proof.old_root != 0 {
+        if !is_padding {
             assert(proof.old_root == root, "proof old_root must match previous root");
             root = proof.new_root;
         }

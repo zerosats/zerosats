@@ -129,21 +129,31 @@ impl From<AggAggInput> for InputMap {
     fn from(value: AggAggInput) -> Self {
         let mut map = InputMap::new();
 
-        // Should be static
+        // agg_agg now consumes one verification key per slot so it can
+        // accept either an agg_utxo or an agg_utxo2 proof in either slot
+        // (see noir/agg_agg/src/main.nr). The existing Rust prover always
+        // batches agg_utxo proofs, so both slots get the same key/hash
+        // here -- swap one of the entries for AGG_UTXO2's key+hash to
+        // build a heterogeneous batch.
+        let agg_utxo_vk_fields: Vec<InputValue> = AGG_UTXO_VERIFICATION_KEY
+            .0
+            .iter()
+            .cloned()
+            .map(InputValue::Field)
+            .collect();
         map.insert(
-            "verification_key".to_owned(),
-            InputValue::Vec(
-                AGG_UTXO_VERIFICATION_KEY
-                    .0
-                    .iter()
-                    .cloned()
-                    .map(InputValue::Field)
-                    .collect(),
-            ),
+            "verification_keys".to_owned(),
+            InputValue::Vec(vec![
+                InputValue::Vec(agg_utxo_vk_fields.clone()),
+                InputValue::Vec(agg_utxo_vk_fields),
+            ]),
         );
         map.insert(
-            "verification_key_hash".to_owned(),
-            InputValue::Field(AGG_UTXO_VERIFICATION_KEY_HASH.0),
+            "verification_key_hashes".to_owned(),
+            InputValue::Vec(vec![
+                InputValue::Field(AGG_UTXO_VERIFICATION_KEY_HASH.0),
+                InputValue::Field(AGG_UTXO_VERIFICATION_KEY_HASH.0),
+            ]),
         );
 
         map.insert(

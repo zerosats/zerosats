@@ -121,7 +121,7 @@ record_circuit_stats() {
 # they can all be compiled before any hash is known.
 # ----------------------------------------------------------------------
 
-LEAF_PROGRAMS=("signature" "utxo")
+LEAF_PROGRAMS=("signature" "utxo" "escrow")
 for name in "${LEAF_PROGRAMS[@]}"; do
   compile_package "$name"
   write_vk_for "$name"
@@ -131,7 +131,10 @@ done
 # ----------------------------------------------------------------------
 # Stage 2 — propagate utxo's VK hash into agg_utxo's source BEFORE
 # compiling agg_utxo. Doing this in the old order meant agg_utxo.json
-# was always one run behind on UTXO_VERIFICATION_KEY_HASH.
+# was always one run behind on UTXO_VERIFICATION_KEY_HASH. The same
+# propagation step runs for the escrow/agg_escrow parallel stack so both
+# 1-level aggregators are pinned to their respective leaf VKs before
+# agg_agg is rebuilt.
 # ----------------------------------------------------------------------
 
 UTXO_VK_OUT=$(vk_hash_for utxo)
@@ -146,9 +149,24 @@ compile_package agg_utxo
 write_vk_for agg_utxo
 record_circuit_stats agg_utxo
 
+ESCROW_VK_OUT=$(vk_hash_for escrow)
+echo "Verification key hash for escrow:"
+echo "$ESCROW_VK_OUT" | sed 's/^/  /'
+ESCROW_VK_HASH=$(echo "$ESCROW_VK_OUT" | extract_u256)
+echo "Updating noir/agg_escrow/src/main.nr ESCROW_VERIFICATION_KEY_HASH=$ESCROW_VK_HASH"
+update_noir_hash "$REPO_ROOT/noir/agg_escrow/src/main.nr" \
+  ESCROW_VERIFICATION_KEY_HASH "$ESCROW_VK_HASH"
+
+compile_package agg_escrow
+write_vk_for agg_escrow
+record_circuit_stats agg_escrow
+
 # ----------------------------------------------------------------------
-# Stage 3 — propagate agg_utxo's VK hash into agg_agg's source BEFORE
-# compiling agg_agg.
+# Stage 3 — propagate both 1-level aggregator VK hashes into agg_agg's
+# source BEFORE compiling agg_agg. agg_agg's per-slot membership check
+# requires both globals to be populated; missing either one would
+# silently leave that slot accepting a single hash, undoing the
+# heterogeneous-batch design.
 # ----------------------------------------------------------------------
 
 AGG_UTXO_VK_OUT=$(vk_hash_for agg_utxo)
@@ -158,6 +176,14 @@ AGG_UTXO_VK_HASH=$(echo "$AGG_UTXO_VK_OUT" | extract_u256)
 echo "Updating noir/agg_agg/src/main.nr AGG_UTXO_VERIFICATION_KEY_HASH=$AGG_UTXO_VK_HASH"
 update_noir_hash "$REPO_ROOT/noir/agg_agg/src/main.nr" \
   AGG_UTXO_VERIFICATION_KEY_HASH "$AGG_UTXO_VK_HASH"
+
+agg_escrow_VK_OUT=$(vk_hash_for agg_escrow)
+echo "Verification key hash for agg_escrow:"
+echo "$agg_escrow_VK_OUT" | sed 's/^/  /'
+agg_escrow_VK_HASH=$(echo "$agg_escrow_VK_OUT" | extract_u256)
+echo "Updating noir/agg_agg/src/main.nr agg_escrow_VERIFICATION_KEY_HASH=$agg_escrow_VK_HASH"
+update_noir_hash "$REPO_ROOT/noir/agg_agg/src/main.nr" \
+  agg_escrow_VERIFICATION_KEY_HASH "$agg_escrow_VK_HASH"
 
 compile_package agg_agg
 # agg_agg is verified on-chain by Solidity, so use the keccak oracle.
@@ -280,7 +306,9 @@ declare -A CIRCUIT_ROLE=(
   [signature32]="Signature leaf (32-byte message)"
   [signature32sha]="Signature leaf (sha256 message)"
   [utxo]="UTXO leaf (recursion base)"
+  [escrow]="UTXO leaf (alternative kinds scaffold)"
   [agg_utxo]="1-level aggregator"
+  [agg_escrow]="1-level aggregator (escrow leaves)"
   [agg_agg]="Top-level aggregator (on-chain verifier)"
 )
 declare -A CIRCUIT_ORACLE=(
@@ -288,7 +316,9 @@ declare -A CIRCUIT_ORACLE=(
   [signature32]="poseidon"
   [signature32sha]="poseidon"
   [utxo]="poseidon"
+  [escrow]="poseidon"
   [agg_utxo]="poseidon"
+  [agg_escrow]="poseidon"
   [agg_agg]="keccak"
 )
 
@@ -297,11 +327,13 @@ declare -A CIRCUIT_ORACLE=(
 # for VK-hash propagation.
 declare -A CIRCUIT_VK_OUT=(
   [utxo]="$UTXO_VK_OUT"
+  [escrow]="$ESCROW_VK_OUT"
   [agg_utxo]="$AGG_UTXO_VK_OUT"
+  [agg_escrow]="$agg_escrow_VK_OUT"
   [agg_agg]="$AGG_AGG_VK_OUT"
 )
 
-CIRCUIT_ORDER=(signature signature32 signature32sha utxo agg_utxo agg_agg)
+CIRCUIT_ORDER=(signature signature32 signature32sha utxo escrow agg_utxo agg_escrow agg_agg)
 
 README_BLOCK=$(mktemp)
 trap 'rm -f "$SOLC_INPUT" "$SOLC_OUTPUT" "$README_BLOCK"' EXIT
