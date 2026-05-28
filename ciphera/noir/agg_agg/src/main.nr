@@ -12,7 +12,7 @@ use poseidon::poseidon2;
 // The on-chain public inputs (`old_root`, `new_root`, `commit_hash`,
 // `messages`) are unchanged, so the Solidity HonkVerifier ABI is untouched.
 global AGG_UTXO_VERIFICATION_KEY_HASH: Field = 3798507185556691269237895706526353312852291328634099462512602675102578351493;
-global agg_escrow_VERIFICATION_KEY_HASH: Field = 9504338426323889057755558003739951053112252896403686341602500331479886491501;
+global AGG_ESCROW_VERIFICATION_KEY_HASH: Field = 9504338426323889057755558003739951053112252896403686341602500331479886491501;
 
 struct UtxoAggProof {
     proof: [Field; 508],
@@ -39,7 +39,7 @@ fn main(
     for i in 0..2 {
         let h = verification_key_hashes[i];
         let is_a = h == AGG_UTXO_VERIFICATION_KEY_HASH;
-        let is_b = h == agg_escrow_VERIFICATION_KEY_HASH;
+        let is_b = h == AGG_ESCROW_VERIFICATION_KEY_HASH;
         assert(is_a | is_b, "vk_hash must be agg_utxo or agg_escrow");
     }
 
