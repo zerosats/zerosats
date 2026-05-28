@@ -121,7 +121,17 @@ record_circuit_stats() {
 # they can all be compiled before any hash is known.
 # ----------------------------------------------------------------------
 
-LEAF_PROGRAMS=("signature" "utxo" "escrow")
+# Leaf programs split into two groups:
+#   * RECURSED_LEAVES feed into the agg_utxo / agg_escrow stack and
+#     their VK hashes are propagated by later stages.
+#   * STANDALONE_LEAVES are not recursed into anywhere on-chain, but
+#     they are still compiled here so the README's circuit table can
+#     show their complexity stats (ACIR opcodes / UltraHonk gates / VK
+#     bytes). Adding a new circuit to STANDALONE_LEAVES is the only
+#     hook needed to surface its numbers in the table.
+RECURSED_LEAVES=("signature" "utxo" "escrow")
+STANDALONE_LEAVES=("signature32" "signature32sha" "timelock")
+LEAF_PROGRAMS=("${RECURSED_LEAVES[@]}" "${STANDALONE_LEAVES[@]}")
 for name in "${LEAF_PROGRAMS[@]}"; do
   compile_package "$name"
   write_vk_for "$name"
@@ -303,10 +313,11 @@ jq ".contracts[\"$SOURCE_KEY\"][\"HonkVerifier\"].evm.bytecode.linkReferences" "
 
 declare -A CIRCUIT_ROLE=(
   [signature]="Signature leaf"
-  [signature32]="Signature leaf (32-byte message)"
-  [signature32sha]="Signature leaf (sha256 message)"
+  [signature32]="Signature leaf (32-byte preimage)"
+  [signature32sha]="Signature leaf (sha256 preimage)"
+  [timelock]="Timelock witness (PoW chain)"
   [utxo]="UTXO leaf (recursion base)"
-  [escrow]="UTXO leaf (alternative kinds scaffold)"
+  [escrow]="UTXO leaf (escrow spend paths)"
   [agg_utxo]="1-level aggregator"
   [agg_escrow]="1-level aggregator (escrow leaves)"
   [agg_agg]="Top-level aggregator (on-chain verifier)"
@@ -315,6 +326,7 @@ declare -A CIRCUIT_ORACLE=(
   [signature]="poseidon"
   [signature32]="poseidon"
   [signature32sha]="poseidon"
+  [timelock]="poseidon"
   [utxo]="poseidon"
   [escrow]="poseidon"
   [agg_utxo]="poseidon"
@@ -333,7 +345,7 @@ declare -A CIRCUIT_VK_OUT=(
   [agg_agg]="$AGG_AGG_VK_OUT"
 )
 
-CIRCUIT_ORDER=(signature signature32 signature32sha utxo escrow agg_utxo agg_escrow agg_agg)
+CIRCUIT_ORDER=(signature signature32 signature32sha timelock utxo escrow agg_utxo agg_escrow agg_agg)
 
 README_BLOCK=$(mktemp)
 trap 'rm -f "$SOLC_INPUT" "$SOLC_OUTPUT" "$README_BLOCK"' EXIT
