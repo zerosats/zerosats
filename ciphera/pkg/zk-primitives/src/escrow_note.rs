@@ -133,7 +133,13 @@ impl EscrowSignatures for Note {
         Self {
             utxo_kind: Element::new(2),
             note_kind,
-            address: Signature32Sha::new(preimage, Element::ZERO).address(),
+            address: {
+                let payment_hash = Signature32Sha::new(preimage, Element::ZERO).sha_hash();
+                let element = Element::from_be_bytes(payment_hash);
+                let (high, low) = element.decompose_be();
+                let key_hash = get_address_for_private_key(secret_key);
+                hash::hash_merge([key_hash, high, low])
+            },
             psi: timelock_address(secret_key, lock),
             value,
         }
