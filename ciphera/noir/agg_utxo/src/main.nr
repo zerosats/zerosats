@@ -58,15 +58,11 @@ fn main(
             messages_index += 1;
         }
 
-        utxo_hashes[i] = poseidon2::Poseidon2::hash(
-            [
-                if is_padding { 0 } else { input_commitments[0] },
-                if is_padding { 0 } else { input_commitments[1] },
-                if is_padding { 0 } else { output_commitments[0] },
-                if is_padding { 0 } else { output_commitments[1] },
-            ],
-            4,
-        );
+        let c_in0 = if is_padding { 0 } else { input_commitments[0] };
+        let c_in1 = if is_padding { 0 } else { input_commitments[1] };
+        let c_out0 = if is_padding { 0 } else { output_commitments[0] };
+        let c_out1 = if is_padding { 0 } else { output_commitments[1] };
+        utxo_hashes[i] = poseidon2::Poseidon2::hash([c_in0, c_in1, c_out0, c_out1], 4);
 
         // Verify non-padding proofs
         let public_inputs = [
