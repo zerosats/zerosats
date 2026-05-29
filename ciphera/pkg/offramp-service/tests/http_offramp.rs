@@ -104,7 +104,7 @@ async fn post_offramp_persists_quote() {
     let resp = test::call_service(&app, req).await;
     assert!(resp.status().is_success());
     let body: Value = test::read_body_json(resp).await;
-    assert_eq!(body["status"], "Pending");
+    assert_eq!(body["status"], "EscrowRequested");
 }
 
 #[actix_web::test]

@@ -24,7 +24,7 @@ async fn migrate(pool: &DbPool) -> eyre::Result<()> {
           payment_hash          BLOB PRIMARY KEY,
           bolt11                TEXT NOT NULL,
           preimage              BLOB,
-          note_commitment       BLOB NOT NULL UNIQUEY,
+          note_commitment       BLOB NOT NULL UNIQUE,
           note_kind             BLOB NOT NULL,
           note_secret           BLOB NOT NULL,
           amount                BLOB NOT NULL,

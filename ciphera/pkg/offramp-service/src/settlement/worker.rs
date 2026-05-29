@@ -57,7 +57,7 @@ async fn step(ctx: &SettlementContext, q: &Quote) -> eyre::Result<()> {
         QuoteStatus::LightningPaying => step_poll_payment(ctx, q).await,
         QuoteStatus::LightningPaid => step_submit_claim(ctx, q).await,
         QuoteStatus::ClaimSubmitted => step_confirm_claim(ctx, q).await,
-        QuoteStatus::Refundable | QuoteStatus::Cancelled => Ok(()),
+        QuoteStatus::ClaimConfirmed | QuoteStatus::Refundable | QuoteStatus::Cancelled => Ok(()),
     }
 }
 
@@ -169,8 +169,11 @@ async fn step_confirm_claim(ctx: &SettlementContext, q: &Quote) -> eyre::Result<
         None => return Ok(()),
     };
     if ctx.rollup.transaction_height(txn_hash).await?.is_some() {
-        info!(payment_hash = %hex::encode(q.payment_hash), "SlowBurn confirmed");
-        quotes::update_status(&ctx.db, q.payment_hash, QuoteStatus::LightningPaid).await?;
+        info!(payment_hash = %hex::encode(q.payment_hash), "claim proof confirmed on rollup");
+        // Previously stamped `LightningPaid` here, which would have
+        // looped the state machine back into the claim-submit step
+        // forever. `ClaimConfirmed` is the canonical terminal.
+        quotes::update_status(&ctx.db, q.payment_hash, QuoteStatus::ClaimConfirmed).await?;
     }
     Ok(())
 }

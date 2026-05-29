@@ -1,9 +1,9 @@
 use crate::db::DbPool;
 use crate::domain::{Quote, QuoteStatus};
 use chrono::{DateTime, TimeZone, Utc};
+use element::Element;
 use sqlx::Row;
 use std::str::FromStr;
-use element::Element;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -19,31 +19,53 @@ pub enum Error {
     Row(String),
 }
 
+/// Insert a fresh quote. The column list, placeholder count (`?1..?15`),
+/// and bind order all have to agree -- the previous version was
+/// silently dropping `user_address`, `preimage`, `claim_address` and
+/// double-binding `payment_hash` into the `zero_block` slot. Keep this
+/// strictly aligned with the `CREATE TABLE quotes (...)` migration in
+/// `db/mod.rs`.
 pub async fn insert(pool: &DbPool, q: &Quote) -> Result<(), Error> {
     let res = sqlx::query(
         r#"
         INSERT INTO quotes (
-          payment_hash, bolt11, note_commitment, note_kind, note_secret,
-          amount, zero_block, n_blocks, status, last_error,
-          expires_at, created_at, updated_at
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13);
+            payment_hash,
+            bolt11,
+            preimage,
+            note_commitment,
+            note_kind,
+            note_secret,
+            amount,
+            user_address,
+            zero_block,
+            n_blocks,
+            claim_address,
+            status,
+            last_error,
+            expires_at,
+            created_at,
+            updated_at
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16);
         "#,
     )
-        .bind(&q.payment_hash[..])
-        .bind(&q.bolt11)
-        .bind(element_bytes(&q.note_commitment))
-        .bind(element_bytes(&q.note_kind))
-        .bind(element_bytes(&q.note_secret))
-        .bind(element_bytes(&q.amount))
-        .bind(&q.payment_hash[..])
-        .bind(element_bytes(&q.n_blocks))
-        .bind(q.status.as_str())
-        .bind(&q.last_error)
-        .bind(q.expires_at.timestamp())
-        .bind(q.created_at.timestamp())
-        .bind(q.updated_at.timestamp())
-        .execute(pool)
-        .await;
+    .bind(&q.payment_hash[..])
+    .bind(&q.bolt11)
+    .bind(q.preimage.as_ref().map(|p| p.to_vec()))
+    .bind(element_bytes(&q.note_commitment))
+    .bind(element_bytes(&q.note_kind))
+    .bind(element_bytes(&q.note_secret))
+    .bind(element_bytes(&q.amount))
+    .bind(element_bytes(&q.user_address))
+    .bind(&q.zero_block[..])
+    .bind(element_bytes(&q.n_blocks))
+    .bind(q.claim_address.as_ref().map(element_bytes))
+    .bind(q.status.as_str())
+    .bind(&q.last_error)
+    .bind(q.expires_at.timestamp())
+    .bind(q.created_at.timestamp())
+    .bind(q.updated_at.timestamp())
+    .execute(pool)
+    .await;
 
     match res {
         Ok(_) => Ok(()),
@@ -58,9 +80,7 @@ pub async fn insert(pool: &DbPool, q: &Quote) -> Result<(), Error> {
 }
 
 pub async fn get(pool: &DbPool, payment_hash: [u8; 32]) -> Result<Quote, Error> {
-    let row = sqlx::query(
-        r#"SELECT * FROM quotes WHERE payment_hash = ?1"#,
-    )
+    let row = sqlx::query(r#"SELECT * FROM quotes WHERE payment_hash = ?1"#)
         .bind(&payment_hash[..])
         .fetch_optional(pool)
         .await?;
@@ -69,16 +89,19 @@ pub async fn get(pool: &DbPool, payment_hash: [u8; 32]) -> Result<Quote, Error> 
     row_to_quote(row)
 }
 
+/// Quotes the settlement worker should still tick. Anything in
+/// `is_terminal()` (`ClaimConfirmed`, `Refundable`, `Cancelled`) is
+/// excluded so the worker doesn't keep waking on finished rows.
 pub async fn list_non_terminal(pool: &DbPool) -> Result<Vec<Quote>, Error> {
     let rows = sqlx::query(
         r#"
         SELECT * FROM quotes
-        WHERE status NOT IN ('LightningPaid', 'Refundable', 'Cancelled')
+        WHERE status NOT IN ('ClaimConfirmed', 'Refundable', 'Cancelled')
         ORDER BY created_at ASC
         "#,
     )
-        .fetch_all(pool)
-        .await?;
+    .fetch_all(pool)
+    .await?;
     rows.into_iter().map(row_to_quote).collect()
 }
 
@@ -87,9 +110,7 @@ pub async fn update_status(
     payment_hash: [u8; 32],
     status: QuoteStatus,
 ) -> Result<(), Error> {
-    sqlx::query(
-        r#"UPDATE quotes SET status = ?1, updated_at = ?2 WHERE payment_hash = ?3"#,
-    )
+    sqlx::query(r#"UPDATE quotes SET status = ?1, updated_at = ?2 WHERE payment_hash = ?3"#)
         .bind(status.as_str())
         .bind(Utc::now().timestamp())
         .bind(&payment_hash[..])
@@ -98,22 +119,22 @@ pub async fn update_status(
     Ok(())
 }
 
-pub async fn record_payment_started(
-    pool: &DbPool,
-    payment_hash: [u8; 32]
-) -> Result<(), Error> {
+/// Mark the quote as `LightningPaying`. Placeholder numbering used to
+/// start at `?2` with two bind values, which would have produced a
+/// runtime sqlite error.
+pub async fn record_payment_started(pool: &DbPool, payment_hash: [u8; 32]) -> Result<(), Error> {
     sqlx::query(
         r#"
         UPDATE quotes
         SET status = 'LightningPaying',
-            updated_at = ?2
-        WHERE payment_hash = ?3
+            updated_at = ?1
+        WHERE payment_hash = ?2
         "#,
     )
-        .bind(Utc::now().timestamp())
-        .bind(&payment_hash[..])
-        .execute(pool)
-        .await?;
+    .bind(Utc::now().timestamp())
+    .bind(&payment_hash[..])
+    .execute(pool)
+    .await?;
     Ok(())
 }
 
@@ -131,14 +152,18 @@ pub async fn record_payment_succeeded(
         WHERE payment_hash = ?3
         "#,
     )
-        .bind(preimage.to_vec())
-        .bind(Utc::now().timestamp())
-        .bind(&payment_hash[..])
-        .execute(pool)
-        .await?;
+    .bind(preimage.to_vec())
+    .bind(Utc::now().timestamp())
+    .bind(&payment_hash[..])
+    .execute(pool)
+    .await?;
     Ok(())
 }
 
+/// Stamp the rollup tx hash returned by `submit_escrow_transaction` and
+/// transition to `ClaimSubmitted`. Previous WHERE clause referenced
+/// `quote_id`, which doesn't exist in the schema -- updates silently
+/// no-op'd on every row.
 pub async fn record_claim_submitted(
     pool: &DbPool,
     payment_hash: [u8; 32],
@@ -150,21 +175,23 @@ pub async fn record_claim_submitted(
         SET status = 'ClaimSubmitted',
             claim_address = ?1,
             updated_at = ?2
-        WHERE quote_id = ?3
+        WHERE payment_hash = ?3
         "#,
     )
-        .bind(element_bytes(&claim_address))
-        .bind(Utc::now().timestamp())
-        .bind(&payment_hash[..])
-        .execute(pool)
-        .await?;
+    .bind(element_bytes(&claim_address))
+    .bind(Utc::now().timestamp())
+    .bind(&payment_hash[..])
+    .execute(pool)
+    .await?;
     Ok(())
 }
 
-pub async fn record_error(pool: &DbPool, payment_hash: [u8; 32], message: &str) -> Result<(), Error> {
-    sqlx::query(
-        r#"UPDATE quotes SET last_error = ?1, updated_at = ?2 WHERE payment_hash = ?3"#,
-    )
+pub async fn record_error(
+    pool: &DbPool,
+    payment_hash: [u8; 32],
+    message: &str,
+) -> Result<(), Error> {
+    sqlx::query(r#"UPDATE quotes SET last_error = ?1, updated_at = ?2 WHERE payment_hash = ?3"#)
         .bind(message)
         .bind(Utc::now().timestamp())
         .bind(&payment_hash[..])
@@ -183,7 +210,10 @@ fn element_bytes(e: &Element) -> Vec<u8> {
 
 fn element_from_bytes(b: &[u8]) -> Result<Element, Error> {
     if b.len() != 32 {
-        return Err(Error::Row(format!("expected 32-byte Element, got {}", b.len())));
+        return Err(Error::Row(format!(
+            "expected 32-byte Element, got {}",
+            b.len()
+        )));
     }
     let mut arr = [0u8; 32];
     arr.copy_from_slice(b);

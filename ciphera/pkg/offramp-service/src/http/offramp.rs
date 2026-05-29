@@ -38,6 +38,9 @@ pub struct TimelockResponse {
 
 #[derive(Debug, Serialize)]
 pub struct CreateResponse {
+    /// Hex-encoded payment hash. Doubles as the quote's primary key for
+    /// the GET / cancel routes (`/v0/offramp/{payment_hash}`).
+    pub payment_hash: String,
     pub note: NoteResponse,
     pub timelock: TimelockResponse,
     pub expires_at: String,
@@ -146,6 +149,7 @@ pub async fn create_offramp(
     quotes::insert(&state.db, &quote).await?;
 
     Ok(web::Json(CreateResponse {
+        payment_hash: hex::encode(payment_hash),
         note: NoteResponse {
             utxo_kind: note.utxo_kind.to_string(),
             note_kind: note.note_kind.to_string(),
@@ -200,23 +204,25 @@ pub async fn cancel_offramp(
     let q = quotes::get(&state.db, payment_hash).await?;
 
     match q.status {
-        QuoteStatus::EscrowRequested => {
+        // Pre-payment states: cancellation is just a status flip.
+        QuoteStatus::EscrowRequested | QuoteStatus::EscrowDetected => {
             quotes::update_status(&state.db, payment_hash, QuoteStatus::Cancelled).await?;
         }
-        QuoteStatus::EscrowDetected => {
-            quotes::update_status(&state.db, payment_hash, QuoteStatus::Cancelled).await?;
-        }
+        // Lightning is in flight or already settled; we can't pull it
+        // back without orphaning a Lightning payment.
         QuoteStatus::LightningPaying | QuoteStatus::LightningPaid => {
             return Err(ApiError::Conflict(
                 "lightning payment in flight or already complete; cannot cancel".into(),
             ));
         }
-        QuoteStatus::ClaimSubmitted => {
-            return Err(ApiError::Conflict("claimed".into()));
+        // Claim proof is already on its way / on chain.
+        QuoteStatus::ClaimSubmitted | QuoteStatus::ClaimConfirmed => {
+            return Err(ApiError::Conflict(
+                "escrow claim already submitted; cannot cancel".into(),
+            ));
         }
-        QuoteStatus::Cancelled | QuoteStatus::Refundable => {
-            // idempotent no-op
-        }
+        // Already terminal: idempotent no-op.
+        QuoteStatus::Cancelled | QuoteStatus::Refundable => {}
     }
 
     let q = quotes::get(&state.db, payment_hash).await?;
