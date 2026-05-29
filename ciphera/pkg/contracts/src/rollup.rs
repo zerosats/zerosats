@@ -533,23 +533,64 @@ impl SignedRollupContract {
         public_inputs.extend(utxo_messages);
         public_inputs.extend(kzg);
 
+        let vk_hash_h256 = AGG_AGG_VERIFICATION_KEY_HASH
+            .parse::<H256>()
+            .expect("verification key is parsable");
+
+        // Log every value that decides whether the call is accepted by
+        // the on-chain `zkVerifiers[verificationKeyHash].enabled`
+        // require. If submissions revert with
+        // `RollupV1: ZK verifier not allowed`, the answer is in this
+        // line: which proxy was hit, which vkHash was submitted, and
+        // whether the public-input shape matches `messages_length + 3`.
+        info!(
+            rollup_addr = %format!("{:#x}", self.readonly.address()),
+            vk_hash = %format!("{:#x}", vk_hash_h256),
+            vk_hash_const_src = AGG_AGG_VERIFICATION_KEY_HASH,
+            public_inputs_len = public_inputs.len(),
+            proof_len = proof.len(),
+            height,
+            "Submitting verifyRollup"
+        );
+
         let call_tx = self
             .call(
                 "verifyRollup",
                 (
                     U256::from(height),
-                    AGG_AGG_VERIFICATION_KEY_HASH
-                        .parse::<H256>()
-                        .expect("verification key is parsable"),
+                    vk_hash_h256,
                     web3::types::Bytes::from(proof),
                     public_inputs,
                     H256::from_slice(&other_hash),
                     Token::Array(signatures),
                 ),
             )
-            .await?;
+            .await;
 
-        Ok(call_tx)
+        match call_tx {
+            Ok(tx) => {
+                info!(tx = %format!("{:#x}", tx), "verifyRollup submitted");
+                Ok(tx)
+            }
+            Err(e) => {
+                let msg = e.to_string();
+                if msg.contains("ZK verifier not allowed") {
+                    tracing::error!(
+                        rollup_addr = %format!("{:#x}", self.readonly.address()),
+                        submitted_vk_hash = %format!("{:#x}", vk_hash_h256),
+                        err = %msg,
+                        "Contract rejected vkHash; on-chain mapping likely does not contain it. \
+                         To confirm, query the mapping directly: \
+                         cast call <rollup_addr> 'zkVerifiers(bytes32)(address,uint32,bool)' \
+                         <submitted_vk_hash> --rpc-url <RPC>. \
+                         If `enabled == false`, either rebuild the prover binary so its \
+                         AGG_AGG_VERIFICATION_KEY_HASH const matches what's registered on chain, \
+                         or addZkVerifier(submitted_vk_hash, ...) via the contract's owner."
+                    );
+                }
+                Err(e)
+            }
+        }
     }
 
     #[tracing::instrument(err, ret, skip(self))]
@@ -605,6 +646,30 @@ impl SignedRollupContract {
 }
 
 impl ReadonlyRollupContract {
+    /// Read the on-chain registration for a `verificationKeyHash`. Returns
+    /// `(verifier_address, messages_length)` if the hash is enabled in
+    /// `zkVerifiers`, or an error otherwise -- mirroring the Solidity
+    /// `getZkVerifier(bytes32)` view which itself reverts on `!enabled`.
+    /// Used at prover startup to fail loudly when the binary's
+    /// `AGG_AGG_VERIFICATION_KEY_HASH` const is not on the chain's
+    /// allow-list, instead of producing a proof that will revert at
+    /// submission time with `RollupV1: ZK verifier not allowed`.
+    #[tracing::instrument(err, ret, skip(self))]
+    pub async fn get_zk_verifier(&self, vk_hash: H256) -> Result<(H160, u32)> {
+        let (verifier, messages_length): (H160, u32) = self
+            .client
+            .query(
+                &self.contract,
+                "getZkVerifier",
+                (vk_hash,),
+                None,
+                Default::default(),
+                self.block_height.map(|x| x.into()),
+            )
+            .await?;
+        Ok((verifier, messages_length))
+    }
+
     #[tracing::instrument(err, ret, skip(self))]
     pub async fn get_mint(&self, key: &Element) -> Result<Option<Mint>> {
         let mint: Mint = self

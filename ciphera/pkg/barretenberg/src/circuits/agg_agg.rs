@@ -158,6 +158,27 @@ impl From<AggAggInput> for InputMap {
                 AggLeafSource::AggEscrow => AGG_ESCROW_VERIFICATION_KEY_HASH.0,
             }
         };
+
+        // Debug-only trace of the per-slot VK selection. For the
+        // utxo-only path (the only one wired into the live prover
+        // today) both sources are `AggUtxo` and both hashes should
+        // equal `AGG_UTXO_VERIFICATION_KEY_HASH`. A divergence here
+        // means an upstream caller constructed `AggAgg` with the wrong
+        // sources -- catch it at proof-build time instead of as an
+        // on-chain `RollupV1: ZK proof verification failed` revert.
+        tracing::debug!(
+            sources = ?value.sources,
+            slot0_hash = %format!(
+                "0x{:064x}",
+                element::Element::from_base(hash_for(value.sources[0])).to_u256()
+            ),
+            slot1_hash = %format!(
+                "0x{:064x}",
+                element::Element::from_base(hash_for(value.sources[1])).to_u256()
+            ),
+            "AggAgg per-slot VK selection"
+        );
+
         map.insert(
             "verification_keys".to_owned(),
             InputValue::Vec(vec![key_for(value.sources[0]), key_for(value.sources[1])]),

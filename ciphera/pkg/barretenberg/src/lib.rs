@@ -6,8 +6,9 @@ mod traits;
 mod util;
 pub mod verify;
 
-pub use circuits::AGG_UTXO_VERIFICATION_KEY_HASH;
+pub use circuits::{AGG_AGG_VERIFICATION_KEY_HASH, AGG_UTXO_VERIFICATION_KEY_HASH};
 pub use traits::{Prove, Verify};
+pub use verify::VerificationKeyHash;
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 

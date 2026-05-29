@@ -55,6 +55,16 @@ pub async fn run_prover(config: &Config, node: Arc<NodeShared>) -> Result<()> {
     )
     .await?;
 
+    // Startup gate: cross-check the three sources of truth for the
+    // agg_agg verification-key hash, then confirm the chain has it
+    // registered. Each comparison fails into a hard error so the prover
+    // never silently submits proofs that will revert with
+    // `RollupV1: ZK verifier not allowed` -- the exact failure mode that
+    // happens when `generate_fixtures.sh` ran but the binary wasn't
+    // rebuilt, the binary was rebuilt mid-script, or the node config
+    // still points at a pre-redeploy proxy address.
+    verify_agg_agg_hash_consistency(&contract).await?;
+
     let db_path = config.db_path.join("prover");
     let prover_state_db = Arc::new(ProverDb::create_or_load(&db_path)?);
     let prover = Arc::new(Prover::new(contract.clone()));
@@ -127,6 +137,105 @@ pub async fn run_prover(config: &Config, node: Arc<NodeShared>) -> Result<()> {
     )?;
 
     Ok(())
+}
+
+/// Verify the agg_agg verification-key hash is consistent across the
+/// three independent sources of truth and that the chain has it
+/// registered as an enabled verifier. Hard-fails the prover startup if
+/// any of these doesn't line up so submissions never get past this
+/// point with a hash the chain doesn't know about.
+///
+/// The three sources:
+/// 1. `contracts::rollup::AGG_AGG_VERIFICATION_KEY_HASH` -- a `&'static
+///    str` const baked into the binary at compile time. This is what
+///    `verify_block` actually sends as the `verificationKeyHash`
+///    argument.
+/// 2. `barretenberg::AGG_AGG_VERIFICATION_KEY_HASH` -- the Poseidon
+///    hash of the `agg_agg_key` bytes embedded via `include_bytes!`,
+///    computed at first use via `lazy_static`. This is the hash that
+///    *actually* matches the proof artefacts the prover will produce.
+/// 3. The chain's `zkVerifiers[hash].enabled` flag, queried via
+///    `getZkVerifier`.
+///
+/// (1) and (2) should agree because `generate_fixtures.sh` updates both
+/// in the same run. They diverge when the binary is rebuilt against
+/// stale fixtures, or when only one was refreshed before a partial
+/// rebuild. (3) is independent of the binary entirely; it only matches
+/// (1)/(2) if a deploy occurred after the latest `generate_fixtures.sh`.
+async fn verify_agg_agg_hash_consistency(contract: &RollupContract) -> Result<()> {
+    use std::str::FromStr;
+    use web3::types::H256;
+
+    let const_hash =
+        H256::from_str(contracts::AGG_AGG_VERIFICATION_KEY_HASH).map_err(|e| {
+            Error::Prover(prover::Error::BarretenbergProve(format!(
+                "AGG_AGG_VERIFICATION_KEY_HASH const is malformed: {e}"
+            )))
+        })?;
+
+    let runtime_hash = {
+        let base = barretenberg::AGG_AGG_VERIFICATION_KEY_HASH.0;
+        let bytes = Element::from_base(base).to_be_bytes();
+        H256::from_slice(&bytes)
+    };
+
+    info!(
+        rollup_addr = %format!("{:#x}", contract.address()),
+        const_hash  = %format!("{:#x}", const_hash),
+        runtime_hash = %format!("{:#x}", runtime_hash),
+        "Prover agg_agg hash fingerprint"
+    );
+
+    if const_hash != runtime_hash {
+        error!(
+            const_hash = %format!("{:#x}", const_hash),
+            runtime_hash = %format!("{:#x}", runtime_hash),
+            "AGG_AGG_VERIFICATION_KEY_HASH drift: the const string baked into the binary \
+             does NOT match Poseidon(embedded agg_agg_key). The binary will submit proofs \
+             tagged with the const hash, but the actual proof bytes are keyed against the \
+             runtime hash -- they cannot both be right. Re-run noir/generate_fixtures.sh \
+             and `cargo build` (in that order) before starting the prover."
+        );
+        return Err(Error::Prover(prover::Error::BarretenbergProve(format!(
+            "AGG_AGG_VERIFICATION_KEY_HASH drift: const={const_hash:#x} runtime={runtime_hash:#x}"
+        ))));
+    }
+
+    // Ask the chain whether it knows this hash. `getZkVerifier` reverts
+    // on the contract side if `enabled == false`, which surfaces here
+    // as an `Err`. Catching it now produces a hard error with the
+    // specific remediation; otherwise the very first `verifyRollup`
+    // submission would revert with the opaque
+    // `RollupV1: ZK verifier not allowed`.
+    match contract.get_zk_verifier(const_hash).await {
+        Ok((verifier_addr, messages_length)) => {
+            info!(
+                rollup_addr = %format!("{:#x}", contract.address()),
+                vk_hash = %format!("{:#x}", const_hash),
+                verifier_addr = %format!("{:#x}", verifier_addr),
+                messages_length,
+                "Chain has agg_agg verifier registered"
+            );
+            Ok(())
+        }
+        Err(e) => {
+            error!(
+                rollup_addr = %format!("{:#x}", contract.address()),
+                vk_hash = %format!("{:#x}", const_hash),
+                err = %e,
+                "Chain does NOT have this agg_agg vkHash enabled. Submissions will revert \
+                 with `RollupV1: ZK verifier not allowed`. Either (a) redeploy the rollup with \
+                 the freshly-regenerated agg_agg key, or (b) propose+execute an \
+                 `addZkVerifier(<vk_hash>, <new_verifier_addr>, 30)` through the contract's \
+                 timelock owner."
+            );
+            Err(Error::Prover(prover::Error::BarretenbergProve(format!(
+                "agg_agg vkHash {const_hash:#x} is not enabled on rollup \
+                 {:#x}: {e}",
+                contract.address()
+            ))))
+        }
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
