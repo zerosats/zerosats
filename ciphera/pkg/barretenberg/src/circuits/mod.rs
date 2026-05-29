@@ -1,5 +1,7 @@
 mod agg_agg;
+mod agg_escrow;
 mod agg_utxo;
+mod escrow;
 mod migrate;
 mod note;
 mod signature;
@@ -11,8 +13,11 @@ mod utxo;
 
 use std::io::Read;
 
+pub use agg_agg::AGG_AGG_VERIFICATION_KEY_HASH;
+pub use agg_escrow::*;
 pub use agg_utxo::*;
 use base64::Engine;
+pub use escrow::*;
 use flate2::read::GzDecoder;
 // pub use migrate::*;
 pub use utxo::*;

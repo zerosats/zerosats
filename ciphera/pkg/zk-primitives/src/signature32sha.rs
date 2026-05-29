@@ -31,7 +31,16 @@ impl Signature32Sha {
     /// `note.address = Poseidon(field_pair(SHA256(preimage)))`.
     #[must_use]
     pub fn address(&self) -> Element {
-        let element = Element::from_be_bytes(self.sha_hash());
+        Self::address_from_hash(self.sha_hash())
+    }
+
+    /// Build the Poseidon hashlock address from a SHA-256 digest directly,
+    /// without knowing the preimage. Used by offramp gateways that hold an
+    /// invoice's `payment_hash` (the SHA-256 of the Lightning preimage) but
+    /// will only learn the preimage after settling the invoice.
+    #[must_use]
+    pub fn address_from_hash(payment_hash: [u8; 32]) -> Element {
+        let element = Element::from_be_bytes(payment_hash);
         let (high, low) = element.decompose_be();
         hash::hash_merge([high, low])
     }

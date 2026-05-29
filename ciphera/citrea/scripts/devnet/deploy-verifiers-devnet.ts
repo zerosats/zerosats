@@ -1,3 +1,6 @@
+// Devnet-only: deploys the aggregate Honk verifier binary against the local
+// Citrea regtest node. Refuses to run against any chain other than 5655.
+
 import {
   createPublicClient,
   createWalletClient,
@@ -5,15 +8,16 @@ import {
   formatEther,
 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
-import { deployBin, citreaDevChain } from "./shared";
+import { assertChainId, citreaDevChain, deployBin } from "../shared";
+
+const DEVNET_CHAIN_ID = 5655;
 
 async function main() {
-  console.log("🚀 Connecting to Citrea...");
-
-  const rpcUrl = process.env.TESTING_URL || "http://localhost:12345";
+  const rpcUrl =
+    process.env.RPC_URL || process.env.TESTING_URL || "http://localhost:12345";
+  console.log("🚀 Connecting to Citrea devnet...");
   console.log(`RPC URL: ${rpcUrl}`);
 
-  // Create clients with dynamic RPC URL
   const publicClient = createPublicClient({
     chain: {
       ...citreaDevChain,
@@ -22,11 +26,14 @@ async function main() {
         public: { http: [rpcUrl] },
       },
     },
-    transport: http(rpcUrl, {
-      timeout: 30000,
-      retryCount: 3,
-    }),
+    transport: http(rpcUrl, { timeout: 30000, retryCount: 3 }),
   });
+
+  await assertChainId(
+    publicClient,
+    DEVNET_CHAIN_ID,
+    "deploy-verifiers-devnet",
+  );
 
   const privateKey = (process.env.PRIVATE_KEY ||
     "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80") as `0x${string}`;
@@ -41,44 +48,24 @@ async function main() {
         public: { http: [rpcUrl] },
       },
     },
-    transport: http(rpcUrl, {
-      timeout: 30000,
-      retryCount: 3,
-    }),
+    transport: http(rpcUrl, { timeout: 30000, retryCount: 3 }),
   });
-
-  console.log("\n🔍 Testing connection...");
-  const chainId = await publicClient.getChainId();
-  console.log(`✅ Chain ID: ${chainId}`);
 
   const blockNumber = await publicClient.getBlockNumber();
-  console.log(`✅ Block Number: ${blockNumber}`);
+  console.log(`✅ Chain ID: ${DEVNET_CHAIN_ID}`);
+  console.log(`✅ Block:    ${blockNumber}`);
 
-  // Check account balance
-  let balance = await publicClient.getBalance({
-    address: account.address,
-  });
-  console.log(`✅ Account: ${account.address}`);
-  console.log(`✅ Balance: ${formatEther(balance)} cBTC`);
+  const balance = await publicClient.getBalance({ address: account.address });
+  console.log(`✅ Account:  ${account.address}`);
+  console.log(`✅ Balance:  ${formatEther(balance)} cBTC`);
 
-  console.log("\n🔍 Looking for binary files and deploying contracts...");
-
+  console.log("\n🔍 Deploying aggregate verifier...");
   const aggregateVerifierAddr = await deployBin(
     "noir/agg_agg_HonkVerifier.bin",
     publicClient,
     walletClient,
   );
-
   console.log(`✅ Aggregate Verifier Contract: ${aggregateVerifierAddr}`);
-  /*
-  const mintVerifierAddr = await deployBin(
-    "noir/mint_HonkVerifier.bin",
-    publicClient,
-    walletClient,
-  );
-
-  console.log(`✅ Mint Verifier Contract: ${mintVerifierAddr}`);
-  */
 }
 
 main()

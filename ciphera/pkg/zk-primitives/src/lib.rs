@@ -11,8 +11,12 @@
 
 mod address;
 mod agg_agg;
+mod agg_escrow;
 mod agg_utxo;
 mod burn;
+mod escrow;
+mod escrow_input_note;
+mod escrow_note;
 mod input_note;
 mod merkle_path;
 mod migrate;
@@ -27,8 +31,12 @@ mod utxo;
 
 pub use address::*;
 pub use agg_agg::*;
+pub use agg_escrow::*;
 pub use agg_utxo::*;
 pub use burn::*;
+pub use escrow::*;
+pub use escrow_input_note::*;
+pub use escrow_note::*;
 pub use input_note::*;
 pub use merkle_path::*;
 pub use migrate::*;

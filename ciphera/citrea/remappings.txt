@@ -1,0 +1,1 @@
+contracts/:atomiq-contracts-evm/=atomiq-contracts-evm/

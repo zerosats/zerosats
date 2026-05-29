@@ -1,16 +1,4 @@
 use poseidon::poseidon2;
-use bitcoin::check_pow_chain;
-
-pub struct TimeLock {
-    pub zero_block: [u8; 32],
-    pub n_blocks: Field,
-}
-
-pub struct TimeProof {
-    pub lock: TimeLock,
-    // Note, only 2 blocks timelock is accepted right now. Increase for production usage
-    pub headers: [[u8; 80]; 2],
-}
 
 pub struct Note {
     pub kind: Field,
@@ -21,11 +9,7 @@ pub struct Note {
 
 pub struct InputNote {
     pub note: Note,
-    // Note commit spend_type to note hash to fix spending condition.
-    pub spend_type: u8,
     pub secret_key: Field,
-    pub preimage: [u8; 32],
-    pub time_proof: TimeProof,
 }
 
 pub fn check_commitment(note: Note, commitment: Field) {
@@ -48,6 +32,68 @@ pub fn get_secret_hash(secret_key: Field) -> Field {
     poseidon2::Poseidon2::hash([secret_key, 0], 2)
 }
 
+pub fn check_input_note_ownership(input_note: InputNote) {
+    if (input_note.note.value != 0) {
+        assert(
+            get_secret_hash(input_note.secret_key) == input_note.note.address,
+            "Input note is not owned by the owner",
+        );
+    }
+}
+
+pub fn slice<let N: u32, let L: u32>(bytes: [u8; N], start: u32) -> [u8; L] {
+    let end = start + L;
+    assert(end <= N, "slice: slice end out of bounds");
+    let mut result = [bytes[0]; L];
+    for i in 0..L {
+        result[i] = bytes[start + i];
+    }
+    result
+}
+
+pub fn field_from_bytes<let N: u32>(bytes: [u8; N]) -> Field {
+    assert(bytes.len() < 32, "field_from_bytes: N must be less than 32");
+    let mut as_field = 0;
+    let mut offset = 1;
+    for i in 0..N {
+        as_field += (bytes[i] as Field) * offset;
+        offset *= 256;
+    }
+    as_field
+}
+
+pub fn is_one_of(value: Field, one_of: [Field]) -> bool {
+    let mut is_one_of = false;
+    for possible in one_of {
+        if possible == value {
+            is_one_of = true;
+        }
+    }
+    is_one_of
+}
+
+use bitcoin::check_pow_chain;
+
+pub struct TimeLock {
+    pub zero_block: [u8; 32],
+    pub n_blocks: Field,
+}
+
+pub struct TimeProof {
+    pub lock: TimeLock,
+    // Note, only 2 blocks timelock is accepted right now. Increase for production usage
+    pub headers: [[u8; 80]; 2],
+}
+
+pub struct EscrowNote {
+    pub note: Note,
+    // Note commit spend_type to note hash to fix spending condition.
+    pub spend_type: u8,
+    pub secret_key: Field,
+    pub preimage: [u8; 32],
+    pub time_proof: TimeProof,
+}
+
 pub fn timelock_is_active(lock: TimeLock) -> bool {
     let mut result = false;
     for i in 0..32 {
@@ -64,7 +110,7 @@ pub fn get_timelock_commitment(lock: TimeLock) -> Field {
      poseidon2::Poseidon2::hash([zero_block_hash, lock.n_blocks], 2)
 }
 
-pub fn check_spend_conditions(input_note: InputNote) {
+pub fn check_spend_conditions(input_note: EscrowNote) {
     if input_note.note.value != 0 {
         if input_note.spend_type == 0 {
             let key_hash = get_secret_hash(input_note.secret_key);
@@ -102,14 +148,14 @@ pub fn check_spend_conditions(input_note: InputNote) {
             assert(computed_hash == input_note.note.address, "Address is not owned by the owner");
         } else if input_note.spend_type == 3 {
             // SHA locked HTLC
+            let key_hash = get_secret_hash(input_note.secret_key);
             if input_note.preimage != [0; 32] {
                 let computed_sha_hash = sha256::digest(input_note.preimage);
                 let (low, high) = bytes_32_to_field_pair(computed_sha_hash);
 
-                let computed_hash = poseidon2::Poseidon2::hash([low, high], 2);
+                let computed_hash = poseidon2::Poseidon2::hash([key_hash, low, high], 3);
                 assert(computed_hash == input_note.note.address, "HTLC: computed hash does not match to SHA preimage");
             } else {
-                let key_hash = get_secret_hash(input_note.secret_key);
                 let commitment = get_timelock_commitment(input_note.time_proof.lock);
                 let timelocked_address = poseidon2::Poseidon2::hash([key_hash, commitment], 2);
 
@@ -129,37 +175,6 @@ pub fn check_spend_conditions(input_note: InputNote) {
         }
     }
     // Padding note passes check
-}
-
-pub fn slice<let N: u32, let L: u32>(bytes: [u8; N], start: u32) -> [u8; L] {
-    let end = start + L;
-    assert(end <= N, "slice: slice end out of bounds");
-    let mut result = [bytes[0]; L];
-    for i in 0..L {
-        result[i] = bytes[start + i];
-    }
-    result
-}
-
-pub fn field_from_bytes<let N: u32>(bytes: [u8; N]) -> Field {
-    assert(bytes.len() < 32, "field_from_bytes: N must be less than 32");
-    let mut as_field = 0;
-    let mut offset = 1;
-    for i in 0..N {
-        as_field += (bytes[i] as Field) * offset;
-        offset *= 256;
-    }
-    as_field
-}
-
-pub fn is_one_of(value: Field, one_of: [Field]) -> bool {
-    let mut is_one_of = false;
-    for possible in one_of {
-        if possible == value {
-            is_one_of = true;
-        }
-    }
-    is_one_of
 }
 
 pub fn bytes_32_to_field_pair(bytes: [u8; 32]) -> (Field, Field) {

@@ -1,4 +1,7 @@
-import IUSDCArtifact from "../artifacts/contracts/IUSDC.sol/IUSDC.json";
+// Devnet-only: bootstraps a USDC fixture (init v1 → v2 → v2.1, mints,
+// approves the rollup proxy as spender). Refuses any chainId other than 5655.
+
+import IUSDCArtifact from "../../artifacts/contracts/IUSDC.sol/IUSDC.json";
 import {
   createPublicClient,
   createWalletClient,
@@ -9,8 +12,9 @@ import {
   maxUint256,
 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
-import { citreaDevChain } from "./shared";
+import { assertChainId, citreaDevChain } from "../shared";
 
+const DEVNET_CHAIN_ID = 5655;
 const usdcAddress = "0x5fbdb2315678afecb367f032d93f642f64180aa3";
 const rollupProxyAddr = "0x610178da211fef7d417bc0e6fed39f05609ad788";
 
@@ -54,13 +58,13 @@ async function main() {
     }),
   });
 
+  await assertChainId(publicClient, DEVNET_CHAIN_ID, "test-deployment-devnet");
+
   const proverAddress = account.address;
   const validators = [account.address];
 
-  // Test basic connectivity
   console.log("\n🔍 Testing connection...");
-  const chainId = await publicClient.getChainId();
-  console.log(`✅ Chain ID: ${chainId}`);
+  console.log(`✅ Chain ID: ${DEVNET_CHAIN_ID}`);
 
   const blockNumber = await publicClient.getBlockNumber();
   console.log(`✅ Block Number: ${blockNumber}`);

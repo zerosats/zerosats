@@ -1,3 +1,5 @@
+// Devnet-only smoke transaction. Refuses any chainId other than 5655.
+
 import {
   createPublicClient,
   createWalletClient,
@@ -6,15 +8,16 @@ import {
   formatEther,
 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
-import { citreaDevChain } from "./shared";
+import { assertChainId, citreaDevChain } from "../shared";
+
+const DEVNET_CHAIN_ID = 5655;
 
 async function main() {
-  console.log("🚀 Connecting to Citrea...");
-
-  const rpcUrl = process.env.TESTING_URL || "http://localhost:12345";
+  const rpcUrl =
+    process.env.RPC_URL || process.env.TESTING_URL || "http://localhost:12345";
+  console.log("🚀 Connecting to Citrea devnet...");
   console.log(`RPC URL: ${rpcUrl}`);
 
-  // Create clients with dynamic RPC URL
   const publicClient = createPublicClient({
     chain: {
       ...citreaDevChain,
@@ -23,11 +26,10 @@ async function main() {
         public: { http: [rpcUrl] },
       },
     },
-    transport: http(rpcUrl, {
-      timeout: 30000,
-      retryCount: 3,
-    }),
+    transport: http(rpcUrl, { timeout: 30000, retryCount: 3 }),
   });
+
+  await assertChainId(publicClient, DEVNET_CHAIN_ID, "send-devnet-citrea-tx");
 
   const privateKey = (process.env.PRIVATE_KEY ||
     "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80") as `0x${string}`;
@@ -42,59 +44,42 @@ async function main() {
         public: { http: [rpcUrl] },
       },
     },
-    transport: http(rpcUrl, {
-      timeout: 30000,
-      retryCount: 3,
-    }),
+    transport: http(rpcUrl, { timeout: 30000, retryCount: 3 }),
   });
 
-  // Test basic connectivity
-  console.log("\n🔍 Testing connection...");
-  const chainId = await publicClient.getChainId();
-  console.log(`✅ Chain ID: ${chainId}`);
+  console.log(`✅ Chain ID: ${DEVNET_CHAIN_ID}`);
+  console.log(`✅ Block:    ${await publicClient.getBlockNumber()}`);
 
-  const blockNumber = await publicClient.getBlockNumber();
-  console.log(`✅ Block Number: ${blockNumber}`);
+  let balance = await publicClient.getBalance({ address: account.address });
+  console.log(`✅ Account:  ${account.address}`);
+  console.log(`✅ Balance:  ${formatEther(balance)} cBTC`);
 
-  // Check account balance
-  let balance = await publicClient.getBalance({
-    address: account.address,
-  });
-  console.log(`✅ Account: ${account.address}`);
-  console.log(`✅ Balance: ${formatEther(balance)} cBTC`);
-
-  // Get gas price
   const gasPrice = await publicClient.getGasPrice();
-  console.log(`✅ Gas Price: ${gasPrice} wei`);
-
-  // Example transaction (uncomment to test)
+  console.log(`✅ Gas price: ${gasPrice} wei`);
 
   console.log("\n💸 Sending test transaction...");
   const hash = await walletClient.sendTransaction({
-    to: "0xE00fa9663e1060D4a70d2f534ef4Cee477f895dE", // Second hardhat account
+    to: "0xE00fa9663e1060D4a70d2f534ef4Cee477f895dE",
     value: parseEther("1"),
     gas: 21000n,
-    gasPrice: gasPrice,
+    gasPrice,
   });
-
   console.log(`📝 Transaction hash: ${hash}`);
 
   const receipt = await publicClient.waitForTransactionReceipt({
     hash,
     timeout: 30000,
   });
-
   console.log(`✅ Transaction confirmed in block: ${receipt.blockNumber}`);
   console.log(`✅ Gas used: ${receipt.gasUsed}`);
-  console.log(`✅ Status: ${receipt.status}`);
+  console.log(`✅ Status:   ${receipt.status}`);
 
   balance = await publicClient.getBalance({
     address: "0xE00fa9663e1060D4a70d2f534ef4Cee477f895dE",
   });
-  console.log(`✅ Account: 0xE00fa9663e1060D4a70d2f534ef4Cee477f895dE`);
-  console.log(`✅ Balance: ${formatEther(balance)} cBTC`);
-
-  console.log("\n🎉 Connection successful!");
+  console.log(
+    `✅ 0xE00fa9663e1060D4a70d2f534ef4Cee477f895dE balance: ${formatEther(balance)} cBTC`,
+  );
 }
 
 main()

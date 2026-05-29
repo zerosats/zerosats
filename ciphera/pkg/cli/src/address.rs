@@ -2,7 +2,12 @@ use element::Element;
 use rand::RngCore;
 use rand::rngs::OsRng;
 use serde::{Deserialize, Serialize};
-use zk_primitives::{Note, citrea_usdc_note_kind, citrea_wcbtc_note_kind};
+use zk_primitives::{CitreaNetwork, Note, citrea_testnet_usdc_note_kind, citrea_wcbtc_note_kind};
+
+/// The CLI is currently hardcoded to Citrea testnet (see
+/// `client::client_tests::CHAIN_ID`). Centralise that assumption here so a
+/// future mainnet/devnet switch only needs to touch one constant.
+const CLI_NETWORK: CitreaNetwork = CitreaNetwork::Testnet;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct CipheraAddress {
@@ -21,8 +26,8 @@ pub fn random_element() -> Element {
 
 pub fn citrea_token_data(ticker: &str) -> (Element, Element) {
     match ticker.to_uppercase().as_str() {
-        "WCBTC" => (Element::new(2), citrea_wcbtc_note_kind()),
-        "USDC" => (Element::new(2), citrea_usdc_note_kind()),
+        "WCBTC" => (Element::new(2), citrea_wcbtc_note_kind(CLI_NETWORK)),
+        "USDC" => (Element::new(2), citrea_testnet_usdc_note_kind()),
         _ => unreachable!("only WCBTC and USDC tokens are supported"),
     }
 }
@@ -36,20 +41,20 @@ pub fn citrea_ticker_from_code(currency: u8) -> String {
 }
 
 pub fn citrea_currency_from_contract(note_kind: Element) -> u8 {
-    if note_kind == citrea_wcbtc_note_kind() {
+    if note_kind == citrea_wcbtc_note_kind(CLI_NETWORK) {
         return 1;
     }
-    if note_kind == citrea_usdc_note_kind() {
+    if note_kind == citrea_testnet_usdc_note_kind() {
         return 2;
     }
     unreachable!("only WCBTC and USDC tokens are supported")
 }
 
 pub fn citrea_ticker_from_contract(note_kind: Element) -> String {
-    if note_kind == citrea_wcbtc_note_kind() {
+    if note_kind == citrea_wcbtc_note_kind(CLI_NETWORK) {
         return "WCBTC".to_string();
     }
-    if note_kind == citrea_usdc_note_kind() {
+    if note_kind == citrea_testnet_usdc_note_kind() {
         return "USDC".to_string();
     }
     unreachable!("only WCBTC and USDC tokens are supported")
@@ -60,8 +65,8 @@ impl From<&CipheraAddress> for Note {
         let psi = value.psi.unwrap_or_else(random_element);
 
         let contract = match value.currency {
-            1 => citrea_wcbtc_note_kind(),
-            2 => citrea_usdc_note_kind(),
+            1 => citrea_wcbtc_note_kind(CLI_NETWORK),
+            2 => citrea_testnet_usdc_note_kind(),
             _ => unreachable!("currency code must be 1 or 2"),
         };
 
@@ -190,7 +195,7 @@ mod tests {
     fn test_roundtrip_from_wcbtc_note() {
         let note = Note {
             utxo_kind: Element::new(2),
-            note_kind: citrea_wcbtc_note_kind(),
+            note_kind: citrea_wcbtc_note_kind(CLI_NETWORK),
             address: hash_merge([Element::new(101), Element::ZERO]),
             psi: Element::ZERO,
             value: Element::new(1),
@@ -220,7 +225,7 @@ mod tests {
     fn test_roundtrip_from_usdc_note() {
         let note = Note {
             utxo_kind: Element::new(2),
-            note_kind: citrea_usdc_note_kind(),
+            note_kind: citrea_testnet_usdc_note_kind(),
             address: hash_merge([Element::new(101), Element::ZERO]),
             psi: Element::ZERO,
             value: Element::new(1),

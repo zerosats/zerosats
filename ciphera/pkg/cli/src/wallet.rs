@@ -5,7 +5,9 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::num::ParseIntError;
 use std::path::{Path, PathBuf};
-use zk_primitives::{InputNote, Note, Utxo};
+use zk_primitives::{Escrow, EscrowInputNote, InputNote, Note, UtxoKind, Utxo};
+
+use crate::escrow::{htlc_claim_address, htlc_refund_psi, pow_two_block_lock, pow_two_block_proof};
 
 use crate::CipheraAddress;
 use crate::address::{citrea_ticker_from_contract, citrea_token_data};
@@ -458,6 +460,150 @@ impl Wallet {
 
     pub fn prepare_receive_note(&self, amount: u64, ticker: &str) -> (Self, InputNote) {
         self.stage_value(|wallet| wallet.receive_note(amount, ticker))
+    }
+
+    // -------- HTLC escrow flow --------
+    //
+    // The three methods below mirror the three sides of a SHA-256 HTLC:
+    // `lock` spends a normal note from `self`'s available balance and
+    // emits a hashlock+timelock-encumbered output; `redeem` spends that
+    // output by revealing the preimage; `refund` spends the same output
+    // after the PoW timelock has elapsed. Lock uses the `Utxo` circuit
+    // (inputs are normal Poseidon-key notes); redeem and refund use the
+    // `Escrow` circuit with `spend_type == 3` (HTLC) inputs. All three
+    // keep `note_kind` constant across inputs/outputs so the
+    // `is_multiple_kinds` check inside each leaf circuit is satisfied.
+
+    fn escrow_lock(
+        &mut self,
+        amount: u64,
+        ticker: &str,
+        htlc_secret_key: Element,
+        preimage: [u8; 32],
+    ) -> Result<(Utxo, EscrowInputNote), WalletError> {
+        let (inputs, change) = self.select_input_notes(ticker, amount)?;
+        let (utxo_kind, note_kind) = citrea_token_data(ticker);
+
+        let htlc_note = Note {
+            utxo_kind,
+            note_kind,
+            address: htlc_claim_address(htlc_secret_key, preimage),
+            psi: htlc_refund_psi(htlc_secret_key, &pow_two_block_lock()),
+            value: Element::from(amount),
+        };
+
+        // EscrowInputNote default sets spend_type=0; pin it to the HTLC
+        // branch (3) up-front and stash the witness data so the redeem
+        // / refund CLI commands can spend it without re-deriving
+        // anything. The persisted JSON is what gets passed between
+        // alice (locker) and bob (redeemer) in a real two-party flow.
+        let escrow_input_note = EscrowInputNote {
+            note: htlc_note.clone(),
+            spend_type: 3,
+            secret_key: htlc_secret_key,
+            preimage,
+            ..EscrowInputNote::default()
+        };
+
+        Ok((
+            Utxo::new_send(inputs, [htlc_note, change]),
+            escrow_input_note,
+        ))
+    }
+
+    pub fn prepare_escrow_lock(
+        &self,
+        amount: u64,
+        ticker: &str,
+        htlc_secret_key: Element,
+        preimage: [u8; 32],
+    ) -> Result<(Self, Utxo, EscrowInputNote), WalletError> {
+        let mut staged = self.clone();
+        let (utxo, escrow_note) =
+            staged.escrow_lock(amount, ticker, htlc_secret_key, preimage)?;
+        Ok((staged, utxo, escrow_note))
+    }
+
+    fn escrow_redeem(
+        &mut self,
+        htlc_input_note: &EscrowInputNote,
+    ) -> Result<(Escrow, InputNote), WalletError> {
+        let ticker = citrea_ticker_from_contract(htlc_input_note.note.note_kind);
+        let amount = self.get_note_amount(&htlc_input_note.note)?;
+
+        // Force the claim branch even if the caller passed a stale
+        // EscrowInputNote default.
+        let redeem_input = EscrowInputNote {
+            note: htlc_input_note.note.clone(),
+            spend_type: 3,
+            secret_key: htlc_input_note.secret_key,
+            preimage: htlc_input_note.preimage,
+            ..EscrowInputNote::default()
+        };
+
+        let received: InputNote = self.receive_note(amount, &ticker);
+        let b = self.push_to_avail(&ticker, received.clone())?;
+        debug!(balance = b, "updated wallet balance after redeem");
+
+        let escrow = Escrow {
+            kind: UtxoKind::Send,
+            input_notes: [redeem_input, EscrowInputNote::padding_note()],
+            output_notes: [received.note.clone(), Note::padding_note()],
+            burn_address: None,
+        };
+
+        Ok((escrow, received))
+    }
+
+    pub fn prepare_escrow_redeem(
+        &self,
+        htlc_input_note: &EscrowInputNote,
+    ) -> Result<(Self, Escrow, InputNote), WalletError> {
+        let mut staged = self.clone();
+        let (escrow, received) = staged.escrow_redeem(htlc_input_note)?;
+        Ok((staged, escrow, received))
+    }
+
+    fn escrow_refund(
+        &mut self,
+        htlc_input_note: &EscrowInputNote,
+    ) -> Result<(Escrow, InputNote), WalletError> {
+        let ticker = citrea_ticker_from_contract(htlc_input_note.note.note_kind);
+        let amount = self.get_note_amount(&htlc_input_note.note)?;
+
+        // Refund branch: preimage is zeroed and the PoW witness for the
+        // configured timelock is attached. `secret_key` must match the
+        // one whose `key_hash` was baked into `psi` at lock time --
+        // for the test flow that's the same key used for claim.
+        let refund_input = EscrowInputNote {
+            note: htlc_input_note.note.clone(),
+            spend_type: 3,
+            secret_key: htlc_input_note.secret_key,
+            preimage: [0u8; 32],
+            time_proof: pow_two_block_proof(),
+        };
+
+        let received: InputNote = self.receive_note(amount, &ticker);
+        let b = self.push_to_avail(&ticker, received.clone())?;
+        debug!(balance = b, "updated wallet balance after refund");
+
+        let escrow = Escrow {
+            kind: UtxoKind::Send,
+            input_notes: [refund_input, EscrowInputNote::padding_note()],
+            output_notes: [received.note.clone(), Note::padding_note()],
+            burn_address: None,
+        };
+
+        Ok((escrow, received))
+    }
+
+    pub fn prepare_escrow_refund(
+        &self,
+        htlc_input_note: &EscrowInputNote,
+    ) -> Result<(Self, Escrow, InputNote), WalletError> {
+        let mut staged = self.clone();
+        let (escrow, received) = staged.escrow_refund(htlc_input_note)?;
+        Ok((staged, escrow, received))
     }
 
     fn import_note(&mut self, note: &Note) -> Result<(), WalletError> {

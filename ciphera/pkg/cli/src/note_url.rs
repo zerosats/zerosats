@@ -2,7 +2,13 @@ use crate::address::citrea_currency_from_contract;
 use element::Element;
 use hash::hash_merge;
 use serde::{Deserialize, Serialize};
-use zk_primitives::{InputNote, Note, citrea_usdc_note_kind, citrea_wcbtc_note_kind};
+use zk_primitives::{
+    CitreaNetwork, InputNote, Note, citrea_testnet_usdc_note_kind, citrea_wcbtc_note_kind,
+};
+
+/// CLI is hardcoded to Citrea testnet; mirror the constant from
+/// `crate::address` rather than re-deriving it.
+const CLI_NETWORK: CitreaNetwork = CitreaNetwork::Testnet;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct CipheraURL {
@@ -14,8 +20,8 @@ pub struct CipheraURL {
 impl From<&CipheraURL> for InputNote {
     fn from(value: &CipheraURL) -> Self {
         let contract = match value.currency {
-            1 => citrea_wcbtc_note_kind(),
-            2 => citrea_usdc_note_kind(),
+            1 => citrea_wcbtc_note_kind(CLI_NETWORK),
+            2 => citrea_testnet_usdc_note_kind(),
             _ => unreachable!("currency code must be 1 or 2"),
         };
         InputNote {
@@ -114,7 +120,7 @@ mod tests {
             secret_key: Element::new(101),
             note: Note {
                 utxo_kind: Element::new(2),
-                note_kind: citrea_wcbtc_note_kind(),
+                note_kind: citrea_wcbtc_note_kind(CLI_NETWORK),
                 address: hash_merge([Element::new(101), Element::ZERO]),
                 psi: Element::ZERO,
                 value: Element::new(1),
@@ -152,7 +158,7 @@ mod tests {
             secret_key: Element::new(101),
             note: Note {
                 utxo_kind: Element::new(2),
-                note_kind: citrea_usdc_note_kind(),
+                note_kind: citrea_testnet_usdc_note_kind(),
                 address: hash_merge([Element::new(101), Element::ZERO]),
                 psi: Element::ZERO,
                 value: Element::MAX,

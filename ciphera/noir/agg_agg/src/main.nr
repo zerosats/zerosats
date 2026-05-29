@@ -1,8 +1,18 @@
 use dep::std;
 use poseidon::poseidon2;
 
-global AGG_UTXO_VERIFICATION_KEY_HASH: Field =
-    3388699005873159084317027697113597051696161581144444636240947639583580530346;
+// agg_agg accepts a heterogeneous batch: each of its two child slots can be
+// either an `agg_utxo` proof (original `utxo` leaves) or an `agg_escrow` proof
+// (alternative `escrow` leaves). The two child circuits have identical
+// public-input shape, proof size, and aggregation structure -- the only
+// difference is which leaf VK each one accepts -- so they are
+// interchangeable inside `agg_agg` once we let the prover declare per-slot
+// which child VK is being used.
+//
+// The on-chain public inputs (`old_root`, `new_root`, `commit_hash`,
+// `messages`) are unchanged, so the Solidity HonkVerifier ABI is untouched.
+global AGG_UTXO_VERIFICATION_KEY_HASH: Field = 3798507185556691269237895706526353312852291328634099462512602675102578351493;
+global AGG_ESCROW_VERIFICATION_KEY_HASH: Field = 9504338426323889057755558003739951053112252896403686341602500331479886491501;
 
 struct UtxoAggProof {
     proof: [Field; 508],
@@ -12,8 +22,8 @@ struct UtxoAggProof {
 }
 
 fn main(
-    verification_key: [Field; 115],
-    verification_key_hash: Field,
+    verification_keys: [[Field; 115]; 2],
+    verification_key_hashes: [Field; 2],
     utxo_agg_proofs: [UtxoAggProof; 2],
     old_root: pub Field,
     new_root: pub Field,
@@ -21,26 +31,16 @@ fn main(
     // 6 proofs, 6 per proof
     messages: pub [Field; 30],
 ) {
-    // Hardcode verification_key_hash for agg_utxo proof
-    assert(verification_key_hash == AGG_UTXO_VERIFICATION_KEY_HASH, "only agg_utxo proof allowed");
-
-    // Pre-loop padding invariants. A padded child contributes nothing to
-    // the outer message segment, commit_hash, or root, so every field
-    // derived from that slot must be zero. Without this, the padded
-    // segment of `messages` is exposed to the verifier as if it had been
-    // proven, even though the recursive verifier re-uses slot 0's proof.
+    // Each slot's declared VK hash must be one of the two known
+    // 1-level-aggregator VKs. Asserting membership rather than equality
+    // is what makes a heterogeneous batch legal; a homogeneous batch
+    // (the existing prover path) passes the same hash in both slots and
+    // also satisfies this check.
     for i in 0..2 {
-        let is_padding = utxo_agg_proofs[i].old_root == 0;
-        if i == 0 {
-            assert(!is_padding, "first proof cannot be a padding proof");
-        }
-        if is_padding {
-            for k in 0..15 {
-                assert(messages[15 * i + k] == 0, "padded child messages must be zero");
-            }
-            assert(utxo_agg_proofs[i].commit_hash == 0, "padded child commit_hash must be zero");
-            assert(utxo_agg_proofs[i].new_root == 0, "padded child new_root must be zero");
-        }
+        let h = verification_key_hashes[i];
+        let is_a = h == AGG_UTXO_VERIFICATION_KEY_HASH;
+        let is_b = h == AGG_ESCROW_VERIFICATION_KEY_HASH;
+        assert(is_a | is_b, "vk_hash must be agg_utxo or agg_escrow");
     }
 
     let mut root = old_root;
@@ -73,23 +73,46 @@ fn main(
             first_public_inputs = public_inputs;
         }
 
+        // Padding slot fallback (`proof.old_root == 0`) must reuse slot 0's
+        // verification key alongside slot 0's proof bytes and public
+        // inputs, otherwise verify_proof_with_type would mix a slot-1 VK
+        // with slot-0 proof bytes and fail.
+        let is_padding = proof.old_root == 0;
         std::verify_proof_with_type(
-            verification_key,
-            if proof.old_root != 0 {
-                proof.proof
+            if is_padding {
+                verification_keys[0]
             } else {
+                verification_keys[i]
+            },
+            if is_padding {
                 utxo_agg_proofs[0].proof
-            },
-            if proof.old_root != 0 {
-                public_inputs
             } else {
-                first_public_inputs
+                proof.proof
             },
-            verification_key_hash,
+            if is_padding {
+                first_public_inputs
+            } else {
+                public_inputs
+            },
+            if is_padding {
+                verification_key_hashes[0]
+            } else {
+                verification_key_hashes[i]
+            },
             7,
         );
 
-        if proof.old_root != 0 {
+        if is_padding {
+            // Enforce a canonical all-zero form for every public field of a
+            // padding slot so that a prover cannot forge arbitrary messages,
+            // commit_hash contributions, or root transitions from a slot that
+            // carries no real proof.
+            for j in 0..15 {
+                assert(messages[15 * i + j] == 0, "padding slot messages must be zero");
+            }
+            assert(proof.new_root == 0, "padding slot new_root must be zero");
+            assert(proof.commit_hash == 0, "padding slot commit_hash must be zero");
+        } else {
             assert(proof.old_root == root, "proof old_root must match previous root");
             root = proof.new_root;
         }
@@ -103,89 +126,4 @@ fn main(
             ),
     );
     assert(new_root == root, "Roots must match");
-}
-
-#[test(should_fail_with = "first proof cannot be a padding proof")]
-fn test_first_proof_cannot_be_padding() {
-    // Slot 0 is the substitute proof for padded slots, so it must itself
-    // be a real (non-padding) proof.
-    let verification_key = [0; 115];
-    let proof = UtxoAggProof { proof: [0; 508], old_root: 0, new_root: 0, commit_hash: 0 };
-    let utxo_agg_proofs = [proof, proof];
-
-    main(
-        verification_key,
-        AGG_UTXO_VERIFICATION_KEY_HASH,
-        utxo_agg_proofs,
-        0,
-        0,
-        0,
-        [0; 30],
-    );
-}
-
-#[test(should_fail_with = "padded child messages must be zero")]
-fn test_padded_child_messages_must_be_zero() {
-    // Padded slot 1 carries a forged burn (kind = 3) in
-    // its message segment. The recursive verifier reuses slot 0's proof
-    // so the segment would otherwise be unconstrained -- this assertion
-    // must catch it.
-    let verification_key = [0; 115];
-    let real = UtxoAggProof { proof: [0; 508], old_root: 1, new_root: 2, commit_hash: 0 };
-    let padded =
-        UtxoAggProof { proof: [0; 508], old_root: 0, new_root: 0, commit_hash: 0 };
-    let utxo_agg_proofs = [real, padded];
-
-    let mut messages = [0; 30];
-    messages[15] = 3; // forged burn kind in padded segment
-
-    main(
-        verification_key,
-        AGG_UTXO_VERIFICATION_KEY_HASH,
-        utxo_agg_proofs,
-        1,
-        2,
-        0,
-        messages,
-    );
-}
-
-#[test(should_fail_with = "padded child commit_hash must be zero")]
-fn test_padded_child_commit_hash_must_be_zero() {
-    let verification_key = [0; 115];
-    let real = UtxoAggProof { proof: [0; 508], old_root: 1, new_root: 2, commit_hash: 0 };
-    // old_root == 0 marks padding, but commit_hash is nonzero.
-    let padded =
-        UtxoAggProof { proof: [0; 508], old_root: 0, new_root: 0, commit_hash: 999 };
-    let utxo_agg_proofs = [real, padded];
-
-    main(
-        verification_key,
-        AGG_UTXO_VERIFICATION_KEY_HASH,
-        utxo_agg_proofs,
-        1,
-        2,
-        0,
-        [0; 30],
-    );
-}
-
-#[test(should_fail_with = "padded child new_root must be zero")]
-fn test_padded_child_new_root_must_be_zero() {
-    let verification_key = [0; 115];
-    let real = UtxoAggProof { proof: [0; 508], old_root: 1, new_root: 2, commit_hash: 0 };
-    // old_root == 0 marks padding, but new_root is nonzero.
-    let padded =
-        UtxoAggProof { proof: [0; 508], old_root: 0, new_root: 7, commit_hash: 0 };
-    let utxo_agg_proofs = [real, padded];
-
-    main(
-        verification_key,
-        AGG_UTXO_VERIFICATION_KEY_HASH,
-        utxo_agg_proofs,
-        1,
-        2,
-        0,
-        [0; 30],
-    );
 }

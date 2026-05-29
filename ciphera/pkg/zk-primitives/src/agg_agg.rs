@@ -5,20 +5,51 @@ use hash::hash_merge;
 use primitives::serde::{deserialize_base64, serialize_base64};
 use serde::{Deserialize, Serialize};
 
-/// The data required to prove an AggAgg transaction, this aggregates multiple AggUtxo proofs into
-/// a single proof. Expects each new_root from the previous AggUtxo proof to be the same as the
-/// old_root of the next AggUtxo proof.
+/// Identifies which 1-level aggregator produced the proof in each
+/// `AggAgg` slot. The Noir `agg_agg` circuit accepts either
+/// `agg_utxo` or `agg_escrow` leaf proofs in either slot; the Rust
+/// prover uses this enum to pick the matching verification key per
+/// slot when building the input map.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AggLeafSource {
+    /// The slot's proof was produced by the `agg_utxo` circuit.
+    AggUtxo,
+    /// The slot's proof was produced by the `agg_escrow` circuit.
+    AggEscrow,
+}
+
+/// The data required to prove an AggAgg transaction, this aggregates two
+/// 1-level aggregator proofs into a single proof. Expects each new_root
+/// from the previous proof to be the same as the old_root of the next
+/// one.
 #[derive(Debug, Clone)]
 pub struct AggAgg {
-    /// The proofs for the AggAgg transaction
+    /// The proofs for the AggAgg transaction. Each proof shares the
+    /// `AggUtxoProof` shape regardless of whether it was produced by
+    /// `agg_utxo` or `agg_escrow`.
     pub proofs: [AggUtxoProof; 2],
+    /// Which 1-level aggregator produced each slot's proof. The prover
+    /// uses this to feed the matching verification key into the
+    /// per-slot Noir input.
+    pub sources: [AggLeafSource; 2],
 }
 
 impl AggAgg {
-    /// Create a new AggAgg
+    /// Create a new AggAgg from two `agg_utxo` proofs.
     #[must_use]
     pub fn new(proofs: [AggUtxoProof; 2]) -> Self {
-        Self { proofs }
+        Self {
+            proofs,
+            sources: [AggLeafSource::AggUtxo, AggLeafSource::AggUtxo],
+        }
+    }
+
+    /// Create a new AggAgg with explicit per-slot leaf-source tags so
+    /// that one slot can carry an `agg_utxo` proof and the other an
+    /// `agg_escrow` proof (or any other mix).
+    #[must_use]
+    pub fn new_mixed(proofs: [AggUtxoProof; 2], sources: [AggLeafSource; 2]) -> Self {
+        Self { proofs, sources }
     }
 
     /// Get the old root of the AggAgg transaction

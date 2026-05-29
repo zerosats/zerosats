@@ -16,7 +16,8 @@ pub use erc20::ERC20Contract;
 pub use error::{Error, Result};
 pub use fees::{Eip1559Fees, FeeStrategy};
 pub use rollup::{
-    ReadonlyRollupContract, SignedRollupContract, SlowBurnQueuedEvent, SlowBurnReleasedEvent,
+    AGG_AGG_VERIFICATION_KEY_HASH, ReadonlyRollupContract, SignedRollupContract,
+    SlowBurnQueuedEvent, SlowBurnReleasedEvent,
 };
 pub type RollupContract = SignedRollupContract;
 

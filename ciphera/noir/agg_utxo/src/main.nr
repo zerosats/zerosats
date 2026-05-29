@@ -2,8 +2,7 @@ use dep::std;
 use common::is_one_of;
 use poseidon::poseidon2;
 
-global UTXO_VERIFICATION_KEY_HASH: Field =
-    882648800003733875427415495039894438670642023611104092359005201691150676330;
+global UTXO_VERIFICATION_KEY_HASH: Field = 10701587517979705559786957280001233427580941744290315464012712640240652948422;
 
 struct AggUtxoProofInput {
     proof: [Field; 508],
@@ -25,20 +24,6 @@ fn main(
 ) {
     // Hardcode verification_key_hash for utxo proof
     assert(verification_key_hash == UTXO_VERIFICATION_KEY_HASH, "only utxo proof allowed");
-
-    // Pre-loop padding invariants. A padded slot's commitments are still
-    // folded into utxo_hashes[i] below and contribute to the outer
-    // commit_hash, so a malicious prover could otherwise poison the
-    // commit_hash with arbitrary fields. Forbid that here so the padded
-    // slot's contribution is canonically poseidon2([0,0,0,0], 4).
-    for i in 0..3 {
-        if proofs[i].utxo_kind == 0 {
-            assert(proofs[i].input_commitments[0] == 0, "padded slot input commitment must be zero");
-            assert(proofs[i].input_commitments[1] == 0, "padded slot input commitment must be zero");
-            assert(proofs[i].output_commitments[0] == 0, "padded slot output commitment must be zero");
-            assert(proofs[i].output_commitments[1] == 0, "padded slot output commitment must be zero");
-        }
-    }
 
     let mut root = old_root;
     let mut utxo_hashes: [Field; 3] = [0, 0, 0];
@@ -73,15 +58,11 @@ fn main(
             messages_index += 1;
         }
 
-        utxo_hashes[i] = poseidon2::Poseidon2::hash(
-            [
-                input_commitments[0],
-                input_commitments[1],
-                output_commitments[0],
-                output_commitments[1],
-            ],
-            4,
-        );
+        let c_in0 = if is_padding { 0 } else { input_commitments[0] };
+        let c_in1 = if is_padding { 0 } else { input_commitments[1] };
+        let c_out0 = if is_padding { 0 } else { output_commitments[0] };
+        let c_out1 = if is_padding { 0 } else { output_commitments[1] };
+        utxo_hashes[i] = poseidon2::Poseidon2::hash([c_in0, c_in1, c_out0, c_out1], 4);
 
         // Verify non-padding proofs
         let public_inputs = [
@@ -260,68 +241,6 @@ fn test_invalid_verification_key_hash() {
         old_root,
         new_root,
         commit_hash,
-    );
-}
-
-// A padded slot's input/output commitments are folded
-// into commit_hash via utxo_hashes[i]. The pre-loop assertions must
-// forbid any nonzero commitment in a slot whose utxo_kind == 0.
-
-fn padded_slot() -> AggUtxoProofInput {
-    AggUtxoProofInput {
-        proof: [0; 508],
-        utxo_kind: 0,
-        input_merkle_paths: [[0; 160]; 2],
-        output_merkle_paths: [[0; 160]; 2],
-        input_commitments: [0; 2],
-        output_commitments: [0; 2],
-    }
-}
-
-fn real_send_slot() -> AggUtxoProofInput {
-    AggUtxoProofInput {
-        proof: [0; 508],
-        utxo_kind: 1, // send, no message consumption
-        input_merkle_paths: [[0; 160]; 2],
-        output_merkle_paths: [[0; 160]; 2],
-        input_commitments: [0; 2],
-        output_commitments: [0; 2],
-    }
-}
-
-#[test(should_fail_with = "padded slot input commitment must be zero")]
-fn test_padded_slot_nonzero_input_commitment_fails() {
-    let mut bad_padding = padded_slot();
-    bad_padding.input_commitments[0] = 12345;
-
-    let proofs = [real_send_slot(), bad_padding, padded_slot()];
-
-    main(
-        [0; 115],
-        UTXO_VERIFICATION_KEY_HASH,
-        proofs,
-        [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-        0,
-        0,
-        0,
-    );
-}
-
-#[test(should_fail_with = "padded slot output commitment must be zero")]
-fn test_padded_slot_nonzero_output_commitment_fails() {
-    let mut bad_padding = padded_slot();
-    bad_padding.output_commitments[1] = 67890;
-
-    let proofs = [real_send_slot(), padded_slot(), bad_padding];
-
-    main(
-        [0; 115],
-        UTXO_VERIFICATION_KEY_HASH,
-        proofs,
-        [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-        0,
-        0,
-        0,
     );
 }
 

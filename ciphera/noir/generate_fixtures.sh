@@ -31,12 +31,24 @@ mkdir -p "$REPO_ROOT/fixtures/keys"
 # Usage: update_noir_hash <file> <global_name> <new_value>
 #
 # Uses -0777 (slurp the whole file) so the substitution survives a
-# `nargo fmt`-induced newline between `=` and the literal -- the
-# fixed-length lookbehind form silently no-ops on wrapped declarations
-# (same failure mode as the Rust/TS perl calls below).
+# `nargo fmt`-induced newline between `=` and the literal. The post
+# write `grep -E` is critical: perl's `s///` returns success even when
+# it matches zero times, so a typo'd `var`, a wrapped declaration the
+# regex misses, a renamed global, or any other mismatch silently leaves
+# the file unchanged. Without this check the stale value rides through
+# the next compile, the resulting agg_agg VK ends up keyed against a
+# stale leaf hash, and downstream consumers (the on-chain registered
+# `verifierKeyHash_`, the Rust prover const, the lazy_static computed
+# from the embedded key bytes) drift apart -- producing the
+# `RollupV1: ZK verifier not allowed` revert from a brand-new deploy.
 update_noir_hash() {
   local file="$1" var="$2" hash="$3"
   perl -i -0777 -pe "s/(global ${var}:\s*Field\s*=\s*)\d+(\s*;)/\${1}${hash}\${2}/" "$file"
+  if ! grep -qE "global[[:space:]]+${var}[[:space:]]*:[[:space:]]*Field[[:space:]]*=[[:space:]]*${hash}[[:space:]]*;" "$file"; then
+    echo "ERROR: update_noir_hash failed to write 'global ${var} = ${hash}' into ${file}" >&2
+    echo "       (regex did not match -- check for typo, renamed global, or formatter-induced wrap)" >&2
+    exit 1
+  fi
 }
 
 # Extract the u256 decimal hash from vk_hash output.
@@ -121,7 +133,17 @@ record_circuit_stats() {
 # they can all be compiled before any hash is known.
 # ----------------------------------------------------------------------
 
-LEAF_PROGRAMS=("signature" "signature32" "signature32sha" "utxo")
+# Leaf programs split into two groups:
+#   * RECURSED_LEAVES feed into the agg_utxo / agg_escrow stack and
+#     their VK hashes are propagated by later stages.
+#   * STANDALONE_LEAVES are not recursed into anywhere on-chain, but
+#     they are still compiled here so the README's circuit table can
+#     show their complexity stats (ACIR opcodes / UltraHonk gates / VK
+#     bytes). Adding a new circuit to STANDALONE_LEAVES is the only
+#     hook needed to surface its numbers in the table.
+RECURSED_LEAVES=("signature" "utxo" "escrow")
+STANDALONE_LEAVES=("signature32" "signature32sha" "timelock")
+LEAF_PROGRAMS=("${RECURSED_LEAVES[@]}" "${STANDALONE_LEAVES[@]}")
 for name in "${LEAF_PROGRAMS[@]}"; do
   compile_package "$name"
   write_vk_for "$name"
@@ -131,7 +153,10 @@ done
 # ----------------------------------------------------------------------
 # Stage 2 — propagate utxo's VK hash into agg_utxo's source BEFORE
 # compiling agg_utxo. Doing this in the old order meant agg_utxo.json
-# was always one run behind on UTXO_VERIFICATION_KEY_HASH.
+# was always one run behind on UTXO_VERIFICATION_KEY_HASH. The same
+# propagation step runs for the escrow/agg_escrow parallel stack so both
+# 1-level aggregators are pinned to their respective leaf VKs before
+# agg_agg is rebuilt.
 # ----------------------------------------------------------------------
 
 UTXO_VK_OUT=$(vk_hash_for utxo)
@@ -146,9 +171,24 @@ compile_package agg_utxo
 write_vk_for agg_utxo
 record_circuit_stats agg_utxo
 
+ESCROW_VK_OUT=$(vk_hash_for escrow)
+echo "Verification key hash for escrow:"
+echo "$ESCROW_VK_OUT" | sed 's/^/  /'
+ESCROW_VK_HASH=$(echo "$ESCROW_VK_OUT" | extract_u256)
+echo "Updating noir/agg_escrow/src/main.nr ESCROW_VERIFICATION_KEY_HASH=$ESCROW_VK_HASH"
+update_noir_hash "$REPO_ROOT/noir/agg_escrow/src/main.nr" \
+  ESCROW_VERIFICATION_KEY_HASH "$ESCROW_VK_HASH"
+
+compile_package agg_escrow
+write_vk_for agg_escrow
+record_circuit_stats agg_escrow
+
 # ----------------------------------------------------------------------
-# Stage 3 — propagate agg_utxo's VK hash into agg_agg's source BEFORE
-# compiling agg_agg.
+# Stage 3 — propagate both 1-level aggregator VK hashes into agg_agg's
+# source BEFORE compiling agg_agg. agg_agg's per-slot membership check
+# requires both globals to be populated; missing either one would
+# silently leave that slot accepting a single hash, undoing the
+# heterogeneous-batch design.
 # ----------------------------------------------------------------------
 
 AGG_UTXO_VK_OUT=$(vk_hash_for agg_utxo)
@@ -158,6 +198,14 @@ AGG_UTXO_VK_HASH=$(echo "$AGG_UTXO_VK_OUT" | extract_u256)
 echo "Updating noir/agg_agg/src/main.nr AGG_UTXO_VERIFICATION_KEY_HASH=$AGG_UTXO_VK_HASH"
 update_noir_hash "$REPO_ROOT/noir/agg_agg/src/main.nr" \
   AGG_UTXO_VERIFICATION_KEY_HASH "$AGG_UTXO_VK_HASH"
+
+AGG_ESCROW_VK_OUT=$(vk_hash_for agg_escrow)
+echo "Verification key hash for agg_escrow:"
+echo "$AGG_ESCROW_VK_OUT" | sed 's/^/  /'
+AGG_ESCROW_VK_HASH=$(echo "$AGG_ESCROW_VK_OUT" | extract_u256)
+echo "Updating noir/agg_agg/src/main.nr AGG_ESCROW_VERIFICATION_KEY_HASH=$AGG_ESCROW_VK_HASH"
+update_noir_hash "$REPO_ROOT/noir/agg_agg/src/main.nr" \
+  AGG_ESCROW_VERIFICATION_KEY_HASH "$AGG_ESCROW_VK_HASH"
 
 compile_package agg_agg
 # agg_agg is verified on-chain by Solidity, so use the keccak oracle.
@@ -174,17 +222,39 @@ echo "Verification key hash for agg_agg:"
 echo "$AGG_AGG_VK_OUT" | sed 's/^/  /'
 AGG_AGG_VK_HASH_HEX=$(echo "$AGG_AGG_VK_OUT" | extract_hex)
 
-echo "Updating citrea/scripts/deploy.ts AGG_AGG_VERIFICATION_KEY_HASH=$AGG_AGG_VK_HASH_HEX"
-echo "Updating pkg/contracts/src/rollup.rs AGG_AGG_VERIFICATION_KEY_HASH=$AGG_AGG_VK_HASH_HEX"
+# The hash has two live consumers:
+#   1. citrea/contracts/noir/agg_agg_vk_hash.json — read at deploy time by
+#      citrea/scripts/deploy.ts (the inlined `const` was removed; the
+#      JSON file is now the single source of truth on the TS side).
+#   2. pkg/contracts/src/rollup.rs — Rust const referenced by the prover.
+# Earlier revisions of this script tried to perl-substitute a `const`
+# inside deploy.ts that no longer exists, so the TS side silently
+# drifted while the Rust side updated correctly. Always write both.
 
+AGG_AGG_VK_HASH_JSON="$REPO_ROOT/citrea/contracts/noir/agg_agg_vk_hash.json"
+echo "Updating $AGG_AGG_VK_HASH_JSON vkHash=$AGG_AGG_VK_HASH_HEX"
+if [[ ! -f "$AGG_AGG_VK_HASH_JSON" ]]; then
+  echo "ERROR: $AGG_AGG_VK_HASH_JSON missing — deploy.ts requires it" >&2
+  exit 1
+fi
+JSON_TMP=$(mktemp)
+jq --arg h "$AGG_AGG_VK_HASH_HEX" '.vkHash = $h' "$AGG_AGG_VK_HASH_JSON" > "$JSON_TMP"
+mv "$JSON_TMP" "$AGG_AGG_VK_HASH_JSON"
+
+echo "Updating pkg/contracts/src/rollup.rs AGG_AGG_VERIFICATION_KEY_HASH=$AGG_AGG_VK_HASH_HEX"
 # Use -0777 (slurp the whole file) so the substitution survives a
-# rustfmt/prettier-induced newline between `=` and `"`. The lookbehind
-# form fails silently on multi-line declarations -- exactly the failure
+# rustfmt-induced newline between `=` and `"`. The lookbehind form
+# fails silently on multi-line declarations -- exactly the failure
 # mode that left pkg/contracts/src/rollup.rs frozen at a stale hash.
-perl -i -0777 -pe "s/(const AGG_AGG_VERIFICATION_KEY_HASH\s*=\s*\")[^\"]*(\")/\${1}${AGG_AGG_VK_HASH_HEX}\${2}/" \
-  "$REPO_ROOT/citrea/scripts/deploy.ts"
+ROLLUP_RS="$REPO_ROOT/pkg/contracts/src/rollup.rs"
 perl -i -0777 -pe "s/(AGG_AGG_VERIFICATION_KEY_HASH:\s*&str\s*=\s*\")[^\"]*(\")/\${1}${AGG_AGG_VK_HASH_HEX}\${2}/" \
-  "$REPO_ROOT/pkg/contracts/src/rollup.rs"
+  "$ROLLUP_RS"
+# Fail loudly if the substitution didn't land — same drift-detection
+# rationale as the JSON write above.
+if ! grep -q "\"${AGG_AGG_VK_HASH_HEX}\"" "$ROLLUP_RS"; then
+  echo "ERROR: failed to write AGG_AGG_VERIFICATION_KEY_HASH into $ROLLUP_RS" >&2
+  exit 1
+fi
 
 $BACKEND write_solidity_verifier --scheme ultra_honk \
   -k "$REPO_ROOT/fixtures/keys/agg_agg_key" \
@@ -255,18 +325,24 @@ jq ".contracts[\"$SOURCE_KEY\"][\"HonkVerifier\"].evm.bytecode.linkReferences" "
 
 declare -A CIRCUIT_ROLE=(
   [signature]="Signature leaf"
-  [signature32]="Signature leaf (32-byte message)"
-  [signature32sha]="Signature leaf (sha256 message)"
+  [signature32]="Signature leaf (32-byte preimage)"
+  [signature32sha]="Signature leaf (sha256 preimage)"
+  [timelock]="Timelock witness (PoW chain)"
   [utxo]="UTXO leaf (recursion base)"
+  [escrow]="UTXO leaf (escrow spend paths)"
   [agg_utxo]="1-level aggregator"
+  [agg_escrow]="1-level aggregator (escrow leaves)"
   [agg_agg]="Top-level aggregator (on-chain verifier)"
 )
 declare -A CIRCUIT_ORACLE=(
   [signature]="poseidon"
   [signature32]="poseidon"
   [signature32sha]="poseidon"
+  [timelock]="poseidon"
   [utxo]="poseidon"
+  [escrow]="poseidon"
   [agg_utxo]="poseidon"
+  [agg_escrow]="poseidon"
   [agg_agg]="keccak"
 )
 
@@ -275,11 +351,13 @@ declare -A CIRCUIT_ORACLE=(
 # for VK-hash propagation.
 declare -A CIRCUIT_VK_OUT=(
   [utxo]="$UTXO_VK_OUT"
+  [escrow]="$ESCROW_VK_OUT"
   [agg_utxo]="$AGG_UTXO_VK_OUT"
+  [agg_escrow]="$AGG_ESCROW_VK_OUT"
   [agg_agg]="$AGG_AGG_VK_OUT"
 )
 
-CIRCUIT_ORDER=(signature signature32 signature32sha utxo agg_utxo agg_agg)
+CIRCUIT_ORDER=(signature signature32 signature32sha timelock utxo escrow agg_utxo agg_escrow agg_agg)
 
 README_BLOCK=$(mktemp)
 trap 'rm -f "$SOLC_INPUT" "$SOLC_OUTPUT" "$README_BLOCK"' EXIT

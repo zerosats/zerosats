@@ -18,7 +18,8 @@ set -e  # Exit on error
 
 # Configuration
 GETH_RPC="${GETH_RPC:-https://rpc.testnet.citrea.xyz}"
-HOST="${HOST:-ciphera.satsbridge.com}"
+HOST="${HOST:-mainnet.lx.dev}"
+ROLLUP="${ROLLUP_ADDRESS:-"0x6b92c31283c7d31ec50fb0f53b69f7e574ef8a7f"}"
 PORT="${PORT:-443}"
 CLI_BIN="./target/debug/ciphera-cli"
 
@@ -124,6 +125,7 @@ test_same_amounts_flow() {
     # Step 1: Mint tokens for alice
     log_info "[1/5] Minting $MINT_AMOUNT tokens for alice..."
     if $CLI_BIN mint \
+        --rollup "$ROLLUP" \
         --geth-rpc "$GETH_RPC" \
         --secret "$SECRET" \
         --amount-sat "$MINT_AMOUNT" \
@@ -305,6 +307,7 @@ test_multi_transfer_consolidation() {
     log_info "[1/8] Setting up wallets..."
     for wallet in bob charlie david; do
         if $CLI_BIN mint \
+            --rollup "$ROLLUP" \
             --geth-rpc "$GETH_RPC" \
             --secret "$SECRET" \
             --amount-sat "$TRANSFER_1" \
@@ -321,6 +324,7 @@ test_multi_transfer_consolidation() {
     # Alice initial mint
     log_info "[2/8] Alice minting $INITIAL_MINT..."
     if $CLI_BIN mint \
+        --rollup "$ROLLUP" \
         --geth-rpc "$GETH_RPC" \
         --secret "$SECRET" \
         --amount-sat "$INITIAL_MINT" \
@@ -398,6 +402,7 @@ test_burn_flow() {
     # Use existing alice wallet
     log_info "[1/2] Burning $BURN_AMOUNT tokens..."
     if $CLI_BIN burn \
+        --rollup "$ROLLUP" \
         --amount-sat "$BURN_AMOUNT" \
         --host "$HOST" \
         --port "$PORT" \
@@ -412,6 +417,7 @@ test_burn_flow() {
     # Check contract state
     log_info "[2/2] Checking contract state..."
     if $CLI_BIN contract \
+        --rollup "$ROLLUP" \
         --geth-rpc "$GETH_RPC"; then
         log_success "Contract state verified"
     else

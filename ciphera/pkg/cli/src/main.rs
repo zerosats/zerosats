@@ -11,7 +11,7 @@ use color_eyre::Result;
 use tracing::{debug, error};
 use web3::types::{H160, H256, U256};
 
-use barretenberg::Prove;
+use barretenberg::{Prove, Verify};
 use contracts::util::{convert_element_to_h256, convert_h160_to_element};
 use hash::hash_merge;
 use rand::{RngCore, rngs::OsRng};
@@ -19,7 +19,14 @@ use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::Path;
 use std::str::FromStr;
-use zk_primitives::{InputNote, Note, citrea_usdc_note_kind, citrea_wcbtc_note_kind};
+use zk_primitives::{
+    CitreaNetwork, InputNote, Note, citrea_testnet_usdc_note_kind, citrea_wcbtc_note_kind,
+};
+
+/// CLI is hardcoded to Citrea testnet today (see
+/// `client::client_tests::CHAIN_ID`). When the CLI grows a `--network` flag
+/// this constant should be threaded through the surrounding code paths.
+const CLI_NETWORK: CitreaNetwork = CitreaNetwork::Testnet;
 
 #[derive(Parser, Debug)]
 #[command(name = "ciphera-cli")]
@@ -36,17 +43,13 @@ struct Cli {
     #[arg(global = true, default_value = "alice", short, long)]
     name: String,
 
-    /// RPC server host (include scheme for TLS: https://host or http://host)
+    /// RPC server host. Include the scheme for TLS (`https://host`); a
+    /// custom port can be appended inline as `https://host:7777`. The
+    /// previous `--port` and `--timeout` flags were dropped: the scheme
+    /// determines the default port (443 / 80) and the timeout has a
+    /// sensible 60 s default baked into the client builder.
     #[arg(global = true, long, default_value = "https://ciphera.satsbridge.com")]
     host: String,
-
-    /// RPC server port
-    #[arg(global = true, short, long, default_value = "443")]
-    port: u16,
-
-    /// Request timeout in seconds
-    #[arg(global = true, long, default_value = "10")]
-    timeout: u64,
 
     #[arg(global = true, short, long, default_value = "5115")] // Citrea testnet default
     chain: u64,
@@ -163,6 +166,45 @@ enum Commands {
         #[arg(long, short, default_value = "1000")]
         blocks: u64,
     },
+    /// Lock funds from this wallet into an HTLC escrow note. Spends one
+    /// or two available notes through the standard Utxo Send circuit
+    /// and emits an output note encumbered by `SHA256(preimage)` on the
+    /// claim side and a PoW timelock on the refund side. Writes the
+    /// resulting `EscrowInputNote` (note + secret_key + preimage) to
+    /// `<name>-htlc.json` so it can be picked up by `escrow-redeem` /
+    /// `escrow-refund`.
+    EscrowLock {
+        /// Amount to lock, in satoshis.
+        #[arg(required = true, short, long)]
+        amount_sat: u64,
+
+        #[arg(short, long, default_value = "WCBTC")]
+        ticker: String,
+
+        /// 32-byte preimage that unlocks the claim path, given as
+        /// 64-hex (optionally prefixed with 0x). The redeemer needs
+        /// this value; share it via the `EscrowInputNote` JSON or out
+        /// of band.
+        #[arg(required = true, long)]
+        preimage: String,
+    },
+    /// Redeem an HTLC escrow note by revealing the preimage. Reads the
+    /// `EscrowInputNote` from the JSON written at lock time.
+    EscrowRedeem {
+        /// Path to the `EscrowInputNote` JSON produced by
+        /// `escrow-lock`.
+        #[arg(required = true, long, default_value = "alice-htlc.json")]
+        note: String,
+    },
+    /// Refund an HTLC escrow note after the timelock has elapsed.
+    /// Reuses the secret key embedded in the JSON written at lock
+    /// time; the preimage is *not* required.
+    EscrowRefund {
+        /// Path to the `EscrowInputNote` JSON produced by
+        /// `escrow-lock`.
+        #[arg(required = true, long, default_value = "alice-htlc.json")]
+        note: String,
+    },
     /// Deposit via Lightning Network using an external onramp service
     DepoLn {
         /// Amount to deposit in satoshis
@@ -258,20 +300,16 @@ async fn handle_sync(
     chain: u64,
     name: &str,
     host: &str,
-    port: u16,
-    timeout_secs: u64,
 ) -> Result<()> {
     debug!(
-        "Connecting wallet {} to Ciphera node at {}:{}",
-        name, host, port
+        "Connecting wallet {} to Ciphera node at {}",
+        name, host
     );
 
     // Build client with fluent API
     let mut client = NodeClient::builder()
         .name(name)
         .host(host)
-        .port(port)
-        .timeout_secs(timeout_secs)
         .build(chain, false)?;
 
     // Check health
@@ -314,7 +352,7 @@ async fn handle_sync(
         }
     }
 
-    println!("\n✨ Successfully connected to Ciphera node at {host}:{port}");
+    println!("\n✨ Successfully connected to Ciphera node at {host}");
     Ok(())
 }
 
@@ -339,8 +377,6 @@ async fn handle_note_spend(
     chain: u64,
     name: &str,
     host: &str,
-    port: u16,
-    timeout_secs: u64,
     amount_wei: u64,
     ticker: &str,
 ) -> Result<()> {
@@ -348,8 +384,6 @@ async fn handle_note_spend(
     let mut client = NodeClient::builder()
         .name(name)
         .host(host)
-        .port(port)
-        .timeout_secs(timeout_secs)
         .build(chain, false)?;
 
     // Prepare transfer. A case, when wallet already has exactly matching note, will be ignored
@@ -394,21 +428,17 @@ async fn handle_spend_to(
     chain: u64,
     name: &str,
     host: &str,
-    port: u16,
-    timeout_secs: u64,
     address: &str,
 ) -> Result<()> {
     debug!(
-        "Connecting wallet {} to Ciphera node at {}:{}",
-        name, host, port
+        "Connecting wallet {} to Ciphera node at {}",
+        name, host
     );
 
     // Build client with fluent API
     let mut client = NodeClient::builder()
         .name(name)
         .host(host)
-        .port(port)
-        .timeout_secs(timeout_secs)
         .build(chain, false)?;
 
     // Spend to UX leverages a variant of NoteURL encoding for providing an "address" with address
@@ -449,23 +479,19 @@ async fn handle_spend_to(
 async fn handle_receive(
     name: &str,
     host: &str,
-    port: u16,
-    timeout_secs: u64,
     chain: u64,
     notefile: Option<String>,
     notelink: Option<String>,
 ) -> Result<()> {
     debug!(
-        "Connecting wallet {} to Ciphera node at {}:{}",
-        name, host, port
+        "Connecting wallet {} to Ciphera node at {}",
+        name, host
     );
 
     // Build client with fluent API
     let mut client = NodeClient::builder()
         .name(name)
         .host(host)
-        .port(port)
-        .timeout_secs(timeout_secs)
         .build(chain, false)?;
 
     // Check health
@@ -494,7 +520,7 @@ async fn handle_receive(
         }
     }
 
-    println!("\n✨ Successfully connected to Ciphera node at {host}:{port}");
+    println!("\n✨ Successfully connected to Ciphera node at {host}");
 
     let input_note = match (notefile, notelink) {
         (Some(path), None) => {
@@ -541,6 +567,140 @@ async fn handle_receive(
     }
 }
 
+// Parse a 32-byte preimage from `0x`-optional hex.
+fn parse_preimage_hex(s: &str) -> Result<[u8; 32], AppError> {
+    let trimmed = s.trim().trim_start_matches("0x");
+    let bytes = hex::decode(trimmed)
+        .map_err(|e| AppError::InvalidAddress(format!("preimage must be hex: {e}")))?;
+    bytes
+        .as_slice()
+        .try_into()
+        .map_err(|_| AppError::InvalidAddress("preimage must be 32 bytes".to_string()))
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn handle_escrow_lock(
+    chain: u64,
+    name: &str,
+    host: &str,
+    amount_wei: u64,
+    ticker: &str,
+    preimage_hex: &str,
+) -> Result<()> {
+    let mut client = NodeClient::builder()
+        .name(name)
+        .host(host)
+        .build(chain, false)?;
+
+    let preimage = parse_preimage_hex(preimage_hex)?;
+
+    // For this single-key test flow the same secret key gates both the
+    // claim and refund branches: convenient for a single-wallet
+    // round-trip, equivalent to running Alice = Bob. A real two-party
+    // HTLC would split this into a redeemer secret + a separate refund
+    // secret; the wallet API can be extended trivially once the second
+    // wallet is wired in.
+    let htlc_secret_key = client.get_wallet().gen_pk();
+
+    let (prepared_wallet, utxo, escrow_input_note) = client
+        .get_wallet()
+        .prepare_escrow_lock(amount_wei, ticker, htlc_secret_key, preimage)?;
+
+    let snark = utxo.prove().unwrap();
+
+    match client.transaction(&snark).await {
+        Ok(tx) => {
+            println!("\n✅ Lock transaction {} submitted", tx.txn_hash);
+            println!("   Height:    {}", tx.height);
+            println!("   Root hash: {}", tx.root_hash);
+
+            prepared_wallet.save()?;
+            client.replace_wallet(prepared_wallet);
+
+            let note_path = format!("{name}-htlc.json");
+            let json_str = serde_json::to_string_pretty(&escrow_input_note)?;
+            std::fs::write(&note_path, json_str)?;
+            println!("\nSaved HTLC EscrowInputNote to {note_path}");
+            println!("  HTLC secret_key: {}", escrow_input_note.secret_key);
+            println!("  preimage hex:    0x{}", hex::encode(preimage));
+            println!("  note address:    {}", escrow_input_note.note.address);
+            println!("  note psi:        {}", escrow_input_note.note.psi);
+
+            let b = client.get_wallet().balance;
+            println!("\nBalance {} sats {ticker}", units::wei_to_sats(b));
+            Ok(())
+        }
+        Err(e) => {
+            eprintln!("\n❌ Could not send lock transaction!");
+            Err(e)
+        }
+    }
+}
+
+async fn handle_escrow_redeem_or_refund(
+    chain: u64,
+    name: &str,
+    host: &str,
+    note_path: &str,
+    refund: bool,
+) -> Result<()> {
+    let client = NodeClient::builder()
+        .name(name)
+        .host(host)
+        .build(chain, false)?;
+
+    let json_str = fs::read_to_string(note_path).map_err(|e| {
+        AppError::IoError(std::io::Error::new(e.kind(), format!("{note_path}: {e}")))
+    })?;
+    let htlc_input_note: zk_primitives::EscrowInputNote = serde_json::from_str(&json_str)?;
+
+    let ticker = cli::address::citrea_ticker_from_contract(htlc_input_note.note.note_kind);
+    let label = if refund { "Refund" } else { "Redeem" };
+
+    let (_prepared_wallet, escrow, _received) = if refund {
+        client.get_wallet().prepare_escrow_refund(&htlc_input_note)?
+    } else {
+        client.get_wallet().prepare_escrow_redeem(&htlc_input_note)?
+    };
+
+    println!("\n🔓 Generating {label} EscrowProof locally...");
+    let snark = escrow
+        .prove()
+        .map_err(|e| color_eyre::eyre::eyre!("escrow.prove() failed: {e}"))?;
+    println!("✅ EscrowProof generated ({} bytes)", snark.proof.0.len());
+
+    // Local self-verification: catches witness-level bugs (wrong
+    // preimage, stale PoW chain, secret_key mismatched against the
+    // baked-in commitment) before we even think about on-chain
+    // submission.
+    snark
+        .verify()
+        .map_err(|e| color_eyre::eyre::eyre!("escrow.verify() failed: {e}"))?;
+    println!("✅ Local verification of EscrowProof succeeded");
+
+    let proof_path = format!("{name}-htlc-{}.snark.json", label.to_lowercase());
+    std::fs::write(&proof_path, serde_json::to_string_pretty(&snark)?)?;
+    println!("📦 Saved proof to {proof_path}");
+
+    println!(
+        "\nℹ️  {label} EscrowProof is valid locally; on-chain submission via the existing\n   \
+         `/transaction` endpoint is NOT yet wired up -- that endpoint accepts UtxoProof\n   \
+         only, see pkg/cli/src/client.rs::transaction. Extending the node mempool +\n   \
+         prover-side aggregation (agg_escrow → agg_agg with sources=[AggUtxo, AggEscrow])\n   \
+         is required to turn this proof into a tree-applied transaction.\n"
+    );
+
+    // The wallet hasn't actually received the redeemed/refunded value
+    // on chain, so we do NOT persist the staged wallet changes here --
+    // doing so would desync the wallet from the chain root once a real
+    // submission path lands. Persistence happens when the proof is
+    // actually accepted by the node.
+
+    let b = client.get_wallet().balance;
+    println!("Balance {} sats {ticker} (unchanged: redeem not yet submitted)", units::wei_to_sats(b));
+    Ok(())
+}
+
 async fn handle_import(name: &str, notefile: &str) -> Result<()> {
     let json_path = Path::new(&notefile);
     if json_path.is_file() {
@@ -560,8 +720,6 @@ async fn handle_import(name: &str, notefile: &str) -> Result<()> {
 async fn handle_depo_ln(
     name: &str,
     host: &str,
-    port: u16,
-    timeout_secs: u64,
     chain: u64,
     amount_sat: u64,
     onramp_uri: &str,
@@ -577,8 +735,6 @@ async fn handle_depo_ln(
     let mut client = NodeClient::builder()
         .name(name)
         .host(host)
-        .port(port)
-        .timeout_secs(timeout_secs)
         .build(chain, false)?;
 
     // 4. Init swap: GET /onramp/{amount}/{payment_hash}
@@ -755,8 +911,6 @@ async fn handle_depo_ln(
 async fn handle_withdraw_ln(
     name: &str,
     host: &str,
-    port: u16,
-    timeout_secs: u64,
     chain: u64,
     invoice: &str,
     substitutor: &str,
@@ -766,8 +920,6 @@ async fn handle_withdraw_ln(
     /*    let client = NodeClient::builder()
             .name(name)
             .host(host)
-            .port(port)
-            .timeout_secs(timeout_secs)
             .build(chain, false)?;
 
         let b = client.get_wallet().balance;
@@ -848,8 +1000,6 @@ async fn handle_withdraw_ln(
     handle_burn(
         name,
         host,
-        port,
-        timeout_secs,
         chain,
         address, // refund address
         input_amount_wei_u64,
@@ -931,8 +1081,6 @@ async fn handle_withdraw_ln(
 async fn handle_mint(
     name: &str,
     host: &str,
-    port: u16,
-    timeout_secs: u64,
     geth_rpc: &str,
     chain: u64,
     rollup: &str,
@@ -945,14 +1093,21 @@ async fn handle_mint(
     let mut client = NodeClient::builder()
         .name(name)
         .host(host)
-        .port(port)
-        .timeout_secs(timeout_secs)
         .build(chain, false)?;
 
     let (prepared_wallet, utxo) = client.get_wallet().prepare_mint(amount_wei, ticker)?;
     let snark = utxo.prove().unwrap();
-
+    let erc20_contract = "0x4370e27F7d91D9341bFf232d7Ee8bdfE3a9933a0";
     if !only_snark {
+
+        client.admin_approve(
+            geth_rpc.clone(),
+            chain.clone(),
+            secret.clone(),
+            rollup.clone(),
+            erc20_contract,
+        );
+
         client
             .admin_mint(
                 geth_rpc,
@@ -989,8 +1144,6 @@ async fn handle_mint(
 async fn handle_burn(
     name: &str,
     host: &str,
-    port: u16,
-    timeout_secs: u64,
     chain: u64,
     address: &str,
     amount_wei: u64,
@@ -1001,8 +1154,6 @@ async fn handle_burn(
     let mut client = NodeClient::builder()
         .name(name)
         .host(host)
-        .port(port)
-        .timeout_secs(timeout_secs)
         .build(chain, false)?;
 
     // Prepare burn
@@ -1117,8 +1268,14 @@ async fn handle_release_slow_burn(
     // remaining note_kind across the supported tokens by recomputing the
     // key and matching it against the indexed `key` topic.
     let candidate_kinds: Vec<(&str, H256)> = vec![
-        ("WCBTC", convert_element_to_h256(&citrea_wcbtc_note_kind())),
-        ("USDC", convert_element_to_h256(&citrea_usdc_note_kind())),
+        (
+            "WCBTC",
+            convert_element_to_h256(&citrea_wcbtc_note_kind(CLI_NETWORK)),
+        ),
+        (
+            "USDC",
+            convert_element_to_h256(&citrea_testnet_usdc_note_kind()),
+        ),
     ];
 
     let mut matched: Option<(&str, H256)> = None;
@@ -1329,7 +1486,7 @@ async fn main() -> Result<()> {
             handle_create(cli.chain, &cli.name).await?;
         }
         Commands::Sync {} => {
-            handle_sync(cli.chain, &cli.name, &cli.host, cli.port, cli.timeout).await?;
+            handle_sync(cli.chain, &cli.name, &cli.host).await?;
         }
         Commands::Address { amount_sat, ticker } => {
             let ticker_normalized = ticker.to_uppercase();
@@ -1343,8 +1500,6 @@ async fn main() -> Result<()> {
                 cli.chain,
                 &cli.name,
                 &cli.host,
-                cli.port,
-                cli.timeout,
                 amount_wei,
                 &ticker_normalized,
             )
@@ -1355,8 +1510,6 @@ async fn main() -> Result<()> {
                 cli.chain,
                 &cli.name,
                 &cli.host,
-                cli.port,
-                cli.timeout,
                 &address,
             )
             .await?;
@@ -1365,8 +1518,6 @@ async fn main() -> Result<()> {
             handle_receive(
                 &cli.name,
                 &cli.host,
-                cli.port,
-                cli.timeout,
                 cli.chain,
                 note,
                 link,
@@ -1375,6 +1526,43 @@ async fn main() -> Result<()> {
         }
         Commands::Import { note } => {
             handle_import(&cli.name, &note).await?;
+        }
+        Commands::EscrowLock {
+            amount_sat,
+            ticker,
+            preimage,
+        } => {
+            let ticker_normalized = ticker.to_uppercase();
+            let amount_wei = units::sats_to_wei(amount_sat);
+            handle_escrow_lock(
+                cli.chain,
+                &cli.name,
+                &cli.host,
+                amount_wei,
+                &ticker_normalized,
+                &preimage,
+            )
+            .await?;
+        }
+        Commands::EscrowRedeem { note } => {
+            handle_escrow_redeem_or_refund(
+                cli.chain,
+                &cli.name,
+                &cli.host,
+                &note,
+                false,
+            )
+            .await?;
+        }
+        Commands::EscrowRefund { note } => {
+            handle_escrow_redeem_or_refund(
+                cli.chain,
+                &cli.name,
+                &cli.host,
+                &note,
+                true,
+            )
+            .await?;
         }
         Commands::Mint {
             geth_rpc,
@@ -1388,8 +1576,6 @@ async fn main() -> Result<()> {
             handle_mint(
                 &cli.name,
                 &cli.host,
-                cli.port,
-                cli.timeout,
                 &geth_rpc,
                 cli.chain,
                 &cli.rollup,
@@ -1410,8 +1596,6 @@ async fn main() -> Result<()> {
             handle_burn(
                 &cli.name,
                 &cli.host,
-                cli.port,
-                cli.timeout,
                 cli.chain,
                 &address,
                 amount_wei,
@@ -1442,8 +1626,6 @@ async fn main() -> Result<()> {
             handle_depo_ln(
                 &cli.name,
                 &cli.host,
-                cli.port,
-                cli.timeout,
                 cli.chain,
                 amount_sat,
                 &onramp_uri,
@@ -1459,8 +1641,6 @@ async fn main() -> Result<()> {
             handle_withdraw_ln(
                 &cli.name,
                 &cli.host,
-                cli.port,
-                cli.timeout,
                 cli.chain,
                 &invoice,
                 &substitutor,

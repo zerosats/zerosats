@@ -50,14 +50,18 @@ impl NodeClientBuilder {
     ///
     /// # Defaults
     /// - host: `127.0.0.1`
-    /// - port: `8091`
-    /// - timeout: `10` seconds
+    /// - port: `8091` (only used when `host` is bare and has no
+    ///   embedded port; `https://…` hosts default to 443, `http://…`
+    ///   hosts default to 80)
+    /// - timeout: `60` seconds. The CLI no longer exposes a `--timeout`
+    ///   flag; bump this default if proof submission needs more
+    ///   headroom on slow networks.
     pub fn new() -> Self {
         Self {
             name: "alice".to_string(),
             host: "127.0.0.1".to_string(),
             port: 8091,
-            timeout: Duration::from_secs(10),
+            timeout: Duration::from_secs(60),
             wallet_dir: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
         }
     }
@@ -101,16 +105,40 @@ impl NodeClientBuilder {
     /// TLS is inferred from the scheme prefix of `host`:
     /// - `"https://…"` → HTTPS
     /// - `"http://…"` or no scheme → HTTP
+    ///
+    /// Port handling: a port embedded in `host` (`host:7777`,
+    /// `https://host:7777`) is honoured verbatim. Otherwise the
+    /// builder's explicit `.port(...)` value is appended **only when
+    /// the scheme is HTTP without an explicit scheme prefix** -- this
+    /// preserves the legacy local-dev default of `http://127.0.0.1:8091`
+    /// while letting `https://ciphera.satsbridge.com` resolve to the
+    /// standard 443 (via reqwest's URL parser) without a CLI flag.
     pub fn build(self, chain_id: u64, create_wallet: bool) -> Result<NodeClient> {
         let base_url = {
-            let (proto, bare_host) = if let Some(h) = self.host.strip_prefix("https://") {
-                ("https", h)
-            } else if let Some(h) = self.host.strip_prefix("http://") {
-                ("http", h)
+            let (proto, bare_host, had_scheme) =
+                if let Some(h) = self.host.strip_prefix("https://") {
+                    ("https", h, true)
+                } else if let Some(h) = self.host.strip_prefix("http://") {
+                    ("http", h, true)
+                } else {
+                    ("http", self.host.as_str(), false)
+                };
+
+            let authority = bare_host.split('/').next().unwrap_or(bare_host);
+            let has_embedded_port = authority.contains(':');
+
+            if has_embedded_port {
+                format!("{proto}://{bare_host}/v0")
+            } else if had_scheme {
+                // Trust the scheme's default port (443 / 80). reqwest
+                // handles this; appending a port would invalidate it
+                // for hosts like `https://ciphera.satsbridge.com`.
+                format!("{proto}://{bare_host}/v0")
             } else {
-                ("http", self.host.as_str())
-            };
-            format!("{}://{}:{}/v0", proto, bare_host, self.port)
+                // Bare host (no scheme): append the legacy 8091 default
+                // for the local-dev workflow.
+                format!("http://{bare_host}:{}/v0", self.port)
+            }
         };
 
         debug!("Building NodeClient for: {}", base_url);
@@ -375,7 +403,6 @@ impl NodeClient {
         secret: &str,
         rollup: &str,
         erc20_contract: &str,
-        mint_erc20: bool,
     ) -> Result<()> {
         //let eth_node = EthNode::default().run_and_deploy().await;
         let sk = SecretKey::from_str(secret)?;
@@ -390,11 +417,6 @@ impl NodeClient {
         let serialized_public_key = public_key.serialize_uncompressed();
         let address_bytes = &keccak256(&serialized_public_key[1..])[12..];
         let admin = Address::from_slice(address_bytes);
-
-        if mint_erc20 {
-            let tx_mint_erc20 = erc20_contract.mint(admin, 10000000).await?;
-            println!("\nRequested ERC20 mint {tx_mint_erc20:#x}. Approving next\n");
-        }
 
         if erc20_contract
             .allowance(rollup.signer_address, admin)
@@ -471,15 +493,23 @@ mod client_tests {
         let client = NodeClientBuilder::new()
             .name(name)
             .host("https://node.example.com")
-            .port(80)
             .build(CHAIN_ID, true)
             .expect("build should succeed");
 
         let _ = std::fs::remove_file(&file);
 
+        // With the `--port` flag removed, a scheme-prefixed host with
+        // no embedded port resolves to the scheme default (443 for
+        // https, 80 for http). Asserting on the URL prefix lets the
+        // scheme check survive without baking in a port number.
         assert!(
-            client.base_url().starts_with("https://node.example.com:80"),
+            client.base_url().starts_with("https://node.example.com"),
             "https:// host prefix should produce https://; got: {}",
+            client.base_url()
+        );
+        assert!(
+            !client.base_url().contains(":8091"),
+            "the builder's default port must NOT leak into the URL when a scheme is present; got: {}",
             client.base_url()
         );
     }
@@ -494,15 +524,19 @@ mod client_tests {
         let client = NodeClientBuilder::new()
             .name(name)
             .host("http://node.example.com")
-            .port(443)
             .build(CHAIN_ID, true)
             .expect("build should succeed");
 
         let _ = std::fs::remove_file(&file);
 
         assert!(
-            client.base_url().starts_with("http://node.example.com:443"),
+            client.base_url().starts_with("http://node.example.com"),
             "http:// host prefix should produce http://; got: {}",
+            client.base_url()
+        );
+        assert!(
+            !client.base_url().contains(":8091"),
+            "the builder's default port must NOT leak into the URL when a scheme is present; got: {}",
             client.base_url()
         );
     }
