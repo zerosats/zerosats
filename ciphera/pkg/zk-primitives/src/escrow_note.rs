@@ -263,11 +263,12 @@ mod tests {
             Element::new(40),
         );
 
-        let expected_refund = hash::hash_merge([
-            get_address_for_private_key(secret_key),
-            lock.commitment(),
-        ]);
-        let expected_hashlock = raw_field_pair_address(preimage_sha());
+        let key_hash = get_address_for_private_key(secret_key);
+        let expected_refund = hash::hash_merge([key_hash, lock.commitment()]);
+
+        let element = Element::from_be_bytes(preimage_sha());
+        let (high, low) = element.decompose_be();
+        let expected_hashlock = hash::hash_merge([key_hash, high, low]);
 
         assert_eq!(note.address, expected_hashlock);
         assert_eq!(note.psi, expected_refund);
