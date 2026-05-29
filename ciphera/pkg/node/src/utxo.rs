@@ -4,25 +4,30 @@ use barretenberg::Verify;
 use block_store::BlockStore;
 use element::Element;
 use node_interface::{ElementData, ElementsVecData, RpcError};
-use zk_primitives::UtxoProof;
+use zk_primitives::LeafProof;
 
-/// Validate a UTXO txn, we check the following:
-/// - The proof is valid
+/// Validate a leaf-circuit txn, we check the following:
+/// - The proof is valid (against utxo or escrow VK, dispatched on the
+///   `LeafProof` variant)
 /// - The recent root is recent enough
 /// - The input notes are not already spent (not in tree)
 /// - The output notes do not already exist (not in tree)
 pub fn validate_txn(
     _mode: Mode,
-    utxo_proof: &UtxoProof,
+    utxo_proof: &LeafProof,
     _height: BlockHeight,
     block_store: &BlockStore<BlockFormat>,
     notes_tree: &PersistentMerkleTree,
 ) -> Result<()> {
-    if let Err(_err) = utxo_proof.verify() {
+    let verify_result = match utxo_proof {
+        LeafProof::Utxo(p) => p.verify(),
+        LeafProof::Escrow(p) => p.verify(),
+    };
+    if let Err(_err) = verify_result {
         Err(RpcError::InvalidProof)?;
     }
 
-    let public_inputs = &utxo_proof.public_inputs;
+    let public_inputs = utxo_proof.public_inputs();
 
     let [input_0, input_1] = public_inputs.input_commitments;
     if input_0 != Element::ZERO && input_0 == input_1 {
@@ -41,7 +46,7 @@ pub fn validate_txn(
     // Check if any of the txn inserts are already in the tree
     let tree = notes_tree.tree();
 
-    for leaf in utxo_proof.public_inputs.output_commitments {
+    for leaf in utxo_proof.public_inputs().output_commitments {
         if leaf >= Element::MODULUS {
             Err(RpcError::InvalidElementSize(ElementData { element: leaf }))?;
         }
@@ -65,7 +70,7 @@ pub fn validate_txn(
         }
     }
 
-    for leaf in utxo_proof.public_inputs.input_commitments {
+    for leaf in utxo_proof.public_inputs().input_commitments {
         if leaf >= Element::MODULUS {
             Err(RpcError::InvalidElementSize(ElementData { element: leaf }))?;
         }

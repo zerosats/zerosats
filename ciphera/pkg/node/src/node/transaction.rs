@@ -5,10 +5,10 @@ use ethereum_types::U64;
 use node_interface::{ElementData, ElementsVecData, MintInContractIsDifferent, RpcError};
 use std::{sync::Arc, time::Duration};
 use tracing::{error, info, instrument};
-use zk_primitives::{UtxoKindMessages, UtxoProof};
+use zk_primitives::{LeafProof, UtxoKindMessages};
 
 impl NodeShared {
-    pub async fn submit_transaction_and_wait(&self, utxo: UtxoProof) -> Result<Arc<Block>> {
+    pub async fn submit_transaction_and_wait(&self, utxo: LeafProof) -> Result<Arc<Block>> {
         let mut started_waiting_at_eth_block = None;
         loop {
             match self.validate_transaction(&utxo).await {
@@ -51,10 +51,10 @@ impl NodeShared {
 
         let mut changes = Vec::new();
         for commitment in utxo
-            .public_inputs
+            .public_inputs()
             .input_commitments
             .into_iter()
-            .chain(utxo.public_inputs.output_commitments)
+            .chain(utxo.public_inputs().output_commitments)
         {
             if commitment.is_zero() {
                 continue;
@@ -83,7 +83,7 @@ impl NodeShared {
         receiver.await.expect("recv error")
     }
 
-    pub(super) async fn validate_transaction(&self, utxo: &UtxoProof) -> Result<()> {
+    pub(super) async fn validate_transaction(&self, utxo: &LeafProof) -> Result<()> {
         if let UtxoKindMessages::Mint(mint_msgs) = utxo.kind_messages() {
             let eth_block = self
                 .rollup_contract
@@ -117,7 +117,7 @@ impl NodeShared {
             // Check if mint is already spent
             if get_mint_res.spent {
                 return Err(RpcError::MintIsAlreadySpent(ElementsVecData {
-                    elements: utxo.public_inputs.output_commitments.to_vec(),
+                    elements: utxo.public_inputs().output_commitments.to_vec(),
                 }))?;
             }
 
@@ -146,7 +146,7 @@ impl NodeShared {
     }
 
     #[instrument(skip(self, txn))]
-    pub async fn receive_transaction(&self, txn: UtxoProof) -> Result<()> {
+    pub async fn receive_transaction(&self, txn: LeafProof) -> Result<()> {
         info!("Received transaction");
 
         if let Err(err) = self.validate_transaction(&txn).await {
@@ -159,10 +159,10 @@ impl NodeShared {
 
         let mut changes = Vec::new();
         for commitment in txn
-            .public_inputs
+            .public_inputs()
             .input_commitments
             .into_iter()
-            .chain(txn.public_inputs.output_commitments)
+            .chain(txn.public_inputs().output_commitments)
         {
             if commitment.is_zero() {
                 continue;

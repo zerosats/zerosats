@@ -13,7 +13,7 @@ use crate::types::BlockHeight;
 use crate::{BlockFormat, PersistentMerkleTree, utxo::validate_txn};
 use crate::{Error, Mode};
 use primitives::sig::Signature;
-use zk_primitives::UtxoProof;
+use zk_primitives::LeafProof;
 
 #[derive(
     Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize,
@@ -47,11 +47,11 @@ pub struct BlockHeader {
 )]
 pub struct BlockState {
     pub root_hash: Element,
-    pub txns: Vec<UtxoProof>,
+    pub txns: Vec<LeafProof>,
 }
 
 impl BlockState {
-    pub fn new(root_hash: Element, txns: Vec<UtxoProof>) -> Self {
+    pub fn new(root_hash: Element, txns: Vec<LeafProof>) -> Self {
         Self { root_hash, txns }
     }
 
@@ -146,7 +146,7 @@ impl BlockContent {
             // Between transactions in the same block,
             // we check that the leaves are unique,
             // otherwise there could be a double spend.
-            for leaf in utxo_proof.public_inputs.output_commitments {
+            for leaf in utxo_proof.public_inputs().output_commitments {
                 if leaf == Element::ZERO {
                     continue;
                 }
@@ -163,7 +163,7 @@ impl BlockContent {
                 }
             }
 
-            for leaf in utxo_proof.public_inputs.input_commitments {
+            for leaf in utxo_proof.public_inputs().input_commitments {
                 if leaf == Element::ZERO {
                     continue;
                 }

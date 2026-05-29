@@ -40,9 +40,9 @@ impl NodeShared {
                 hash = format!("0x{}", utxo_proof.hash()),
                 kind = ?utxo_proof.kind(),
                 kind_messages = ?utxo_proof.kind_messages(),
-                messages =  ?utxo_proof.public_inputs.messages.iter().map(|l| format!("0x{l:x}")).collect::<Vec<_>>(),
-                input_leaves = ?utxo_proof.public_inputs.input_commitments.iter().map(|l| format!("0x{l:x}")).collect::<Vec<_>>(),
-                output_leaves = ?utxo_proof.public_inputs.output_commitments.iter().map(|l| format!("0x{l:x}")).collect::<Vec<_>>(),
+                messages =  ?utxo_proof.public_inputs().messages.iter().map(|l| format!("0x{l:x}")).collect::<Vec<_>>(),
+                input_leaves = ?utxo_proof.public_inputs().input_commitments.iter().map(|l| format!("0x{l:x}")).collect::<Vec<_>>(),
+                output_leaves = ?utxo_proof.public_inputs().output_commitments.iter().map(|l| format!("0x{l:x}")).collect::<Vec<_>>(),
                 "Committing transaction"
             )
         }
@@ -51,7 +51,7 @@ impl NodeShared {
         let block_input_commitments = state
             .txns
             .iter()
-            .flat_map(|utxo_proof| utxo_proof.public_inputs.input_commitments)
+            .flat_map(|utxo_proof| utxo_proof.public_inputs().input_commitments)
             .filter(|l: &_| !l.is_zero())
             .collect::<Vec<_>>();
 
@@ -161,12 +161,12 @@ impl NodeShared {
 
         let insert_leaves = txns
             .iter()
-            .flat_map(|utxo| utxo.public_inputs.output_commitments)
+            .flat_map(|utxo| utxo.public_inputs().output_commitments)
             .filter(|l| !l.is_zero())
             .collect::<Vec<_>>();
         let remove_leaves = txns
             .iter()
-            .flat_map(|utxo| utxo.public_inputs.input_commitments)
+            .flat_map(|utxo| utxo.public_inputs().input_commitments)
             .filter(|l| !l.is_zero())
             .collect::<Vec<_>>();
 

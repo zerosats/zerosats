@@ -16,6 +16,8 @@ use rpc::error::{HTTPError, HttpResult};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use wire_message::WireMessage;
+use zk_primitives::LeafProof;
+#[cfg(test)]
 use zk_primitives::UtxoProof;
 
 #[tracing::instrument(err, skip_all)]
@@ -23,35 +25,43 @@ pub async fn submit_txn(
     state: web::Data<State>,
     web::Json(data): web::Json<TransactionRequest>,
 ) -> HttpResult<web::Json<TransactionResponse>> {
-    let utxo_proof = data.proof;
+    let leaf_proof = data.proof;
 
     tracing::info!(
         method = "submit_txn",
-        proof = serde_json::to_string(&utxo_proof).unwrap(),
+        proof = serde_json::to_string(&leaf_proof).unwrap(),
         "Incoming request"
     );
 
-    if let Err(_err) = utxo_proof.verify() {
+    // Each leaf flavour is verified against its own embedded
+    // verification key (`UtxoProof` against the utxo VK, `EscrowProof`
+    // against the escrow VK); both implementations live in
+    // `barretenberg::circuits` and are dispatched here on the enum.
+    let verify_result = match &leaf_proof {
+        LeafProof::Utxo(p) => p.verify(),
+        LeafProof::Escrow(p) => p.verify(),
+    };
+    if let Err(_err) = verify_result {
         return Err(RpcError::InvalidProof)?;
     }
 
-    let utxo_hash = utxo_proof.hash();
+    let txn_hash = leaf_proof.hash();
 
     let node = Arc::clone(&state.node);
-    let block = tokio::spawn(async move { node.submit_transaction_and_wait(utxo_proof).await })
+    let block = tokio::spawn(async move { node.submit_transaction_and_wait(leaf_proof).await })
         .await
         .context("tokio spawn join handle error")??;
 
     Ok(web::Json(TransactionResponse {
         height: block.content.header.height,
         root_hash: block.content.state.root_hash,
-        txn_hash: utxo_hash,
+        txn_hash,
     }))
 }
 
 #[derive(Serialize)]
 pub(crate) struct TxnWithInfo {
-    pub(crate) proof: UtxoProof,
+    pub(crate) proof: LeafProof,
     pub(crate) index_in_block: u64,
     pub(crate) hash: Element,
     pub(crate) block_height: BlockHeight,
@@ -321,14 +331,14 @@ mod tests {
 
         let store = block_store::BlockStore::<BlockFormat>::create_or_load(tempdir.path()).unwrap();
 
-        let new_block = |height: u64, txns: Vec<UtxoProof>| {
+        let new_block = |height: u64, txns: Vec<LeafProof>| {
             let mut block = Block::default();
             block.content.header.height = BlockHeight(height);
             block.content.state.txns = txns;
             block
         };
 
-        let new_proof = || UtxoProof::default();
+        let new_proof = || LeafProof::Utxo(UtxoProof::default());
 
         let blocks = [
             new_block(1, vec![]),

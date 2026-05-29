@@ -2,7 +2,7 @@ use borsh::{BorshDeserialize, BorshSerialize};
 use primitives::block_height::BlockHeight;
 use serde::{Deserialize, Serialize};
 use wire_message::WireMessage;
-use zk_primitives::UtxoProof;
+use zk_primitives::LeafProof;
 
 #[derive(Debug, Clone, BorshSerialize, BorshDeserialize, Serialize, Deserialize)]
 pub struct TxnMetadata {
@@ -15,7 +15,7 @@ pub struct TxnMetadata {
 #[derive(Debug, Clone)]
 #[wire_message::wire_message]
 pub enum TxnFormat {
-    V1(UtxoProof, TxnMetadata),
+    V1(LeafProof, TxnMetadata),
     // TODO next version:
     // - cache the hash of the transaction in the metadata
 }
@@ -47,7 +47,7 @@ impl block_store::Transaction for TxnFormat {
     fn input_elements(&self) -> Vec<element::Element> {
         match self {
             TxnFormat::V1(utxo_proof, _) => utxo_proof
-                .public_inputs
+                .public_inputs()
                 .input_commitments
                 .iter()
                 .filter(|c| !c.is_zero())
@@ -59,7 +59,7 @@ impl block_store::Transaction for TxnFormat {
     fn output_elements(&self) -> Vec<element::Element> {
         match self {
             TxnFormat::V1(utxo_proof, _) => utxo_proof
-                .public_inputs
+                .public_inputs()
                 .output_commitments
                 .iter()
                 .filter(|c| !c.is_zero())
@@ -70,7 +70,7 @@ impl block_store::Transaction for TxnFormat {
 
     fn mint_hash(&self) -> Option<element::Element> {
         match self {
-            TxnFormat::V1(utxo_proof, _) => match utxo_proof.public_inputs.kind_messages() {
+            TxnFormat::V1(utxo_proof, _) => match utxo_proof.public_inputs().kind_messages() {
                 zk_primitives::UtxoKindMessages::Mint(utxo_kind_mint_messages) => {
                     Some(utxo_kind_mint_messages.mint_hash)
                 }

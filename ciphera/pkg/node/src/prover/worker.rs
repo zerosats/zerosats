@@ -407,8 +407,8 @@ where
                 for proof in commit.content.state.txns.iter() {
                     let proof_messages = match proof.kind() {
                         UtxoKind::Null | UtxoKind::Send => &[][..],
-                        UtxoKind::Mint => &proof.public_inputs.messages[..4],
-                        UtxoKind::Burn | UtxoKind::SlowBurn => &proof.public_inputs.messages[..],
+                        UtxoKind::Mint => &proof.public_inputs().messages[..4],
+                        UtxoKind::Burn | UtxoKind::SlowBurn => &proof.public_inputs().messages[..],
                     };
 
                     for &message in proof_messages {

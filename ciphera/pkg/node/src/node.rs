@@ -38,7 +38,7 @@ use tokio::sync::mpsc;
 use tokio_stream::StreamExt;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::{debug, error, info, instrument};
-use zk_primitives::UtxoProof;
+use zk_primitives::LeafProof;
 
 pub use self::block_format::BlockFormat;
 pub use self::txn_format::TxnFormat;
@@ -97,7 +97,7 @@ pub struct NodeShared {
     doomslug: Arc<Mutex<Doomslug>>,
 
     /// Mempool for storing pending txns
-    mempool: Mempool<Element, UtxoProof, BlockHeight, Element, Arc<Block>>,
+    mempool: Mempool<Element, LeafProof, BlockHeight, Element, Arc<Block>>,
 
     // Block cache (unconfirmed blocks)
     pub(crate) block_cache: Arc<Mutex<BlockCache>>,
@@ -547,7 +547,7 @@ impl NodeShared {
         }
     }
 
-    pub(crate) fn get_txn(&self, txn_hash: [u8; 32]) -> Result<Option<(UtxoProof, TxnMetadata)>> {
+    pub(crate) fn get_txn(&self, txn_hash: [u8; 32]) -> Result<Option<(LeafProof, TxnMetadata)>> {
         let txn = self.block_store.get_txn_by_hash(txn_hash)?;
         Ok(txn.map(|TxnFormat::V1(txn, metadata)| (txn, metadata)))
     }
