@@ -480,6 +480,14 @@ contract RollupV1 is
             tokens[noteKind] == address(0),
             "RollupV1: Token already exists"
         );
+        // Bytes 10..29 of the noteKind encode the token address (same
+        // layout enforced by initialize). Reject mismatches so a stale
+        // or mis-typed noteKind can never silently route mint/burn to the
+        // wrong ERC20.
+        require(
+            address(uint160(uint256(noteKind) >> 16)) == tokenAddress,
+            "RollupV1: noteKind/token mismatch"
+        );
 
         tokens[noteKind] = tokenAddress;
     }

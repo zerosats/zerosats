@@ -102,7 +102,17 @@ fn main(
             7,
         );
 
-        if !is_padding {
+        if is_padding {
+            // Enforce a canonical all-zero form for every public field of a
+            // padding slot so that a prover cannot forge arbitrary messages,
+            // commit_hash contributions, or root transitions from a slot that
+            // carries no real proof.
+            for j in 0..15 {
+                assert(messages[15 * i + j] == 0, "padding slot messages must be zero");
+            }
+            assert(proof.new_root == 0, "padding slot new_root must be zero");
+            assert(proof.commit_hash == 0, "padding slot commit_hash must be zero");
+        } else {
             assert(proof.old_root == root, "proof old_root must match previous root");
             root = proof.new_root;
         }

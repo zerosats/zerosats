@@ -275,8 +275,6 @@ mod tests {
         assert_eq!(note.address, expected_hashlock);
         assert_eq!(note.psi, expected_refund);
     }
-        assert_eq!(note.psi, expected_refund);
-    }
 
     #[test]
     fn new_htlc_for_recipient_matches_new_htlc() {

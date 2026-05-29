@@ -60,10 +60,10 @@ fn main(
 
         utxo_hashes[i] = poseidon2::Poseidon2::hash(
             [
-                input_commitments[0],
-                input_commitments[1],
-                output_commitments[0],
-                output_commitments[1],
+                if is_padding { 0 } else { input_commitments[0] },
+                if is_padding { 0 } else { input_commitments[1] },
+                if is_padding { 0 } else { output_commitments[0] },
+                if is_padding { 0 } else { output_commitments[1] },
             ],
             4,
         );
