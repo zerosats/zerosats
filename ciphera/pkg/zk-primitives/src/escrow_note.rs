@@ -249,11 +249,9 @@ mod tests {
     fn htlc_combines_timelock_refund_and_sha_hashlock() {
         // HTLC (spend_type == 3) checks:
         //   - hash branch (nonzero preimage): note.address must equal
-        //     Poseidon(field_pair(SHA256(preimage)));
+        //     Poseidon(key_hash, field_pair(SHA256(preimage)));
         //   - refund branch (zero preimage):  note.psi must equal
         //     Poseidon(key_hash, lock.commitment()).
-        // So address carries the hashlock and psi carries the refund
-        // commitment -- opposite to the pre-fix layout.
         let secret_key = Element::new(101);
         let lock = TimeLock {
             zero_block: [7u8; 32],
@@ -275,6 +273,8 @@ mod tests {
         let expected_hashlock = hash::hash_merge([key_hash, high, low]);
 
         assert_eq!(note.address, expected_hashlock);
+        assert_eq!(note.psi, expected_refund);
+    }
         assert_eq!(note.psi, expected_refund);
     }
 
