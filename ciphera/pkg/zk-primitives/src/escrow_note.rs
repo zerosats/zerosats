@@ -162,7 +162,11 @@ impl EscrowSignatures for Note {
         Self {
             utxo_kind: Element::new(2),
             note_kind,
-            address: Signature32Sha::address_from_hash(payment_hash),
+            address: {
+                let element = Element::from_be_bytes(payment_hash);
+                let (high, low) = element.decompose_be();
+                hash::hash_merge([recipient_address, high, low])
+            },
             psi: hash::hash_merge([recipient_address, lock.commitment()]),
             value,
         }
