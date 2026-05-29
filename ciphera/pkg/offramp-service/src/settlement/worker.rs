@@ -43,8 +43,8 @@ async fn tick_once(ctx: &SettlementContext) -> eyre::Result<()> {
     let quotes_list = quotes::list_non_terminal(&ctx.db).await?;
     for q in quotes_list {
         if let Err(e) = step(ctx, &q).await {
-            warn!(quote_id = %q.quote_id, error = ?e, "step failed; will retry");
-            let _ = quotes::record_error(&ctx.db, q.quote_id, &e.to_string()).await;
+            warn!(payment_hash = %hex::encode(q.payment_hash), error = ?e, "step failed; will retry");
+            let _ = quotes::record_error(&ctx.db, q.payment_hash, &e.to_string()).await;
         }
     }
     Ok(())
@@ -55,25 +55,23 @@ async fn step(ctx: &SettlementContext, q: &Quote) -> eyre::Result<()> {
         QuoteStatus::EscrowRequested => step_detect_escrow(ctx, q).await,
         QuoteStatus::EscrowDetected => step_pay_invoice(ctx, q).await,
         QuoteStatus::LightningPaying => step_poll_payment(ctx, q).await,
-        QuoteStatus::LightningPaid => step_submit_burn(ctx, q).await,
-        QuoteStatus::ClaimSubmitted => step_confirm_burn(ctx, q).await,
-        QuoteStatus::LightningPaid
-        | QuoteStatus::Refundable
-        | QuoteStatus::Cancelled => Ok(()),
+        QuoteStatus::LightningPaid => step_submit_claim(ctx, q).await,
+        QuoteStatus::ClaimSubmitted => step_confirm_claim(ctx, q).await,
+        QuoteStatus::Refundable | QuoteStatus::Cancelled => Ok(()),
     }
 }
 
 async fn step_detect_escrow(ctx: &SettlementContext, q: &Quote) -> eyre::Result<()> {
     if Utc::now() > q.expires_at {
-        info!(quote_id = %q.quote_id, "quote expired before escrow; cancelling");
-        quotes::update_status(&ctx.db, q.quote_id, QuoteStatus::Cancelled).await?;
+        info!(payment_hash = %hex::encode(q.payment_hash), "quote expired before escrow; cancelling");
+        quotes::update_status(&ctx.db, q.payment_hash, QuoteStatus::Cancelled).await?;
         return Ok(());
     }
 
     match ctx.rollup.element_status(q.note_commitment).await? {
         ElementStatus::Unspent { height, .. } => {
-            info!(quote_id = %q.quote_id, height, "escrow detected on rollup");
-            quotes::update_status(&ctx.db, q.quote_id, QuoteStatus::EscrowDetected).await?;
+            info!(payment_hash = %hex::encode(q.payment_hash), height, "escrow detected on rollup");
+            quotes::update_status(&ctx.db, q.payment_hash, QuoteStatus::EscrowDetected).await?;
         }
         ElementStatus::NotFound => {}
     }
@@ -81,25 +79,25 @@ async fn step_detect_escrow(ctx: &SettlementContext, q: &Quote) -> eyre::Result<
 }
 
 async fn step_pay_invoice(ctx: &SettlementContext, q: &Quote) -> eyre::Result<()> {
-    info!(quote_id = %q.quote_id, "paying bolt11 invoice");
+    info!(payment_hash = %hex::encode(q.payment_hash), "paying bolt11 invoice");
     // phoenixd-rs's pay_bolt11_invoice blocks until settled. Mark
     // LightningPaying up front so a crash mid-call doesn't lose the row's
     // state.
-    quotes::record_payment_started(&ctx.db, q.quote_id, "in-flight").await?;
+    quotes::record_payment_started(&ctx.db, q.payment_hash).await?;
     match ctx.lightning.pay_invoice(&q.bolt11).await {
         Ok(result) => {
             if let Some(preimage) = result.preimage {
-                quotes::record_payment_succeeded(&ctx.db, q.quote_id, preimage).await?;
+                quotes::record_payment_succeeded(&ctx.db, q.payment_hash, preimage).await?;
             } else {
                 // Synchronous phoenixd return without preimage shouldn't
                 // happen, but defend against it by polling next tick.
-                quotes::record_payment_started(&ctx.db, q.quote_id, &result.payment_id).await?;
+                quotes::record_payment_started(&ctx.db, q.payment_hash).await?;
             }
         }
         Err(e) => {
-            warn!(quote_id = %q.quote_id, error = ?e, "pay_invoice errored; will poll status next tick");
-            quotes::record_payment_started(&ctx.db, q.quote_id, "in-flight").await?;
-            quotes::record_error(&ctx.db, q.quote_id, &e.to_string()).await?;
+            warn!(payment_hash = %hex::encode(q.payment_hash), error = ?e, "pay_invoice errored; will poll status next tick");
+            quotes::record_payment_started(&ctx.db, q.payment_hash).await?;
+            quotes::record_error(&ctx.db, q.payment_hash, &e.to_string()).await?;
         }
     }
     Ok(())
@@ -110,19 +108,19 @@ async fn step_poll_payment(ctx: &SettlementContext, q: &Quote) -> eyre::Result<(
     match ctx.lightning.payment_status(&hash_hex).await? {
         LightningPaymentStatus::Pending => Ok(()),
         LightningPaymentStatus::Succeeded { preimage } => {
-            info!(quote_id = %q.quote_id, "lightning payment succeeded");
-            quotes::record_payment_succeeded(&ctx.db, q.quote_id, preimage).await?;
+            info!(payment_hash = %hex::encode(q.payment_hash), "lightning payment succeeded");
+            quotes::record_payment_succeeded(&ctx.db, q.payment_hash, preimage).await?;
             Ok(())
         }
         LightningPaymentStatus::Failed => {
-            warn!(quote_id = %q.quote_id, "lightning payment failed; quote is refundable");
-            quotes::update_status(&ctx.db, q.quote_id, QuoteStatus::Refundable).await?;
+            warn!(payment_hash = %hex::encode(q.payment_hash), "lightning payment failed; quote is refundable");
+            quotes::update_status(&ctx.db, q.payment_hash, QuoteStatus::Refundable).await?;
             Ok(())
         }
     }
 }
 
-async fn step_submit_burn(ctx: &SettlementContext, q: &Quote) -> eyre::Result<()> {
+async fn step_submit_claim(ctx: &SettlementContext, q: &Quote) -> eyre::Result<()> {
     let preimage = q
         .preimage
         .ok_or_else(|| eyre::eyre!("LightningPaid without preimage"))?;
@@ -137,16 +135,16 @@ async fn step_submit_burn(ctx: &SettlementContext, q: &Quote) -> eyre::Result<()
     // quote in `ClaimSubmitted` with a sentinel txn_hash so the
     // state machine still drains -- the actual on-chain burn is the
     // operator's responsibility for now.
-    info!(quote_id = %q.quote_id, "generating Escrow claim proof");
+    info!(payment_hash = %hex::encode(q.payment_hash), "generating Escrow claim proof");
     let proof = ctx
         .prover
         .build_and_prove(q, preimage, ctx.service_secret_key)
         .await?;
 
-    info!(quote_id = %q.quote_id, "submitting Escrow claim proof to rollup");
+    info!(payment_hash = %hex::encode(q.payment_hash), "submitting Escrow claim proof to rollup");
     match ctx.rollup.submit_escrow_transaction(proof).await {
         Ok(resp) => {
-            quotes::record_burn_submitted(&ctx.db, q.quote_id, resp.txn_hash).await?;
+            quotes::record_claim_submitted(&ctx.db, q.payment_hash, resp.txn_hash).await?;
         }
         Err(e) => {
             // Don't tip the quote into a failure state on the
@@ -154,7 +152,7 @@ async fn step_submit_burn(ctx: &SettlementContext, q: &Quote) -> eyre::Result<()
             // and stored, so retrying once node-side support lands
             // will work without redoing the heavy proving step.
             warn!(
-                quote_id = %q.quote_id,
+                payment_hash = %hex::encode(q.payment_hash),
                 error = ?e,
                 "submit_escrow_transaction not yet supported by node; \
                  claim proof generated locally and will need manual or \
@@ -165,14 +163,14 @@ async fn step_submit_burn(ctx: &SettlementContext, q: &Quote) -> eyre::Result<()
     Ok(())
 }
 
-async fn step_confirm_burn(ctx: &SettlementContext, q: &Quote) -> eyre::Result<()> {
-    let txn_hash = match q.burn_txn_hash {
+async fn step_confirm_claim(ctx: &SettlementContext, q: &Quote) -> eyre::Result<()> {
+    let txn_hash = match q.claim_address {
         Some(h) => h,
         None => return Ok(()),
     };
     if ctx.rollup.transaction_height(txn_hash).await?.is_some() {
-        info!(quote_id = %q.quote_id, "SlowBurn confirmed");
-        quotes::update_status(&ctx.db, q.quote_id, QuoteStatus::LightningPaid).await?;
+        info!(payment_hash = %hex::encode(q.payment_hash), "SlowBurn confirmed");
+        quotes::update_status(&ctx.db, q.payment_hash, QuoteStatus::LightningPaid).await?;
     }
     Ok(())
 }

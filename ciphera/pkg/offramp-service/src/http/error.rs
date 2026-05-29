@@ -11,6 +11,8 @@ pub enum ApiError {
     Conflict(String),
     #[error("internal: {0}")]
     Internal(String),
+    #[error("Invalid payment hash format")]
+    InvalidPaymentHash,
 }
 
 #[derive(Serialize)]
@@ -22,6 +24,7 @@ struct ErrorBody {
 impl ResponseError for ApiError {
     fn status_code(&self) -> StatusCode {
         match self {
+            Self::InvalidPaymentHash => StatusCode::BAD_REQUEST,
             Self::BadRequest(_) => StatusCode::BAD_REQUEST,
             Self::NotFound => StatusCode::NOT_FOUND,
             Self::Conflict(_) => StatusCode::CONFLICT,
@@ -31,6 +34,7 @@ impl ResponseError for ApiError {
 
     fn error_response(&self) -> HttpResponse {
         let kind = match self {
+            Self::InvalidPaymentHash => "bad_request",
             Self::BadRequest(_) => "bad_request",
             Self::NotFound => "not_found",
             Self::Conflict(_) => "conflict",

@@ -93,11 +93,11 @@ async fn post_offramp_persists_quote() {
     let resp = test::call_service(&app, req).await;
     assert!(resp.status().is_success(), "status: {:?}", resp.status());
     let body: Value = test::read_body_json(resp).await;
-    assert!(body["quote_id"].is_string());
+    assert!(body["payment_hash"].is_string());
     assert_eq!(body["timelock"]["n_blocks"], 2);
     assert_eq!(body["note"]["utxo_kind"], "2");
 
-    let qid = body["quote_id"].as_str().unwrap();
+    let qid = body["payment_hash"].as_str().unwrap();
     let req = test::TestRequest::get()
         .uri(&format!("/v0/offramp/{qid}"))
         .to_request();
@@ -131,10 +131,10 @@ async fn cancel_pending_quote_transitions_to_cancelled() {
     let resp = test::call_service(&app, req).await;
     assert!(resp.status().is_success());
     let body: Value = test::read_body_json(resp).await;
-    let qid = body["quote_id"].as_str().unwrap().to_string();
+    let payment_hash = body["payment_hash"].as_str().unwrap().to_string();
 
     let req = test::TestRequest::post()
-        .uri(&format!("/v0/offramp/{qid}/cancel"))
+        .uri(&format!("/v0/offramp/{payment_hash}/cancel"))
         .to_request();
     let resp = test::call_service(&app, req).await;
     assert!(resp.status().is_success(), "status: {:?}", resp.status());

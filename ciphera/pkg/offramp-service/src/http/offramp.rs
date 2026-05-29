@@ -1,16 +1,17 @@
 use crate::db::quotes;
 use crate::domain::{Quote, QuoteStatus};
-use crate::http::AppState;
 use crate::http::error::ApiError;
+use crate::http::AppState;
+use crate::settlement::proof::htlc_note_for_service_claim;
 use actix_web::web;
 use chrono::{Duration, Utc};
 use element::Element;
 use lightning_invoice::Bolt11Invoice;
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
-use uuid::Uuid;
-use crate::settlement::proof::htlc_note_for_service_claim;
 use zk_primitives::TimeLock;
+use rand::RngCore;
+use rand::rngs::OsRng;
 
 #[derive(Debug, Deserialize)]
 pub struct CreateRequest {
@@ -37,7 +38,6 @@ pub struct TimelockResponse {
 
 #[derive(Debug, Serialize)]
 pub struct CreateResponse {
-    pub quote_id: Uuid,
     pub note: NoteResponse,
     pub timelock: TimelockResponse,
     pub expires_at: String,
@@ -118,13 +118,17 @@ pub async fn create_offramp(
     );
     let note_commitment = note.commitment();
 
+    let mut bytes = [0u8; 32];
+    OsRng.fill_bytes(&mut bytes);
+    let note_secret = Element::from_be_bytes(bytes);
+
     let now = Utc::now();
     let expires_at = now + Duration::seconds(state.config.quote_ttl_seconds);
     let quote = Quote {
-        quote_id: Uuid::new_v4(),
+        payment_hash,
         status: QuoteStatus::EscrowRequested,
         bolt11: req.bolt11.clone(),
-        payment_hash,
+        note_secret,
         user_address,
         note_kind,
         amount,
@@ -132,8 +136,7 @@ pub async fn create_offramp(
         n_blocks: lock.n_blocks,
         note_commitment,
         preimage: None,
-        lightning_payment_id: None,
-        burn_txn_hash: None,
+        claim_address: None,
         last_error: None,
         expires_at,
         created_at: now,
@@ -143,7 +146,6 @@ pub async fn create_offramp(
     quotes::insert(&state.db, &quote).await?;
 
     Ok(web::Json(CreateResponse {
-        quote_id: quote.quote_id,
         note: NoteResponse {
             utxo_kind: note.utxo_kind.to_string(),
             note_kind: note.note_kind.to_string(),
@@ -162,7 +164,6 @@ pub async fn create_offramp(
 
 #[derive(Debug, Serialize)]
 pub struct StatusResponse {
-    pub quote_id: Uuid,
     pub status: String,
     pub payment_hash: String,
     pub preimage: Option<String>,
@@ -174,47 +175,56 @@ pub struct StatusResponse {
 
 pub async fn get_offramp(
     state: web::Data<AppState>,
-    path: web::Path<(Uuid,)>,
+    path: web::Path<(String,)>,
 ) -> Result<web::Json<StatusResponse>, ApiError> {
-    let (quote_id,) = path.into_inner();
-    let q = quotes::get(&state.db, quote_id).await?;
+    let (payment_hash_hex,) = path.into_inner();
+
+    let mut payment_hash = [0u8; 32];
+    hex::decode_to_slice(&payment_hash_hex, &mut payment_hash)
+        .map_err(|_| ApiError::InvalidPaymentHash)?; // Map error to your API error typ
+
+    let q = quotes::get(&state.db, payment_hash).await?;
     Ok(web::Json(status_response(&q)))
 }
 
 pub async fn cancel_offramp(
     state: web::Data<AppState>,
-    path: web::Path<(Uuid,)>,
+    path: web::Path<(String,)>,
 ) -> Result<web::Json<StatusResponse>, ApiError> {
-    let (quote_id,) = path.into_inner();
-    let q = quotes::get(&state.db, quote_id).await?;
+    let (payment_hash_hex,) = path.into_inner();
+
+    let mut payment_hash = [0u8; 32];
+    hex::decode_to_slice(&payment_hash_hex, &mut payment_hash)
+        .map_err(|_| ApiError::InvalidPaymentHash)?; // Map error to your API error typ
+
+    let q = quotes::get(&state.db, payment_hash).await?;
 
     match q.status {
         QuoteStatus::EscrowRequested => {
-            quotes::update_status(&state.db, quote_id, QuoteStatus::Cancelled).await?;
+            quotes::update_status(&state.db, payment_hash, QuoteStatus::Cancelled).await?;
         }
         QuoteStatus::EscrowDetected => {
-            quotes::update_status(&state.db, quote_id, QuoteStatus::Cancelled).await?;
+            quotes::update_status(&state.db, payment_hash, QuoteStatus::Cancelled).await?;
         }
         QuoteStatus::LightningPaying | QuoteStatus::LightningPaid => {
             return Err(ApiError::Conflict(
                 "lightning payment in flight or already complete; cannot cancel".into(),
             ));
         }
-        QuoteStatus::ClaimSubmitted | QuoteStatus::LightningPaid => {
-            return Err(ApiError::Conflict("burn already in flight".into()));
+        QuoteStatus::ClaimSubmitted => {
+            return Err(ApiError::Conflict("claimed".into()));
         }
         QuoteStatus::Cancelled | QuoteStatus::Refundable => {
             // idempotent no-op
         }
     }
 
-    let q = quotes::get(&state.db, quote_id).await?;
+    let q = quotes::get(&state.db, payment_hash).await?;
     Ok(web::Json(status_response(&q)))
 }
 
 fn status_response(q: &Quote) -> StatusResponse {
     StatusResponse {
-        quote_id: q.quote_id,
         status: q.status.as_str().into(),
         payment_hash: hex::encode(q.payment_hash),
         preimage: q.preimage.map(hex::encode),

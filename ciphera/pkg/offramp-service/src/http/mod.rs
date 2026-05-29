@@ -28,11 +28,11 @@ pub fn configure_routes(state: AppState) -> impl FnOnce(&mut web::ServiceConfig)
                         web::resource("/offramp").route(web::post().to(offramp::create_offramp)),
                     )
                     .service(
-                        web::resource("/offramp/{quote_id}")
+                        web::resource("/offramp/{payment_hash}")
                             .route(web::get().to(offramp::get_offramp)),
                     )
                     .service(
-                        web::resource("/offramp/{quote_id}/cancel")
+                        web::resource("/offramp/{payment_hash}/cancel")
                             .route(web::post().to(offramp::cancel_offramp)),
                     ),
             );

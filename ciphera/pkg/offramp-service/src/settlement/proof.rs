@@ -154,6 +154,7 @@ pub fn htlc_note_for_service_claim(
     amount: Element,
 ) -> Note {
     let service_key_hash = get_address_for_private_key(service_secret_key);
+
     let elem = Element::from_be_bytes(payment_hash);
     let (high, low) = elem.decompose_be();
     let address = hash_merge([service_key_hash, high, low]);

@@ -37,7 +37,7 @@ async fn main() -> eyre::Result<()> {
         &config.phoenixd_api_password,
         &config.phoenixd_url,
     )?);
-    let prover = Arc::new(LocalEscrowClaimProver::default());
+    let prover = Arc::new(LocalEscrowClaimProver);
 
     let settlement_ctx = SettlementContext {
         db: pool.clone(),

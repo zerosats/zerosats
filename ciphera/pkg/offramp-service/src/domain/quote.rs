@@ -1,7 +1,6 @@
 use chrono::{DateTime, Utc};
 use element::Element;
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 
 /// Per-quote state in the offramp settlement flow.
 ///
@@ -62,19 +61,18 @@ impl std::str::FromStr for QuoteStatus {
 /// One offramp quote row, mirrors the `quotes` table.
 #[derive(Debug, Clone)]
 pub struct Quote {
-    pub quote_id: Uuid,
-    pub status: QuoteStatus,
-    pub bolt11: String,
     pub payment_hash: [u8; 32],
-    pub user_address: Element,
-    pub note_kind: Element,
-    pub amount: Element,
-    pub zero_block: [u8; 32],
-    pub n_blocks: Element,
-    pub note_commitment: Element,
+    pub bolt11: String,
     pub preimage: Option<[u8; 32]>,
-    pub lightning_payment_id: Option<String>,
-    pub burn_txn_hash: Option<Element>,
+    pub note_commitment: Element,   // was Element
+    pub note_kind: Element,        // added
+    pub note_secret: Element,      // NEW FIELD
+    pub amount: Element,
+    pub user_address: Element,
+    pub zero_block: [u8; 32],
+    pub n_blocks: Element, // now nullable
+    pub claim_address: Option<Element>,
+    pub status: QuoteStatus,
     pub last_error: Option<String>,
     pub expires_at: DateTime<Utc>,
     pub created_at: DateTime<Utc>,

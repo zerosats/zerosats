@@ -5150,6 +5150,7 @@ dependencies = [
  "lightning-types",
  "node-interface",
  "primitives",
+ "rand 0.8.5",
  "reqwest",
  "serde",
  "serde_json",

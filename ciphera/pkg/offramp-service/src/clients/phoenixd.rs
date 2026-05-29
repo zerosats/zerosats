@@ -46,13 +46,12 @@ pub trait LightningClient: Send + Sync {
     /// mid-call can lose track of an in-flight payment.
     async fn pay_invoice(&self, bolt11: &str) -> eyre::Result<PayResult>;
 
-    async fn payment_status(&self, payment_hash_hex: &str) -> eyre::Result<LightningPaymentStatus>;
+    async fn payment_status(&self, payment_hash: &str) -> eyre::Result<LightningPaymentStatus>;
 }
 
 #[derive(Debug, Clone)]
 pub struct PayResult {
-    pub payment_id: String,
-    pub payment_hash_hex: String,
+    pub payment_hash: [u8; 32],
     pub preimage: Option<[u8; 32]>,
 }
 
@@ -95,7 +94,6 @@ struct PayInvoiceRequest {
 pub struct PayInvoiceResponse {
     pub recipient_amount_sat: u64,
     pub routing_fee_sat: u64,
-    pub payment_id: String,
     pub payment_hash: String,
     pub payment_preimage: String,
 }
@@ -162,7 +160,7 @@ impl Phoenixd {
     ) -> Result<GetOutgoingInvoiceResponse, PhoenixdError> {
         let url = self
             .api_url
-            .join(&format!("payments/outgoing/{}", payment_hash))
+            .join(&format!("payments/outgoing/{payment_hash}"))
             .map_err(|_| PhoenixdError::InvalidUrl)?;
         let resp = self
             .client
@@ -232,10 +230,10 @@ impl LightningClient for PhoenixdClient {
             .await
             .map_err(|e| eyre::eyre!("phoenixd pay_bolt11_invoice: {e:?}"))?;
 
-        let preimage = parse_preimage(&resp.payment_preimage)?;
+        let preimage = parse_bytearray(&resp.payment_preimage)?;
+        let payment_hash = parse_bytearray(&resp.payment_hash)?;
         Ok(PayResult {
-            payment_id: resp.payment_id,
-            payment_hash_hex: resp.payment_hash,
+            payment_hash,
             preimage: Some(preimage),
         })
     }
@@ -247,7 +245,7 @@ impl LightningClient for PhoenixdClient {
         match self.phoenixd.get_outgoing_invoice(payment_hash_hex).await {
             Ok(body) => {
                 if body.is_paid {
-                    let preimage = parse_preimage(&body.preimage)?;
+                    let preimage = parse_bytearray(&body.preimage)?;
                     Ok(LightningPaymentStatus::Succeeded { preimage })
                 } else if body.completed_at.is_some() {
                     Ok(LightningPaymentStatus::Failed)
@@ -261,7 +259,7 @@ impl LightningClient for PhoenixdClient {
     }
 }
 
-fn parse_preimage(hex_str: &str) -> eyre::Result<[u8; 32]> {
+fn parse_bytearray(hex_str: &str) -> eyre::Result<[u8; 32]> {
     let bytes = hex::decode(hex_str.trim_start_matches("0x"))?;
     if bytes.len() != 32 {
         eyre::bail!("expected 32-byte preimage, got {} bytes", bytes.len());

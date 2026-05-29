@@ -21,15 +21,18 @@ async fn migrate(pool: &DbPool) -> eyre::Result<()> {
     sqlx::query(
         r#"
         CREATE TABLE IF NOT EXISTS quotes (
-          payment_hash          TEXT PRIMARY KEY,
-          note_commitment       TEXT NOT NULL UNIQUEY,
-          status                TEXT NOT NULL,
+          payment_hash          BLOB PRIMARY KEY,
           bolt11                TEXT NOT NULL,
+          preimage              BLOB,
+          note_commitment       BLOB NOT NULL UNIQUEY,
           note_kind             BLOB NOT NULL,
+          note_secret           BLOB NOT NULL,
           amount                BLOB NOT NULL,
+          user_address          BLOB NOT NULL,
           zero_block            BLOB NOT NULL,
           n_blocks              BLOB NOT NULL,
-          preimage              BLOB,
+          claim_address         BLOB,
+          status                TEXT NOT NULL,
           last_error            TEXT,
           expires_at            INTEGER NOT NULL,
           created_at            INTEGER NOT NULL,

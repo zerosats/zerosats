@@ -10,7 +10,7 @@ hash = { workspace = true }
 node-interface = { workspace = true }
 primitives = { workspace = true }
 zk-primitives = { workspace = true }
-
+rand = {workspace = true}
 actix-web = { workspace = true }
 actix-cors = { workspace = true }
 async-trait = { workspace = true }
