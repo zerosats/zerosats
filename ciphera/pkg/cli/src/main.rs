@@ -19,14 +19,7 @@ use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::Path;
 use std::str::FromStr;
-use zk_primitives::{
-    CitreaNetwork, InputNote, Note, citrea_testnet_usdc_note_kind, citrea_wcbtc_note_kind,
-};
-
-/// CLI is hardcoded to Citrea testnet today (see
-/// `client::client_tests::CHAIN_ID`). When the CLI grows a `--network` flag
-/// this constant should be threaded through the surrounding code paths.
-const CLI_NETWORK: CitreaNetwork = CitreaNetwork::Testnet;
+use zk_primitives::{InputNote, Note, citrea_testnet_usdc_note_kind, citrea_wcbtc_note_kind};
 
 #[derive(Parser, Debug)]
 #[command(name = "ciphera-cli")]
@@ -1099,17 +1092,8 @@ async fn handle_mint(
 
     let (prepared_wallet, utxo) = client.get_wallet().prepare_mint(amount_wei, ticker)?;
     let snark = utxo.prove().unwrap();
-    let erc20_contract = "0x4370e27F7d91D9341bFf232d7Ee8bdfE3a9933a0";
+
     if !only_snark {
-
-        client.admin_approve(
-            geth_rpc.clone(),
-            chain.clone(),
-            secret.clone(),
-            rollup.clone(),
-            erc20_contract,
-        );
-
         client
             .admin_mint(
                 geth_rpc,
@@ -1269,10 +1253,14 @@ async fn handle_release_slow_burn(
     // The event only carries hash, burnAddr, amount; brute-force the
     // remaining note_kind across the supported tokens by recomputing the
     // key and matching it against the indexed `key` topic.
+    // Derive the network from the `--chain` argument so the WCBTC note
+    // kind we brute-force against matches the chain we're actually talking
+    // to, instead of a hardcoded enum.
+    let network = cli::address::network_for_chain(chain);
     let candidate_kinds: Vec<(&str, H256)> = vec![
         (
             "WCBTC",
-            convert_element_to_h256(&citrea_wcbtc_note_kind(CLI_NETWORK)),
+            convert_element_to_h256(&citrea_wcbtc_note_kind(network)),
         ),
         (
             "USDC",

@@ -5,12 +5,12 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::num::ParseIntError;
 use std::path::{Path, PathBuf};
-use zk_primitives::{Escrow, EscrowInputNote, InputNote, Note, UtxoKind, Utxo};
+use zk_primitives::{CitreaNetwork, Escrow, EscrowInputNote, InputNote, Note, UtxoKind, Utxo};
 
 use crate::escrow::{htlc_claim_address, htlc_refund_psi, pow_two_block_lock, pow_two_block_proof};
 
 use crate::CipheraAddress;
-use crate::address::{citrea_ticker_from_contract, citrea_token_data};
+use crate::address::{CLI_NETWORK, citrea_ticker_from_contract, citrea_token_data, network_for_chain};
 use crate::rpc::TxnWithInfo;
 use std::collections::HashMap;
 use tracing::{debug, error, info};
@@ -103,6 +103,14 @@ impl Wallet {
         let mut bytes = [0u8; 32];
         OsRng.fill_bytes(&mut bytes);
         Element::from_be_bytes(bytes)
+    }
+
+    /// Citrea network this wallet operates on, derived from its bound
+    /// `chain_id`. Used when *constructing* notes so the WCBTC `note_kind`
+    /// matches the wallet's chain instead of a hardcoded default. Legacy
+    /// wallets that predate `chain_id` fall back to [`CLI_NETWORK`].
+    fn network(&self) -> CitreaNetwork {
+        self.chain_id.map_or(CLI_NETWORK, network_for_chain)
     }
 
     fn with_storage_path(mut self, storage_path: PathBuf) -> Self {
@@ -444,7 +452,7 @@ impl Wallet {
         let pk = self.gen_pk();
         let self_address = hash_merge([pk, Element::ZERO]);
 
-        let (utxo_kind, note_kind) = citrea_token_data(ticker);
+        let (utxo_kind, note_kind) = citrea_token_data(self.network(), ticker);
 
         let note = Note {
             utxo_kind,
@@ -482,7 +490,7 @@ impl Wallet {
         preimage: [u8; 32],
     ) -> Result<(Utxo, EscrowInputNote), WalletError> {
         let (inputs, change) = self.select_input_notes(ticker, amount)?;
-        let (utxo_kind, note_kind) = citrea_token_data(ticker);
+        let (utxo_kind, note_kind) = citrea_token_data(self.network(), ticker);
 
         let htlc_note = Note {
             utxo_kind,
@@ -651,7 +659,7 @@ impl Wallet {
         let pk = self.gen_pk();
         let psi = self.gen_pk();
         let address = hash_merge([pk, Element::ZERO]);
-        let (utxo_kind, note_kind) = citrea_token_data(ticker);
+        let (utxo_kind, note_kind) = citrea_token_data(self.network(), ticker);
 
         let note = Note {
             utxo_kind,
@@ -733,7 +741,7 @@ mod wallet_tests {
     }
 
     fn create_note_and_encode_address(amount: u64) -> String {
-        let (utxo_kind, note_kind) = citrea_token_data("WCBTC");
+        let (utxo_kind, note_kind) = citrea_token_data(CitreaNetwork::Testnet, "WCBTC");
 
         let note = Note {
             utxo_kind,
@@ -1374,7 +1382,7 @@ mod wallet_tests {
 
     /// InputNote with a real WCBTC contract so `citrea_ticker_from_contract` resolves.
     fn create_wcbtc_input_note_with_contract(amount: u64) -> InputNote {
-        let (utxo_kind, note_kind) = citrea_token_data("WCBTC");
+        let (utxo_kind, note_kind) = citrea_token_data(CitreaNetwork::Testnet, "WCBTC");
         let pk = Element::from(99999u64);
         let address = hash_merge([pk, Element::ZERO]);
         InputNote::new(
@@ -1411,7 +1419,7 @@ mod wallet_tests {
     /// so callers can compute its commitment for sync tests.
     fn add_pending_note(wallet: &mut Wallet, amount: u64) -> Note {
         let pk = Element::from(12345u64);
-        let (utxo_kind, note_kind) = citrea_token_data("WCBTC");
+        let (utxo_kind, note_kind) = citrea_token_data(CitreaNetwork::Testnet, "WCBTC");
         let address = hash_merge([pk, Element::ZERO]);
         let note = Note {
             utxo_kind,
@@ -1432,7 +1440,7 @@ mod wallet_tests {
     /// `import_note` can find and claim it by matching the address.
     fn make_importable_note(wallet: &mut Wallet, amount: u64) -> Note {
         let pk = Element::from(12345u64);
-        let (utxo_kind, note_kind) = citrea_token_data("WCBTC");
+        let (utxo_kind, note_kind) = citrea_token_data(CitreaNetwork::Testnet, "WCBTC");
         let note = Note {
             utxo_kind,
             note_kind,
@@ -1554,7 +1562,7 @@ mod wallet_tests {
     #[test]
     fn test_burn_note_not_in_avail_returns_error() {
         let mut wallet = Wallet::random(5115, Some("test".to_string()));
-        let (utxo_kind, note_kind) = citrea_token_data("WCBTC");
+        let (utxo_kind, note_kind) = citrea_token_data(CitreaNetwork::Testnet, "WCBTC");
         let pk = Element::from(12345u64);
         let input_note = InputNote::new(
             Note {
@@ -1671,7 +1679,7 @@ mod wallet_tests {
     #[test]
     fn test_import_note_unknown_address_returns_error() {
         let mut wallet = Wallet::random(5115, Some("test".to_string()));
-        let (utxo_kind, note_kind) = citrea_token_data("WCBTC");
+        let (utxo_kind, note_kind) = citrea_token_data(CitreaNetwork::Testnet, "WCBTC");
         // Address does not correspond to any pending note in the wallet.
         let note = Note {
             utxo_kind,
@@ -1691,7 +1699,7 @@ mod wallet_tests {
         let mut wallet = Wallet::random(5115, Some("test".to_string()));
         // Add an unrelated pending note for USDC.
         let pk_usdc = Element::from(55555u64);
-        let (kind_usdc, contract_usdc) = citrea_token_data("USDC");
+        let (kind_usdc, contract_usdc) = citrea_token_data(CitreaNetwork::Testnet, "USDC");
         let unrelated_note = InputNote::new(
             Note {
                 utxo_kind: kind_usdc,

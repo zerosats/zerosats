@@ -24,18 +24,10 @@ pub struct Config {
     #[arg(long, env = "ROLLUP_BASECHAIN_ID")]
     chain_id: u64,
 
-    #[arg(
-        long,
-        env = "ROLLUP_CONTRACT_ADDR",
-        default_value = "0xcf7ed3acca5a467e9e704c703e8d87f634fb0fc9"
-    )]
+    #[arg(long, env = "ROLLUP_CONTRACT_ADDR")]
     rollup_contract_addr: String,
 
-    #[arg(
-        long,
-        env = "ERC20_CONTRACT_ADDR",
-        default_value = "0x4370e27F7d91D9341bFf232d7Ee8bdfE3a9933a0"
-    )]
+    #[arg(long, env = "ERC20_CONTRACT_ADDR")]
     erc20_contract_addr: String,
 
     #[arg(long, env = "CLAIMER_CONTRACT_ADDR")]
