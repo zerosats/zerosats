@@ -310,14 +310,32 @@ impl Prover {
         let utxo_agg_proof = self.aggregate_utxo(tree, utxo_slots, current_block)?;
         let escrow_agg_proof = self.aggregate_escrow(tree, escrow_slots, current_block)?;
 
-        // Heterogeneous batch: slot 0 = agg_utxo, slot 1 = agg_escrow.
-        // `AggAgg::new_mixed` tags each slot's source so the backend
-        // input map picks the matching verification key (see
-        // `pkg/barretenberg/src/circuits/agg_agg.rs::From<AggAggInput>`).
-        let agg_agg = AggAgg::new_mixed(
-            [utxo_agg_proof, escrow_agg_proof.into_inner()],
-            [AggLeafSource::AggUtxo, AggLeafSource::AggEscrow],
-        );
+        // Slot 0 must always carry the non-padding aggregator so that
+        // `AggAgg::old_root()` (which unconditionally reads proofs[0].old_root)
+        // returns the real pre-block tree root, and so the Noir agg_agg
+        // circuit's root-chaining assertion (proofs[0].new_root ==
+        // proofs[1].old_root) is satisfiable.
+        //
+        // When the UTXO bucket is all-padding (escrow-only block) the default
+        // AggUtxoProof has old_root = new_root = 0, which would cause both of
+        // those invariants to fail.  Swap the slots so the real aggregator
+        // (AggEscrow in that case) is always in slot 0.
+        let (slot0, src0, slot1, src1) = if utxo_agg_proof.public_inputs.is_padding() {
+            (
+                escrow_agg_proof.into_inner(),
+                AggLeafSource::AggEscrow,
+                utxo_agg_proof,
+                AggLeafSource::AggUtxo,
+            )
+        } else {
+            (
+                utxo_agg_proof,
+                AggLeafSource::AggUtxo,
+                escrow_agg_proof.into_inner(),
+                AggLeafSource::AggEscrow,
+            )
+        };
+        let agg_agg = AggAgg::new_mixed([slot0, slot1], [src0, src1]);
         let proof = agg_agg
             .prove()
             .map_err(|e| Error::BarretenbergProve(e.to_string()))?;

@@ -27,7 +27,6 @@ RUN apt-get update && apt-get install -y \
 
 # Install Rust
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain 1.88.0
-ENV PATH="/root/.cargo/bin:$PATH"
 
 RUN curl -fsSL https://deb.nodesource.com/setup_22.x -o nodesource_setup.sh
 RUN bash nodesource_setup.sh
@@ -37,21 +36,14 @@ RUN apt-get update && apt-get install -y nodejs \
     && apt-get clean
 
 RUN curl -L https://raw.githubusercontent.com/noir-lang/noirup/refs/heads/main/install | bash
-RUN . /root/.bashrc && noirup
+RUN . /root/.bashrc && noirup -v 1.0.0-beta.14
 
-RUN curl -fsSL https://raw.githubusercontent.com/AztecProtocol/aztec-packages/master/barretenberg/bbup/install | bash && \
-    /root/.bb/bbup -v "${BB_VERSION}" && \
-    test -x /root/.bb/bb && /root/.bb/bb --version
+COPY ./ciphera/web/binaries/linux64/barretenberg-amd64-linux.tar.gz barretenberg.tar.gz
+RUN tar -xzf barretenberg.tar.gz && \
+    mv bb /usr/local/bin/bb && \
+    rm barretenberg.tar.gz
 
-# Create a workspace directory
-WORKDIR /app
-COPY ciphera .
-
-WORKDIR /app/citrea
-RUN npm ci
-RUN npx hardhat compile
-
-ENV PATH="/root/.cargo/bin:/root/.bb:/usr/src/noir/noir-repo/target/release:/usr/src/barretenberg/cpp/build/bin:$PATH"
+ENV PATH="/usr/local/cargo/bin:/usr/local/bin:$PATH"
 
 # Set bash as entrypoint with login shell to ensure profile is sourced
 ENTRYPOINT ["/bin/bash", "--login"]

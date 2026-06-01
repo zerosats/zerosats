@@ -73,7 +73,11 @@ impl NodeShared {
         // If we exit after commiting to block store,
         // but before commiting to notes tree, we
         // can detect it by checking the previous block's root hash.
-        self.block_store.set(&BlockFormat::V2(
+        // V3 is the current on-disk format whose inner `Block` carries
+        // `Vec<LeafProof>` (heterogeneous utxo / escrow txns). V1 and
+        // V2 are retained for reading legacy blocks and are never
+        // written.
+        self.block_store.set(&BlockFormat::V3(
             block.clone(),
             BlockMetadata {
                 timestamp_unix_s: Some(commit_time.timestamp() as u64),

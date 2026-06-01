@@ -15,7 +15,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 use tracing::debug;
-use zk_primitives::{Note, UtxoProof};
+use zk_primitives::{EscrowProof, LeafProof, Note, UtxoProof};
 
 use contracts::ConfirmationType;
 use ethereum_types::U256;
@@ -295,7 +295,23 @@ impl NodeClient {
         Ok(height_resp.height)
     }
 
+    /// Submit a utxo-circuit proof. The wire shape on `/v0/transaction`
+    /// expects a tagged `LeafProof` after the heterogeneous-aggregation
+    /// refactor; this helper wraps as `LeafProof::Utxo` so existing
+    /// utxo-only call sites don't need to know the enum.
     pub async fn transaction(&self, proof: &UtxoProof) -> Result<TransactionResponse> {
+        self.submit_leaf(LeafProof::Utxo(proof.clone())).await
+    }
+
+    /// Submit an escrow-circuit proof (HTLC claim or refund). Same
+    /// endpoint as `transaction`, tagged as `LeafProof::Escrow` so the
+    /// node routes it through the escrow leaf VK and the prover into
+    /// the `agg_escrow` slot of the heterogeneous `agg_agg` batch.
+    pub async fn transaction_escrow(&self, proof: &EscrowProof) -> Result<TransactionResponse> {
+        self.submit_leaf(LeafProof::Escrow(proof.clone())).await
+    }
+
+    async fn submit_leaf(&self, proof: LeafProof) -> Result<TransactionResponse> {
         let url = format!("{}/transaction", self.base_url);
 
         debug!("Sending transaction via {}", url);

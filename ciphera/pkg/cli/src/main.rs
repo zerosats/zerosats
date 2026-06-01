@@ -644,7 +644,7 @@ async fn handle_escrow_redeem_or_refund(
     note_path: &str,
     refund: bool,
 ) -> Result<()> {
-    let client = NodeClient::builder()
+    let mut client = NodeClient::builder()
         .name(name)
         .host(host)
         .build(chain, false)?;
@@ -657,7 +657,7 @@ async fn handle_escrow_redeem_or_refund(
     let ticker = cli::address::citrea_ticker_from_contract(htlc_input_note.note.note_kind);
     let label = if refund { "Refund" } else { "Redeem" };
 
-    let (_prepared_wallet, escrow, _received) = if refund {
+    let (prepared_wallet, escrow, _received) = if refund {
         client.get_wallet().prepare_escrow_refund(&htlc_input_note)?
     } else {
         client.get_wallet().prepare_escrow_redeem(&htlc_input_note)?
@@ -669,36 +669,38 @@ async fn handle_escrow_redeem_or_refund(
         .map_err(|e| color_eyre::eyre::eyre!("escrow.prove() failed: {e}"))?;
     println!("✅ EscrowProof generated ({} bytes)", snark.proof.0.len());
 
-    // Local self-verification: catches witness-level bugs (wrong
-    // preimage, stale PoW chain, secret_key mismatched against the
-    // baked-in commitment) before we even think about on-chain
-    // submission.
+    // Local self-verification before going on chain. Catches
+    // witness-level bugs (wrong preimage, stale PoW chain,
+    // secret_key mismatched against the baked-in commitment)
+    // without burning a node round-trip.
     snark
         .verify()
         .map_err(|e| color_eyre::eyre::eyre!("escrow.verify() failed: {e}"))?;
     println!("✅ Local verification of EscrowProof succeeded");
 
-    let proof_path = format!("{name}-htlc-{}.snark.json", label.to_lowercase());
-    std::fs::write(&proof_path, serde_json::to_string_pretty(&snark)?)?;
-    println!("📦 Saved proof to {proof_path}");
+    // Submit through the node's `/v0/transaction` endpoint as
+    // `LeafProof::Escrow`. The endpoint accepts both leaf flavours
+    // since the heterogeneous-aggregation refactor; the node routes
+    // escrow proofs through the agg_escrow → agg_agg slot pair on
+    // commit.
+    match client.transaction_escrow(&snark).await {
+        Ok(tx) => {
+            println!("\n✅ {label} transaction {} has been submitted!", tx.txn_hash);
+            println!("   Height:    {}", tx.height);
+            println!("   Root hash: {}", tx.root_hash);
 
-    println!(
-        "\nℹ️  {label} EscrowProof is valid locally; on-chain submission via the existing\n   \
-         `/transaction` endpoint is NOT yet wired up -- that endpoint accepts UtxoProof\n   \
-         only, see pkg/cli/src/client.rs::transaction. Extending the node mempool +\n   \
-         prover-side aggregation (agg_escrow → agg_agg with sources=[AggUtxo, AggEscrow])\n   \
-         is required to turn this proof into a tree-applied transaction.\n"
-    );
+            prepared_wallet.save()?;
+            client.replace_wallet(prepared_wallet);
 
-    // The wallet hasn't actually received the redeemed/refunded value
-    // on chain, so we do NOT persist the staged wallet changes here --
-    // doing so would desync the wallet from the chain root once a real
-    // submission path lands. Persistence happens when the proof is
-    // actually accepted by the node.
-
-    let b = client.get_wallet().balance;
-    println!("Balance {} sats {ticker} (unchanged: redeem not yet submitted)", units::wei_to_sats(b));
-    Ok(())
+            let b = client.get_wallet().balance;
+            println!("\nBalance {} sats {ticker}", units::wei_to_sats(b));
+            Ok(())
+        }
+        Err(e) => {
+            eprintln!("\n❌ {label} submission failed: {e}");
+            Err(e)
+        }
+    }
 }
 
 async fn handle_import(name: &str, notefile: &str) -> Result<()> {
