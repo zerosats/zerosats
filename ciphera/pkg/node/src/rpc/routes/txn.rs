@@ -19,7 +19,7 @@ use wire_message::WireMessage;
 use zk_primitives::LeafProof;
 #[cfg(test)]
 use zk_primitives::UtxoProof;
-use tracing::{info, error};
+use tracing::{debug, info, error};
 
 #[tracing::instrument(err, skip_all)]
 pub async fn submit_txn(
@@ -28,10 +28,22 @@ pub async fn submit_txn(
 ) -> HttpResult<web::Json<TransactionResponse>> {
     let leaf_proof = data.proof;
 
+    // Highlight the leaf flavour (utxo vs escrow) and kind at `info`;
+    // keep the bulky full-proof JSON at `debug` for when a specific
+    // payload needs inspecting.
     info!(
         method = "submit_txn",
-        proof = serde_json::to_string(&leaf_proof).unwrap(),
-        "Incoming request"
+        flavour = leaf_proof.flavour(),
+        kind = ?leaf_proof.kind(),
+        hash = %format!("0x{}", leaf_proof.hash()),
+        "Incoming {} transaction",
+        leaf_proof.flavour().to_uppercase()
+    );
+    debug!(
+        method = "submit_txn",
+        flavour = leaf_proof.flavour(),
+        proof = serde_json::to_string(&leaf_proof).unwrap_or_default(),
+        "Incoming transaction proof payload"
     );
 
     // Each leaf flavour is verified against its own embedded
@@ -44,7 +56,13 @@ pub async fn submit_txn(
     };
 
     if let Err(_err) = verify_result {
-        error!(?_err, "proof verification failed");
+        error!(
+            flavour = leaf_proof.flavour(),
+            kind = ?leaf_proof.kind(),
+            ?_err,
+            "{} proof verification failed",
+            leaf_proof.flavour().to_uppercase()
+        );
         return Err(RpcError::InvalidProof)?;
     }
 

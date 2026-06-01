@@ -4,6 +4,7 @@ use barretenberg::Verify;
 use block_store::BlockStore;
 use element::Element;
 use node_interface::{ElementData, ElementsVecData, RpcError};
+use tracing::{debug, warn};
 use zk_primitives::LeafProof;
 
 /// Validate a leaf-circuit txn, we check the following:
@@ -19,11 +20,25 @@ pub fn validate_txn(
     block_store: &BlockStore<BlockFormat>,
     notes_tree: &PersistentMerkleTree,
 ) -> Result<()> {
+    debug!(
+        flavour = utxo_proof.flavour(),
+        kind = ?utxo_proof.kind(),
+        hash = %format!("0x{}", utxo_proof.hash()),
+        "Validating leaf proof"
+    );
+
     let verify_result = match utxo_proof {
         LeafProof::Utxo(p) => p.verify(),
         LeafProof::Escrow(p) => p.verify(),
     };
     if let Err(_err) = verify_result {
+        warn!(
+            flavour = utxo_proof.flavour(),
+            kind = ?utxo_proof.kind(),
+            error = ?_err,
+            "{} proof verification failed",
+            utxo_proof.flavour().to_uppercase()
+        );
         Err(RpcError::InvalidProof)?;
     }
 

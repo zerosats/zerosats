@@ -2,7 +2,8 @@ use std::{sync::Arc, time::Instant};
 
 use doomslug::ApprovalValidated;
 use primitives::hash::CryptoHash;
-use tracing::{info, instrument, warn};
+use tracing::{debug, info, instrument, warn};
+use zk_primitives::count_flavours;
 
 use crate::{
     BlockFormat, Error, Mode, NodeShared, Result,
@@ -18,8 +19,17 @@ impl NodeShared {
         let state = &block.content.state;
         let height = block.content.header.height;
 
-        // Commit proposal
-        info!(counter.commit_height = ?height, "Commit");
+        // Commit proposal. Highlight the leaf mix (utxo vs escrow) in
+        // the one-line block summary so the flavour split is visible at
+        // `info` without scanning the per-txn lines below.
+        let (utxo_count, escrow_count) = count_flavours(&state.txns);
+        info!(
+            counter.commit_height = ?height,
+            txns = state.txns.len(),
+            utxo = utxo_count,
+            escrow = escrow_count,
+            "Commit block {height:?}: {utxo_count} utxo + {escrow_count} escrow txn(s)"
+        );
 
         // Update the last_commit time
         let commit_time = chrono::Utc::now();
@@ -36,15 +46,25 @@ impl NodeShared {
             .collect::<Result<Vec<_>>>()?;
 
         for utxo_proof in &block.content.state.txns {
+            // Concise, flavour-highlighted line at `info`; the bulky
+            // commitment / message dump drops to `debug`.
             info!(
-                hash = format!("0x{}", utxo_proof.hash()),
+                flavour = utxo_proof.flavour(),
+                kind = ?utxo_proof.kind(),
+                hash = %format!("0x{}", utxo_proof.hash()),
+                "Committing {} transaction",
+                utxo_proof.flavour().to_uppercase()
+            );
+            debug!(
+                flavour = utxo_proof.flavour(),
+                hash = %format!("0x{}", utxo_proof.hash()),
                 kind = ?utxo_proof.kind(),
                 kind_messages = ?utxo_proof.kind_messages(),
                 messages =  ?utxo_proof.public_inputs().messages.iter().map(|l| format!("0x{l:x}")).collect::<Vec<_>>(),
                 input_leaves = ?utxo_proof.public_inputs().input_commitments.iter().map(|l| format!("0x{l:x}")).collect::<Vec<_>>(),
                 output_leaves = ?utxo_proof.public_inputs().output_commitments.iter().map(|l| format!("0x{l:x}")).collect::<Vec<_>>(),
-                "Committing transaction"
-            )
+                "Committed transaction details"
+            );
         }
 
         // Input commitments (to be removed from the tree)
@@ -162,6 +182,15 @@ impl NodeShared {
 
             utxos.into_iter().map(|(_, utxo)| utxo).collect::<Vec<_>>()
         };
+
+        let (utxo_count, escrow_count) = count_flavours(&txns);
+        info!(
+            ?height,
+            txns = txns.len(),
+            utxo = utxo_count,
+            escrow = escrow_count,
+            "Proposing block {height:?}: {utxo_count} utxo + {escrow_count} escrow txn(s)"
+        );
 
         let insert_leaves = txns
             .iter()

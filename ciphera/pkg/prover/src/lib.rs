@@ -19,7 +19,7 @@ use smirk::{
 };
 use smirk_metadata::SmirkMetadata;
 use std::sync::Arc;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 use web3::ethabi;
 use zk_primitives::{
     AggAgg, AggAggProof, AggEscrow, AggEscrowProof, AggLeafSource, AggUtxo, AggUtxoProof,
@@ -172,9 +172,21 @@ impl Prover {
         height: u64,
         txns: [Option<Transaction>; MAXIMUM_TXNS],
     ) -> Result<AggAggProof> {
+        // `txns` is padded to `MAXIMUM_TXNS` with `None`; count only the
+        // real leaves and split by flavour so the log reflects the
+        // actual utxo / escrow workload rather than the padded length.
+        let (utxo_count, escrow_count) = txns.iter().flatten().fold(
+            (0usize, 0usize),
+            |(utxo, escrow), t| match t.proof.is_escrow() {
+                true => (utxo, escrow + 1),
+                false => (utxo + 1, escrow),
+            },
+        );
         info!(
-            "Bundling {} UTXO proof(s) and proving new root hash",
-            txns.len()
+            height,
+            utxo = utxo_count,
+            escrow = escrow_count,
+            "Bundling {utxo_count} utxo + {escrow_count} escrow leaf proof(s) and proving new root hash"
         );
 
         let proof = tokio::task::spawn_blocking({
@@ -302,6 +314,20 @@ impl Prover {
             escrow_bucket.push(Transaction::new(LeafProof::Escrow(EscrowProof::default())));
         }
 
+        // Report the real (non-padding) leaves routed into each bucket so
+        // the flavour split through the aggregator is visible at `info`.
+        let real_utxo = utxo_bucket.iter().filter(|t| !t.proof.is_padding()).count();
+        let real_escrow = escrow_bucket
+            .iter()
+            .filter(|t| !t.proof.is_padding())
+            .count();
+        info!(
+            block = current_block,
+            utxo = real_utxo,
+            escrow = real_escrow,
+            "Aggregating {real_utxo} utxo + {real_escrow} escrow leaf proof(s) into AggUtxo + AggEscrow buckets"
+        );
+
         #[allow(clippy::unwrap_used)]
         let utxo_slots: [Transaction; UTXO_AGG_NUMBER] = utxo_bucket.try_into().unwrap();
         #[allow(clippy::unwrap_used)]
@@ -358,8 +384,18 @@ impl Prover {
         current_block: u64,
     ) -> Result<AggUtxoProof, Error> {
         if utxos.iter().all(|utxo| utxo.proof.is_padding()) {
+            debug!(
+                block = current_block,
+                "UTXO bucket is all padding; emitting default AggUtxoProof"
+            );
             return Ok(AggUtxoProof::default());
         }
+
+        let real = utxos.iter().filter(|u| !u.proof.is_padding()).count();
+        debug!(
+            block = current_block,
+            real, "Proving AggUtxo over {real} real utxo leaf slot(s)"
+        );
 
         let (_, old_tree, new_tree, merkle_paths) =
             self.gen_merkle_paths(tree, &utxos, current_block)?;
@@ -427,8 +463,18 @@ impl Prover {
         current_block: u64,
     ) -> Result<AggEscrowProof, Error> {
         if txns.iter().all(|t| t.proof.is_padding()) {
+            debug!(
+                block = current_block,
+                "Escrow bucket is all padding; emitting default AggEscrowProof"
+            );
             return Ok(AggEscrowProof::default());
         }
+
+        let real = txns.iter().filter(|t| !t.proof.is_padding()).count();
+        debug!(
+            block = current_block,
+            real, "Proving AggEscrow over {real} real escrow leaf slot(s)"
+        );
 
         let (_, old_tree, new_tree, merkle_paths) =
             self.gen_merkle_paths(tree, &txns, current_block)?;

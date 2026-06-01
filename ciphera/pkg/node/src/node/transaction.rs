@@ -145,14 +145,21 @@ impl NodeShared {
         )
     }
 
-    #[instrument(skip(self, txn))]
+    #[instrument(skip(self, txn), fields(flavour = txn.flavour(), kind = ?txn.kind()))]
     pub async fn receive_transaction(&self, txn: LeafProof) -> Result<()> {
-        info!("Received transaction");
+        info!(
+            hash = %format!("0x{}", txn.hash()),
+            "Received {} transaction from peer",
+            txn.flavour().to_uppercase()
+        );
 
         if let Err(err) = self.validate_transaction(&txn).await {
             error!(
+                flavour = txn.flavour(),
+                kind = ?txn.kind(),
                 ?err,
-                "Failed to validate transaction received from another node"
+                "Failed to validate {} transaction received from another node",
+                txn.flavour().to_uppercase()
             );
             return Ok(());
         }

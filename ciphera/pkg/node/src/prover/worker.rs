@@ -365,7 +365,18 @@ where
             continue;
         }
 
-        tracing::info!(?commit, "Proving commit");
+        // Highlight the leaf mix being proven (utxo vs escrow) at
+        // `info`; the full block payload stays at `debug`.
+        let (utxo_count, escrow_count) =
+            zk_primitives::count_flavours(&commit.content.state.txns);
+        tracing::info!(
+            height = ?commit.content.header.height,
+            txns = commit.content.state.txns.len(),
+            utxo = utxo_count,
+            escrow = escrow_count,
+            "Proving commit: {utxo_count} utxo + {escrow_count} escrow leaf proof(s)"
+        );
+        tracing::debug!(?commit, "Proving commit (full block)");
         tracing::info!(counter.proving_height = ?commit.content.header.height);
         let prover = Arc::clone(&prover);
 
