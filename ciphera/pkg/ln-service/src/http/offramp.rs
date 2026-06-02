@@ -2,7 +2,7 @@ use crate::db::quotes;
 use crate::domain::{Quote, QuoteStatus};
 use crate::http::error::ApiError;
 use crate::http::AppState;
-use crate::settlement::proof::htlc_note_for_service_claim;
+use crate::settlement::proof::offramp_htlc_note;
 use actix_web::web;
 use chrono::{Duration, Utc};
 use element::Element;
@@ -111,7 +111,7 @@ pub async fn create_offramp(
     // the user's address. The prover at settlement time witnesses the
     // claim branch using `service_secret_key` from
     // `SettlementContext` -- this must agree.
-    let note = htlc_note_for_service_claim(
+    let note = offramp_htlc_note(
         state.config.service_secret_key,
         user_address,
         &lock,
@@ -127,6 +127,25 @@ pub async fn create_offramp(
 
     let now = Utc::now();
     let expires_at = now + Duration::seconds(state.config.quote_ttl_seconds);
+
+    // The quote must expire strictly before the bolt11 invoice does.
+    // Otherwise we could accept escrow against a quote that outlives the
+    // invoice and then be left unable to pay it -- the user's funds
+    // would be locked behind a dead invoice. Reject up front.
+    let invoice_expiry = invoice
+        .expires_at()
+        .and_then(|d| {
+            chrono::DateTime::<Utc>::from_timestamp(d.as_secs() as i64, d.subsec_nanos())
+        })
+        .ok_or_else(|| ApiError::BadRequest("bolt11 expiry is out of range".into()))?;
+    if expires_at >= invoice_expiry {
+        return Err(ApiError::BadRequest(format!(
+            "quote expiry ({}) is not earlier than invoice expiry ({})",
+            expires_at.to_rfc3339(),
+            invoice_expiry.to_rfc3339()
+        )));
+    }
+
     let quote = Quote {
         payment_hash,
         status: QuoteStatus::EscrowRequested,

@@ -16,11 +16,11 @@ pub enum ElementStatus {
 /// need three calls: submit a transaction, look up an element commitment,
 /// and look up a transaction by hash.
 #[async_trait]
-pub trait RollupClient: Send + Sync {
+pub trait CipheraClient: Send + Sync {
     async fn submit_transaction(&self, proof: UtxoProof) -> eyre::Result<TransactionResponse>;
     /// Submit an `EscrowProof`. The current node `/v0/transaction`
     /// endpoint is `UtxoProof`-only; the default impl on
-    /// [`ReqwestRollupClient`] reports this as an error so the
+    /// [`ReqwestCipheraClient`] reports this as an error so the
     /// settlement worker can park the quote without losing the proof.
     /// Once the node mempool learns to discriminate between leaf-proof
     /// types and the prover wires `agg_escrow` into the `agg_agg`
@@ -38,12 +38,12 @@ pub trait RollupClient: Send + Sync {
 }
 
 #[derive(Debug, Clone)]
-pub struct ReqwestRollupClient {
+pub struct ReqwestCipheraClient {
     base_url: String,
     http: Client,
 }
 
-impl ReqwestRollupClient {
+impl ReqwestCipheraClient {
     pub fn new(base_url: impl Into<String>) -> Self {
         Self {
             base_url: base_url.into(),
@@ -53,7 +53,7 @@ impl ReqwestRollupClient {
 }
 
 #[async_trait]
-impl RollupClient for ReqwestRollupClient {
+impl CipheraClient for ReqwestCipheraClient {
     async fn submit_transaction(&self, proof: UtxoProof) -> eyre::Result<TransactionResponse> {
         let url = format!("{}/v0/transaction", self.base_url);
         // The wire `TransactionRequest::proof` is a `LeafProof` after

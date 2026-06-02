@@ -72,7 +72,7 @@ impl EscrowClaimProver for LocalEscrowClaimProver {
         // Reconstruct the HTLC escrow note exactly as it lives in the
         // rollup tree. The user (locker) bound the claim branch to the
         // service's pubkey and the refund branch to their own.
-        let escrow_note = htlc_note_for_service_claim(
+        let escrow_note = offramp_htlc_note(
             service_secret_key,
             quote.user_address,
             &lock,
@@ -145,7 +145,7 @@ impl EscrowClaimProver for LocalEscrowClaimProver {
 /// Exposed `pub` so the HTTP handler can hash an HTLC commitment for
 /// quote storage using the exact same binding the prover will later
 /// witness against.
-pub fn htlc_note_for_service_claim(
+pub fn offramp_htlc_note(
     service_secret_key: Element,
     user_address: Element,
     lock: &TimeLock,

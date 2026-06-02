@@ -1,29 +1,18 @@
 //! Lightning settlement surface.
 //!
-//! The actual phoenixd HTTP plumbing in [`Phoenixd`] mirrors the upstream
-//! `phoenixd-rs` SDK <https://github.com/evd0kim/phoenixd-rs> verbatim
-//! (same `Phoenixd::new`, `pay_bolt11_invoice`, `get_outgoing_invoice`,
-//! same response shapes). The struct is inlined here rather than pulled
-//! in as a crate dependency because the upstream's
-//! `tokio ^1.52.3 / async-trait ^0.1.89 / thiserror ^2.0.18` floor
-//! conflicts with this workspace's locked dep graph (see Cargo.toml).
-//! When the workspace dep graph clears, swap this module's
-//! `Phoenixd` for `phoenixd_rs::Phoenixd` -- the call sites in
-//! [`PhoenixdClient`] don't need to change.
-//!
+//! The phoenixd HTTP plumbing is provided by the upstream `phoenixd-rs`
+//! SDK <https://github.com/evd0kim/phoenixd-rs> ([`phoenixd_rs::Phoenixd`]).
 //! The local [`LightningClient`] trait + [`LightningPaymentStatus`] enum
-//! sit on top of `Phoenixd` and stay stable so `settlement/worker.rs`
-//! can keep mocking lightning behaviour in tests.
+//! sit on top of it and stay stable so `settlement/worker.rs` can keep
+//! mocking lightning behaviour in tests, and so the concrete error type
+//! is collapsed to `eyre::Report` at the settlement-worker boundary.
 //!
-//! Endpoints exercised:
+//! Endpoints exercised (via the SDK):
 //!   - `POST /payinvoice`
 //!   - `GET  /payments/outgoing/{payment_hash}`
 
 use async_trait::async_trait;
-use reqwest::{Client, StatusCode, Url};
-use serde::{Deserialize, Serialize};
-use std::str::FromStr;
-use thiserror::Error;
+use phoenixd_rs::{Error as PhoenixdError, Phoenixd};
 
 #[derive(Debug, Clone)]
 pub enum LightningPaymentStatus {
@@ -53,130 +42,6 @@ pub trait LightningClient: Send + Sync {
 pub struct PayResult {
     pub payment_hash: [u8; 32],
     pub preimage: Option<[u8; 32]>,
-}
-
-// ---------------------------------------------------------------------------
-// `phoenixd-rs` API surface, vendored verbatim (MIT). See module docs.
-// ---------------------------------------------------------------------------
-
-/// Mirror of upstream `phoenixd_rs::Error`.
-#[derive(Debug, Error)]
-pub enum PhoenixdError {
-    #[error("Not found")]
-    NotFound,
-    #[error("Invalid Url")]
-    InvalidUrl,
-    #[error(transparent)]
-    ReqwestError(#[from] reqwest::Error),
-    #[error(transparent)]
-    SerdeError(#[from] serde_json::Error),
-}
-
-/// Mirror of upstream `phoenixd_rs::Phoenixd`.
-#[derive(Debug, Clone)]
-pub struct Phoenixd {
-    api_password: String,
-    api_url: Url,
-    client: Client,
-}
-
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct PayInvoiceRequest {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    amount_sat: Option<u64>,
-    invoice: String,
-}
-
-/// Mirror of upstream `phoenixd_rs::PayInvoiceResponse`.
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PayInvoiceResponse {
-    pub recipient_amount_sat: u64,
-    pub routing_fee_sat: u64,
-    pub payment_hash: String,
-    pub payment_preimage: String,
-}
-
-/// Mirror of upstream `phoenixd_rs::GetOutgoingInvoiceResponse`.
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct GetOutgoingInvoiceResponse {
-    pub payment_hash: String,
-    pub preimage: String,
-    pub is_paid: bool,
-    pub sent: u64,
-    pub fees: u64,
-    pub invoice: Option<String>,
-    pub completed_at: Option<u64>,
-    pub created_at: u64,
-}
-
-impl Phoenixd {
-    /// `Phoenixd::new(api_password, api_url)`.
-    pub fn new(api_password: &str, api_url: &str) -> Result<Self, PhoenixdError> {
-        let client = reqwest::Client::builder()
-            .build()
-            .map_err(PhoenixdError::ReqwestError)?;
-        let api_url = Url::from_str(api_url).map_err(|_| PhoenixdError::InvalidUrl)?;
-        Ok(Self {
-            api_password: api_password.to_string(),
-            api_url,
-            client,
-        })
-    }
-
-    /// `Phoenixd::pay_bolt11_invoice(invoice, amount_sat)`.
-    pub async fn pay_bolt11_invoice(
-        &self,
-        invoice: &str,
-        amount_sat: Option<u64>,
-    ) -> Result<PayInvoiceResponse, PhoenixdError> {
-        let url = self
-            .api_url
-            .join("/payinvoice")
-            .map_err(|_| PhoenixdError::InvalidUrl)?;
-        let request = PayInvoiceRequest {
-            amount_sat,
-            invoice: invoice.to_string(),
-        };
-        let res = self
-            .client
-            .post(url)
-            .basic_auth("", Some(&self.api_password))
-            .form(&request)
-            .send()
-            .await?
-            .error_for_status()?
-            .json::<PayInvoiceResponse>()
-            .await?;
-        Ok(res)
-    }
-
-    /// `Phoenixd::get_outgoing_invoice(payment_hash)`.
-    pub async fn get_outgoing_invoice(
-        &self,
-        payment_hash: &str,
-    ) -> Result<GetOutgoingInvoiceResponse, PhoenixdError> {
-        let url = self
-            .api_url
-            .join(&format!("payments/outgoing/{payment_hash}"))
-            .map_err(|_| PhoenixdError::InvalidUrl)?;
-        let resp = self
-            .client
-            .get(url)
-            .basic_auth("", Some(&self.api_password))
-            .send()
-            .await?;
-        if resp.status() == StatusCode::NOT_FOUND {
-            return Err(PhoenixdError::NotFound);
-        }
-        let body = resp
-            .error_for_status()?
-            .json::<GetOutgoingInvoiceResponse>()
-            .await?;
-        Ok(body)
-    }
 }
 
 // ---------------------------------------------------------------------------

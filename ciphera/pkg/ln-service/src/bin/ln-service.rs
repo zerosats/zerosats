@@ -1,7 +1,7 @@
 use actix_cors::Cors;
 use actix_web::{App, HttpServer, web};
 use clap::Parser;
-use ln_service::clients::{MempoolClient, PhoenixdClient, ReqwestRollupClient};
+use ln_service::clients::{MempoolClient, PhoenixdClient, ReqwestCipheraClient};
 use ln_service::config::Config;
 use ln_service::db;
 use ln_service::http::{AppState, configure_routes};
@@ -32,7 +32,7 @@ async fn main() -> eyre::Result<()> {
     let pool = db::connect(&config.db_path).await?;
 
     let chain_tip = Arc::new(MempoolClient::new(config.mempool_url.clone()));
-    let rollup = Arc::new(ReqwestRollupClient::new(config.rollup_url.clone()));
+    let rollup = Arc::new(ReqwestCipheraClient::new(config.rollup_url.clone()));
     let lightning = Arc::new(PhoenixdClient::new(
         &config.phoenixd_api_password,
         &config.phoenixd_url,

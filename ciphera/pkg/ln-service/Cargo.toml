@@ -19,20 +19,7 @@ clap = { workspace = true }
 eyre = { workspace = true }
 hex = { workspace = true }
 lightning-invoice = { version = "0.34", features = ["std"] }
-# TODO: switch back to the published phoenixd-rs git dep once the
-# workspace can dep-resolve it. As of 2026-05-29 phoenixd-rs requires
-#   tokio   ^1.52.3
-#   async-trait ^0.1.89
-#   thiserror ^2.0.18
-#   reqwest ^0.13.3
-#   serde   ^1.0.228
-# and adding it as `{ git = "https://github.com/evd0kim/phoenixd-rs.git" }`
-# clashes with this workspace's locked tokio 1.46.1 / web3 0.19 fork chain
-# (compounded by a yanked `core2 0.4.0` blocking transitive resolution).
-# The trait + struct surface in `clients::phoenixd` already mirrors the
-# upstream `Phoenixd` API verbatim (`pay_bolt11_invoice`,
-# `get_outgoing_invoice`, identical response shapes), so flipping the
-# switch is a Cargo.toml + import rename when the resolver clears.
+phoenixd-rs = { workspace = true }
 reqwest = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

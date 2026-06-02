@@ -1,4 +1,4 @@
-use crate::clients::{ElementStatus, LightningClient, LightningPaymentStatus, RollupClient};
+use crate::clients::{CipheraClient, ElementStatus, LightningClient, LightningPaymentStatus};
 use crate::db::{DbPool, quotes};
 use crate::domain::{Quote, QuoteStatus};
 use crate::settlement::proof::EscrowClaimProver;
@@ -12,7 +12,7 @@ use tracing::{error, info, warn};
 #[derive(Clone)]
 pub struct SettlementContext {
     pub db: DbPool,
-    pub rollup: Arc<dyn RollupClient>,
+    pub rollup: Arc<dyn CipheraClient>,
     pub lightning: Arc<dyn LightningClient>,
     pub prover: Arc<dyn EscrowClaimProver>,
     /// EVM address claimed-value will be settled to (downstream burn,
