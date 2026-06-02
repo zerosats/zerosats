@@ -1,8 +1,9 @@
 # Node
 
-Primary client for Solid blockchain.
+Primary client for the Ciphera network.
 
-Before running node, deploy contracts in the `eth` directory and set rollup-contract-addr to the address of the deployed rollup contract.
+Before running a node, deploy the contracts in `../../citrea` and set
+`rollup-contract-addr` to the deployed rollup contract address.
 
 ### Single validators
 
@@ -106,9 +107,9 @@ podman run -v $(pwd)/ciphera/pkg:/app/pkg:z --rm -it --entrypoint bash ciphera-c
 ```
 
 ```bash
-cargo run --bin pay-cli connect --host 63.176.138.198 --port 8091
+cargo run --bin ciphera-cli connect --host 63.176.138.198 --port 8091
 ```
 
 ```bash
-/app/target/debug/pay-cli connect --host 63.176.138.198 --port 8091
+/app/target/debug/ciphera-cli connect --host 63.176.138.198 --port 8091
 ```

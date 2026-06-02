@@ -29,14 +29,9 @@ Core components:
 
 ## Design notes
 
-Detailed security and operational rationale for the rollup design lives in:
-
-- [`docs/rollup-v1-design-notes.md`](docs/rollup-v1-design-notes.md)
-- [`docs/mainnet-prep-plan.md`](docs/mainnet-prep-plan.md) — refactor plan
-- [`docs/mainnet-runbook.md`](docs/mainnet-runbook.md) — day-of operator runbook
-
-Keep inline contract comments concise; the design notes are the source
-of truth for invariants and tradeoffs.
+Detailed security and operational rationale for the rollup design lives
+in the inline comments in `contracts/rollup/RollupV1.sol`, the deployment
+scripts in `scripts/`, and the tests in `test/`.
 
 ## What `initialize()` does
 
@@ -118,7 +113,7 @@ Key test files in `test/`:
 
 ## Regenerating EVM verifier
 
-To regenerate the aggregate proof verifier binary, see [pkg/prover](/pkg/prover).
+To regenerate the aggregate proof verifier binary, see [pkg/prover](../pkg/prover).
 After regeneration, the canonical VK hash is written to
 `contracts/noir/agg_agg_vk_hash.json` and is read by `deploy.ts` — do
 not edit the hash by hand.
