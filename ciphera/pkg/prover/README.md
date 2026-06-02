@@ -1,6 +1,7 @@
 # Prover
 
-Prover is responsible for generating aggregation proofs and submitting them to Ethereum.
+Prover is responsible for generating aggregation proofs and submitting
+them to the Citrea rollup contract.
 
 ## Testing the prover
 
