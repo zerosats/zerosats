@@ -1,7 +1,7 @@
 ARG CITREA_BASE_IMAGE=satsbridge/ciphera:citrea
 FROM ${CITREA_BASE_IMAGE}
 
-ARG BB_VERSION=1.0.0-nightly.20250723
+ARG BB_VERSION=3.0.0-nightly.20251030-2
 
 ENV DEBIAN_FRONTEND=noninteractive
 
