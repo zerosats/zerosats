@@ -1,4 +1,4 @@
-use crate::db::onramps;
+use crate::db::{onramps, service_notes};
 use crate::domain::{Onramp, OnrampStatus};
 use crate::http::AppState;
 use crate::http::error::ApiError;
@@ -43,17 +43,35 @@ pub async fn create_onramp(
         )));
     }
 
-    let invoice = state
-        .lightning
-        .create_invoice(amount_sat, "ciphera onramp")
-        .await
-        .map_err(|e| ApiError::Internal(format!("invoice creation: {e}")))?;
-
     // sat -> wei (1 sat = 1e10 wei), the canonical note-value convention.
     let value_wei = u128::from(amount_sat)
         .checked_mul(10_000_000_000)
         .ok_or_else(|| ApiError::BadRequest("amount overflow converting sats to wei".into()))?;
     let amount = Element::from(value_wei);
+
+    // Liquidity precheck: don't hand out an invoice the worker can't fund.
+    // The funding Send spends a single service note, so we need one
+    // unspent note that covers the amount. This is best-effort (no
+    // reservation) -- the worker still guards against a concurrent spend
+    // -- but it stops the common "paid an invoice, deposit can't settle"
+    // failure where the service simply has no liquidity.
+    let need = u64::try_from(value_wei).map_err(|_| {
+        ApiError::Unavailable(format!("no service note can cover {value_wei} wei"))
+    })?;
+    let covering = service_notes::select_available(&state.db, state.default_note_kind, need)
+        .await
+        .map_err(|e| ApiError::Internal(format!("liquidity check: {e}")))?;
+    if covering.is_none() {
+        return Err(ApiError::Unavailable(format!(
+            "insufficient service liquidity: no unspent note covers {amount_sat} sat"
+        )));
+    }
+
+    let invoice = state
+        .lightning
+        .create_invoice(amount_sat, "ciphera onramp")
+        .await
+        .map_err(|e| ApiError::Internal(format!("invoice creation: {e}")))?;
 
     let now = Utc::now();
     let expires_at = now + Duration::seconds(state.config.quote_ttl_seconds);

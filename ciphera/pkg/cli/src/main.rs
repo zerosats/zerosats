@@ -202,15 +202,30 @@ enum Commands {
         #[arg(required = true, long, default_value = "alice-htlc.json")]
         note: String,
     },
-    /// Deposit via Lightning Network using an external onramp service
+    /// Deposit via Lightning using the Atomiq exchange trade protocol:
+    /// requests an onramp swap from the Atomiq service, prints the invoice
+    /// to pay, then mints the resulting note via the reveal-preimage flow.
+    AtomiqDepo {
+        /// Amount to deposit in satoshis
+        #[arg(required = true, short, long)]
+        amount_sat: u64,
+
+        /// Atomiq onramp service base URI
+        #[arg(long, default_value = "https://testnet.lx.dev")]
+        onramp_uri: String,
+    },
+    /// Deposit via Lightning through the ln-service onramp flow. Two
+    /// steps: (1) request a bolt11 invoice from the ln-service and pay it,
+    /// then (2) once the service funds the note on chain, redeem it into
+    /// this wallet using the preimage as the note's spend key.
     DepoLn {
         /// Amount to deposit in satoshis
         #[arg(required = true, short, long)]
         amount_sat: u64,
 
-        /// Onramp service base URI
-        #[arg(long, default_value = "https://testnet.lx.dev")]
-        onramp_uri: String,
+        /// ln-service base URI (serves GET /v0/onramp)
+        #[arg(long, default_value = "http://127.0.0.1:7080")]
+        ln_service_uri: String,
     },
     /// Withdraw via Lightning using the Atomiq exchange trade protocol:
     /// fetches a swap quote from the Atomiq offramp service and burns
@@ -733,7 +748,7 @@ async fn handle_import(name: &str, notefile: &str) -> Result<()> {
     }
 }
 
-async fn handle_depo_ln(
+async fn handle_atomiq_depo(
     name: &str,
     host: &str,
     chain: u64,
@@ -921,6 +936,163 @@ async fn handle_depo_ln(
             Err(e)
         }
     }
+}
+
+/// Reduce a 32-byte Lightning preimage to a single BN254 field element by
+/// taking its **low 16 bytes**. Must match the ln-service convention
+/// (`settlement::onramp::preimage_field`): a full 32-byte value can exceed
+/// the field modulus, so only the trailing 128 bits (big-endian low half)
+/// are used as the note's spend key.
+fn preimage_field(preimage: [u8; 32]) -> Element {
+    let mut buf = [0u8; 32];
+    buf[16..].copy_from_slice(&preimage[16..]);
+    Element::from_be_bytes(buf)
+}
+
+/// ln-service onramp deposit. Step 1 requests a bolt11 invoice for
+/// `amount_sat` and prints it to pay. Step 2 polls until the ln-service
+/// funds the preimage-locked note on chain, then redeems it into this
+/// wallet using `preimage_field(preimage)` as the spend key.
+async fn handle_depo_ln(
+    name: &str,
+    host: &str,
+    chain: u64,
+    amount_sat: u64,
+    ln_service_uri: &str,
+) -> Result<()> {
+    let http = reqwest::Client::new();
+
+    // Step 1 — GET /v0/onramp?amount_sat=N -> { payment_hash, bolt11 }.
+    let create_url = format!("{ln_service_uri}/v0/onramp?amount_sat={amount_sat}");
+    println!("\n⚡ Requesting onramp invoice from ln-service...");
+    let resp = http
+        .get(&create_url)
+        .send()
+        .await
+        .map_err(|e| color_eyre::eyre::eyre!("Failed to reach ln-service: {}", e))?;
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        return Err(color_eyre::eyre::eyre!("ln-service error {}: {}", status, body));
+    }
+    let data: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| color_eyre::eyre::eyre!("Failed to parse ln-service response: {}", e))?;
+
+    let payment_hash = data["payment_hash"]
+        .as_str()
+        .ok_or_else(|| color_eyre::eyre::eyre!("Missing 'payment_hash' in ln-service response"))?
+        .to_string();
+    let bolt11 = data["bolt11"]
+        .as_str()
+        .ok_or_else(|| color_eyre::eyre::eyre!("Missing 'bolt11' in ln-service response"))?
+        .to_string();
+
+    println!("\n⚡ Pay this Lightning invoice:");
+    println!("   {bolt11}");
+    println!("\n   Payment hash: {payment_hash}");
+    println!("\nWaiting for the ln-service to fund the deposit note...\n");
+
+    // Step 2 — poll /v0/onramp/{payment_hash} until the note is confirmed.
+    const MAX_POLL_ATTEMPTS: u32 = 150; // ~10 minutes at 4 s intervals
+    const POLL_INTERVAL_SECS: u64 = 4;
+
+    let status_url = format!("{ln_service_uri}/v0/onramp/{payment_hash}");
+    let mut attempts = 0u32;
+    let (preimage_hex, note_commitment_hex) = loop {
+        tokio::time::sleep(std::time::Duration::from_secs(POLL_INTERVAL_SECS)).await;
+
+        attempts += 1;
+        if attempts > MAX_POLL_ATTEMPTS {
+            return Err(color_eyre::eyre::eyre!(
+                "Timed out waiting for onramp note after {} attempts",
+                MAX_POLL_ATTEMPTS
+            ));
+        }
+
+        let resp = http
+            .get(&status_url)
+            .send()
+            .await
+            .map_err(|e| color_eyre::eyre::eyre!("Poll error: {}", e))?;
+        if !resp.status().is_success() {
+            let body = resp.text().await.unwrap_or_default();
+            return Err(color_eyre::eyre::eyre!("Onramp status check failed: {}", body));
+        }
+        let s: serde_json::Value = resp
+            .json()
+            .await
+            .map_err(|e| color_eyre::eyre::eyre!("Failed to parse onramp status: {}", e))?;
+
+        let status = s["status"].as_str().unwrap_or("");
+        println!("State: {status}");
+        match status {
+            "NoteConfirmed" => {
+                let preimage = s["preimage"].as_str().ok_or_else(|| {
+                    color_eyre::eyre::eyre!("note confirmed but 'preimage' missing")
+                })?;
+                let note_commitment = s["note_commitment"].as_str().map(str::to_string);
+                break (preimage.to_string(), note_commitment);
+            }
+            "Expired" | "Failed" => {
+                return Err(color_eyre::eyre::eyre!(
+                    "Onramp reached terminal state {status}"
+                ));
+            }
+            _ => {} // InvoicePending / Paid / NoteSubmitted -- keep polling.
+        }
+    };
+
+    // Step 3 — reconstruct the preimage-locked note and redeem it. The
+    // ln-service built a standard Poseidon-key note whose key is the
+    // preimage's low-half field element, so we can spend it once we know
+    // the preimage (revealed by the status endpoint after payment).
+    let preimage = parse_preimage_hex(&preimage_hex)?;
+    let unlock_key = preimage_field(preimage);
+    let amount_wei = units::sats_to_wei(amount_sat);
+    let (utxo_kind, note_kind) =
+        cli::address::citrea_token_data(cli::address::network_for_chain(chain), "WCBTC");
+
+    let note = Note {
+        utxo_kind,
+        note_kind,
+        address: get_address_for_private_key(unlock_key),
+        psi: hash_merge([unlock_key, unlock_key]),
+        value: Element::new(amount_wei),
+    };
+
+    // Sanity check against the commitment the service reported -- catches a
+    // note_kind / amount / preimage-convention mismatch before we persist a
+    // note we can't actually spend.
+    if let Some(nc) = note_commitment_hex {
+        let expected = Element::from_str(&nc)
+            .map_err(|e| color_eyre::eyre::eyre!("invalid note_commitment from service: {e}"))?;
+        if note.commitment() != expected {
+            return Err(color_eyre::eyre::eyre!(
+                "reconstructed note commitment {} != service commitment {}; \
+                 note_kind/amount/preimage convention disagree",
+                note.commitment(),
+                expected
+            ));
+        }
+    }
+
+    let input_note = InputNote::new(note.clone(), unlock_key);
+
+    let mut client = NodeClient::builder()
+        .name(name)
+        .host(host)
+        .build(chain, false)?;
+    let (prepared_wallet, ()) = client.get_wallet().prepare_add_to_avail(input_note)?;
+    prepared_wallet.save()?;
+    client.replace_wallet(prepared_wallet);
+
+    println!("\n✅ Deposit note redeemed into wallet.");
+    println!("   note value: {} sats", units::wei_to_sats(amount_wei));
+    let b = client.get_wallet().balance;
+    println!("\nBalance {} sats WCBTC", units::wei_to_sats(b));
+    Ok(())
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1782,16 +1954,29 @@ async fn main() -> Result<()> {
             handle_release_slow_burn(&geth_rpc, cli.chain, &cli.rollup, &secret, &key, blocks)
                 .await?;
         }
-        Commands::DepoLn {
+        Commands::AtomiqDepo {
             amount_sat,
             onramp_uri,
+        } => {
+            handle_atomiq_depo(
+                &cli.name,
+                &cli.host,
+                cli.chain,
+                amount_sat,
+                &onramp_uri,
+            )
+            .await?;
+        }
+        Commands::DepoLn {
+            amount_sat,
+            ln_service_uri,
         } => {
             handle_depo_ln(
                 &cli.name,
                 &cli.host,
                 cli.chain,
                 amount_sat,
-                &onramp_uri,
+                &ln_service_uri,
             )
             .await?;
         }

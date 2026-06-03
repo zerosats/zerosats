@@ -41,24 +41,30 @@ async fn main() -> eyre::Result<()> {
     )?);
     let prover = Arc::new(LocalEscrowClaimProver);
 
-    let settlement_ctx = SettlementContext {
-        db: pool.clone(),
-        ciphera: ciphera.clone(),
-        lightning: lightning.clone(),
-        prover,
-        service_evm_address: config.service_evm_address,
-        service_secret_key: config.service_secret_key,
-        tick: Duration::from_millis(config.worker_tick_ms),
-    };
-    tokio::spawn(run_supervisor(settlement_ctx));
+    if config.offramp {
+        let settlement_ctx = SettlementContext {
+            db: pool.clone(),
+            ciphera: ciphera.clone(),
+            lightning: lightning.clone(),
+            prover,
+            service_evm_address: config.service_evm_address,
+            service_secret_key: config.service_secret_key,
+            tick: Duration::from_millis(config.worker_tick_ms),
+        };
+        tokio::spawn(run_supervisor(settlement_ctx));
+        tracing::info!("offramp enabled");
+    }
 
-    let onramp_ctx = OnrampContext {
-        db: pool.clone(),
-        ciphera: ciphera.clone(),
-        lightning: lightning.clone(),
-        tick: Duration::from_millis(config.worker_tick_ms),
-    };
-    tokio::spawn(run_onramp_supervisor(onramp_ctx));
+    if config.onramp {
+        let onramp_ctx = OnrampContext {
+            db: pool.clone(),
+            ciphera: ciphera.clone(),
+            lightning: lightning.clone(),
+            tick: Duration::from_millis(config.worker_tick_ms),
+        };
+        tokio::spawn(run_onramp_supervisor(onramp_ctx));
+        tracing::info!("onramp enabled");
+    }
 
     let bind = config.bind.clone();
     let app_state = AppState {

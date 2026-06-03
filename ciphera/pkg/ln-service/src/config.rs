@@ -53,6 +53,16 @@ pub struct Config {
     #[arg(long, env = "DB_PATH", default_value = "offramp.sqlite")]
     pub db_path: String,
 
+    /// Enable the offramp endpoints (`/v0/offramp*`) and its settlement
+    /// worker. Pass `--offramp false` to run an onramp-only gateway.
+    #[arg(long, env = "OFFRAMP", action = clap::ArgAction::Set, default_value_t = true)]
+    pub offramp: bool,
+
+    /// Enable the onramp endpoints (`/v0/onramp*`) and its settlement
+    /// worker. Pass `--onramp false` to run an offramp-only gateway.
+    #[arg(long, env = "ONRAMP", action = clap::ArgAction::Set, default_value_t = true)]
+    pub onramp: bool,
+
     /// Base-layer Citrea chain id, matching the node binary's `--chain-id`
     /// / `CIPHERA_BASE_CHAIN_ID` (testnet 5115, mainnet 4114). When set,
     /// the default WCBTC note kind is derived from it. Takes precedence
@@ -157,6 +167,8 @@ mod tests {
             phoenixd_api_password: "x".into(),
             mempool_url: "x".into(),
             db_path: "x".into(),
+            offramp: true,
+            onramp: true,
             chain_id,
             citrea_network: net,
             ciphera_btc_note_kind: explicit,

@@ -9,6 +9,8 @@ pub enum ApiError {
     NotFound,
     #[error("conflict: {0}")]
     Conflict(String),
+    #[error("unavailable: {0}")]
+    Unavailable(String),
     #[error("internal: {0}")]
     Internal(String),
     #[error("Invalid payment hash format")]
@@ -28,6 +30,7 @@ impl ResponseError for ApiError {
             Self::BadRequest(_) => StatusCode::BAD_REQUEST,
             Self::NotFound => StatusCode::NOT_FOUND,
             Self::Conflict(_) => StatusCode::CONFLICT,
+            Self::Unavailable(_) => StatusCode::SERVICE_UNAVAILABLE,
             Self::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
@@ -38,6 +41,7 @@ impl ResponseError for ApiError {
             Self::BadRequest(_) => "bad_request",
             Self::NotFound => "not_found",
             Self::Conflict(_) => "conflict",
+            Self::Unavailable(_) => "unavailable",
             Self::Internal(_) => "internal",
         };
         HttpResponse::build(self.status_code()).json(ErrorBody {

@@ -10,10 +10,28 @@ use ln_service::clients::{
 };
 use ln_service::config::Config;
 use ln_service::db;
+use ln_service::domain::ServiceNote;
 use ln_service::http::{AppState, configure_routes};
 use serde_json::Value;
 use std::sync::Arc;
 use tempfile::tempdir;
+
+/// Seed an unspent service note of the default kind so the onramp
+/// liquidity precheck passes.
+async fn seed_service_note(state: &AppState, value: u64) {
+    let now = chrono::Utc::now();
+    let note = ServiceNote {
+        commitment: Element::new(0xdeadbeef),
+        note_secret: Element::new(0x1111),
+        note_kind: test_note_kind(),
+        value,
+        spent: false,
+        source_payment_hash: None,
+        created_at: now,
+        updated_at: now,
+    };
+    db::service_notes::insert(&state.db, &note).await.unwrap();
+}
 
 const CANNED_PAYMENT_HASH: [u8; 32] = [0xab; 32];
 const CANNED_BOLT11: &str = "lnbcrt10u1pcannedinvoiceplaceholder";
@@ -90,6 +108,8 @@ async fn get_onramp_issues_invoice_and_persists() {
     let tmp = tempdir().unwrap();
     let db_path = tmp.path().join("onramp.sqlite");
     let state = make_app_state(&db_path).await;
+    // 1000 sat = 1e13 wei; seed a note that comfortably covers it.
+    seed_service_note(&state, 1_000_000_000_000_000).await;
     let app = test::init_service(
         App::new().service(web::scope("").configure(configure_routes(state))),
     )
@@ -121,6 +141,26 @@ async fn get_onramp_issues_invoice_and_persists() {
     // Unpaid: no preimage or note yet.
     assert!(body["preimage"].is_null());
     assert!(body["note_commitment"].is_null());
+}
+
+#[actix_web::test]
+async fn get_onramp_rejects_when_no_liquidity() {
+    let tmp = tempdir().unwrap();
+    let db_path = tmp.path().join("onramp.sqlite");
+    let state = make_app_state(&db_path).await; // no service notes seeded
+    let app = test::init_service(
+        App::new().service(web::scope("").configure(configure_routes(state))),
+    )
+    .await;
+
+    let req = test::TestRequest::get()
+        .uri("/v0/onramp?amount_sat=1000")
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert_eq!(
+        resp.status(),
+        actix_web::http::StatusCode::SERVICE_UNAVAILABLE
+    );
 }
 
 #[actix_web::test]
