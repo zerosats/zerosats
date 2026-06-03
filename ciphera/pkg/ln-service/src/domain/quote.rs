@@ -7,10 +7,10 @@ use serde::{Deserialize, Serialize};
 /// The state machine flows top to bottom:
 ///   `EscrowRequested` (user asked for a quote; HTLC commitment computed,
 ///       awaiting on-chain funding)
-///   → `EscrowDetected` (note commitment seen in a rollup tx)
+///   → `EscrowDetected` (note commitment seen in a ciphera tx)
 ///   → `LightningPaying`
 ///   → `LightningPaid` (preimage stored; ready to redeem)
-///   → `ClaimSubmitted` (escrow-claim proof sent to rollup)
+///   → `ClaimSubmitted` (escrow-claim proof sent to ciphera)
 ///   → `ClaimConfirmed` (terminal success)
 ///
 /// Failure exits: `Refundable` (Lightning hard-failed; user can refund via
@@ -85,8 +85,10 @@ pub struct Quote {
     pub preimage: Option<[u8; 32]>,
     pub note_commitment: Element,
     pub note_kind: Element,
-    /// Random 32-byte secret bound into the HTLC's `psi` derivation.
-    /// Re-used by the worker to reconstruct the note at proof time.
+    /// Random 32-byte secret, unique per quote. Keys the service-owned
+    /// output note minted by the claim proof (`address`/`psi` derive from
+    /// it), so equal-amount claims don't collide on the same output
+    /// commitment, and the service can later spend/burn that note.
     pub note_secret: Element,
     pub amount: Element,
     /// User-provided Ciphera address (= `get_address_for_private_key(user_sk)`).

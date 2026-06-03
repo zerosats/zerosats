@@ -1,4 +1,6 @@
-use crate::clients::{CipheraClient, ElementStatus, LightningClient, LightningPaymentStatus};
+use crate::clients::{
+    CipheraClient, ElementStatus, LightningClient, LightningPaymentStatus, SubmitError,
+};
 use crate::db::{DbPool, quotes};
 use crate::domain::{Quote, QuoteStatus};
 use crate::settlement::proof::EscrowClaimProver;
@@ -12,7 +14,7 @@ use tracing::{error, info, warn};
 #[derive(Clone)]
 pub struct SettlementContext {
     pub db: DbPool,
-    pub rollup: Arc<dyn CipheraClient>,
+    pub ciphera: Arc<dyn CipheraClient>,
     pub lightning: Arc<dyn LightningClient>,
     pub prover: Arc<dyn EscrowClaimProver>,
     /// EVM address claimed-value will be settled to (downstream burn,
@@ -68,9 +70,9 @@ async fn step_detect_escrow(ctx: &SettlementContext, q: &Quote) -> eyre::Result<
         return Ok(());
     }
 
-    match ctx.rollup.element_status(q.note_commitment).await? {
+    match ctx.ciphera.element_status(q.note_commitment).await? {
         ElementStatus::Unspent { height, .. } => {
-            info!(payment_hash = %hex::encode(q.payment_hash), height, "escrow detected on rollup");
+            info!(payment_hash = %hex::encode(q.payment_hash), height, "escrow detected on ciphera");
             quotes::update_status(&ctx.db, q.payment_hash, QuoteStatus::EscrowDetected).await?;
         }
         ElementStatus::NotFound => {}
@@ -125,42 +127,50 @@ async fn step_submit_claim(ctx: &SettlementContext, q: &Quote) -> eyre::Result<(
         .preimage
         .ok_or_else(|| eyre::eyre!("LightningPaid without preimage"))?;
 
-    // New stage shape post-Escrow split:
+    // Stage shape post-Escrow split:
     //   1. Build + locally verify the HTLC claim proof (Escrow circuit).
-    //   2. Submit it on chain.
-    // The current node mempool endpoint (`/v0/transaction`) accepts
-    // UtxoProof only; submitting EscrowProof needs a node-side
-    // extension (and prover-side AggEscrow batching). Until then, the
-    // worker generates + verifies the proof locally and parks the
-    // quote in `ClaimSubmitted` with a sentinel txn_hash so the
-    // state machine still drains -- the actual on-chain burn is the
-    // operator's responsibility for now.
+    //   2. Submit it to the node's `/v0/transaction` endpoint as a
+    //      `LeafProof::Escrow`. The node now accepts the tagged escrow
+    //      variant and routes it through the `agg_escrow` aggregator
+    //      bucket, so this is a real submission, not a stub.
     info!(payment_hash = %hex::encode(q.payment_hash), "generating Escrow claim proof");
     let proof = ctx
         .prover
         .build_and_prove(q, preimage, ctx.service_secret_key)
         .await?;
 
-    info!(payment_hash = %hex::encode(q.payment_hash), "submitting Escrow claim proof to rollup");
-    match ctx.rollup.submit_escrow_transaction(proof).await {
+    info!(payment_hash = %hex::encode(q.payment_hash), "submitting Escrow claim proof to ciphera");
+    match ctx.ciphera.submit_escrow_transaction(proof).await {
         Ok(resp) => {
             quotes::record_claim_submitted(&ctx.db, q.payment_hash, resp.txn_hash).await?;
+            Ok(())
         }
         Err(e) => {
-            // Don't tip the quote into a failure state on the
-            // transient submission gap -- the proof itself is valid
-            // and stored, so retrying once node-side support lands
-            // will work without redoing the heavy proving step.
-            warn!(
-                payment_hash = %hex::encode(q.payment_hash),
-                error = ?e,
-                "submit_escrow_transaction not yet supported by node; \
-                 claim proof generated locally and will need manual or \
-                 future-automated forwarding to chain"
-            );
+            // Idempotency: `output-commitments-exists` means this claim's
+            // output note is already in the tree. Each claim's output is
+            // keyed by the unique per-quote `note_secret`, so the only
+            // thing that could have minted it is this quote's own earlier
+            // submission -- i.e. the claim already landed. Treat it as
+            // confirmed instead of retrying forever.
+            if let Some(SubmitError::OutputCommitmentsExist(_)) =
+                e.downcast_ref::<SubmitError>()
+            {
+                info!(
+                    payment_hash = %hex::encode(q.payment_hash),
+                    "claim output already on chain; marking confirmed"
+                );
+                quotes::update_status(&ctx.db, q.payment_hash, QuoteStatus::ClaimConfirmed)
+                    .await?;
+                return Ok(());
+            }
+            // Surface the *actual* node error rather than assuming a
+            // missing-feature gap. `tick_once` records it on the quote
+            // and retries next round; the locally-generated proof is
+            // deterministic, so a retry after a transient node error
+            // re-proves but stays correct.
+            Err(e.wrap_err("submit_escrow_transaction to node failed"))
         }
     }
-    Ok(())
 }
 
 async fn step_confirm_claim(ctx: &SettlementContext, q: &Quote) -> eyre::Result<()> {
@@ -168,8 +178,8 @@ async fn step_confirm_claim(ctx: &SettlementContext, q: &Quote) -> eyre::Result<
         Some(h) => h,
         None => return Ok(()),
     };
-    if ctx.rollup.transaction_height(txn_hash).await?.is_some() {
-        info!(payment_hash = %hex::encode(q.payment_hash), "claim proof confirmed on rollup");
+    if ctx.ciphera.transaction_height(txn_hash).await?.is_some() {
+        info!(payment_hash = %hex::encode(q.payment_hash), "claim proof confirmed on ciphera");
         // Previously stamped `LightningPaid` here, which would have
         // looped the state machine back into the claim-submit step
         // forever. `ClaimConfirmed` is the canonical terminal.

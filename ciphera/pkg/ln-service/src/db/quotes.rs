@@ -160,7 +160,7 @@ pub async fn record_payment_succeeded(
     Ok(())
 }
 
-/// Stamp the rollup tx hash returned by `submit_escrow_transaction` and
+/// Stamp the ciphera tx hash returned by `submit_escrow_transaction` and
 /// transition to `ClaimSubmitted`. Previous WHERE clause referenced
 /// `quote_id`, which doesn't exist in the schema -- updates silently
 /// no-op'd on every row.

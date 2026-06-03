@@ -11,8 +11,8 @@
 //!
 //! Address binding (see `noir/common/src/lib.nr::check_spend_conditions`,
 //! `spend_type == 3`):
-//!   * claim branch: `note.address == Poseidon([service_key_hash, low, high])`
-//!     where `(low, high) = field_pair(SHA256(preimage))` and
+//!   * claim branch: `note.address == Poseidon([service_key_hash, high, low])`
+//!     where `(high, low) = field_pair(SHA256(preimage))` and
 //!     `service_key_hash = Poseidon([service_secret_key, 0])`.
 //!   * refund branch: `note.psi == Poseidon([user_key_hash, lock.commitment()])`
 //!     where `user_key_hash = Poseidon([user_secret_key, 0])`.
@@ -24,7 +24,7 @@
 
 use crate::domain::Quote;
 use async_trait::async_trait;
-use barretenberg::Prove;
+use barretenberg::{Prove, Verify};
 use element::Element;
 use hash::hash_merge;
 use sha2::{Digest, Sha256};
@@ -70,7 +70,7 @@ impl EscrowClaimProver for LocalEscrowClaimProver {
         };
 
         // Reconstruct the HTLC escrow note exactly as it lives in the
-        // rollup tree. The user (locker) bound the claim branch to the
+        // ciphera tree. The user (locker) bound the claim branch to the
         // service's pubkey and the refund branch to their own.
         let escrow_note = offramp_htlc_note(
             service_secret_key,
@@ -112,7 +112,16 @@ impl EscrowClaimProver for LocalEscrowClaimProver {
         // the escrow circuit's `is_multiple_kinds` guard requires
         // consistent `note_kind` across inputs/outputs, the output
         // mirrors `quote.note_kind`.
-        let service_note = service_owned_note(service_secret_key, quote.note_kind, quote.amount);
+        //
+        // Key the output note off the per-quote `note_secret`, not the
+        // shared `service_secret_key`. The latter is deterministic, so
+        // two claims of the same amount/kind would mint the *same* output
+        // commitment and the node rejects the second with
+        // `output-commitments-exists` (409). `note_secret` is random per
+        // quote (and persisted), so each output is unique -- mirroring the
+        // CLI's fresh-key `receive_note` -- while staying service-spendable
+        // for the future burn.
+        let service_note = service_owned_note(quote.note_secret, quote.note_kind, quote.amount);
 
         let escrow = Escrow {
             kind: UtxoKind::Send,
@@ -125,12 +134,21 @@ impl EscrowClaimProver for LocalEscrowClaimProver {
         // the async settlement worker does not block. The raw barretenberg
         // error is `Box<dyn StdError>` which is !Send, so stringify it
         // before crossing the thread boundary.
+        //
+        // Verify locally before returning, mirroring the CLI's
+        // redeem/refund path (`snark.verify()`). This catches a
+        // witness-level bug -- wrong preimage, `service_secret_key`
+        // mismatch, stale commitment -- here, with a clear error, instead
+        // of shipping an invalid proof that the node rejects and that
+        // then looks like a node/transport fault.
         let proof = tokio::task::spawn_blocking(move || {
-            escrow.prove().map_err(|e| format!("{e:?}"))
+            let proof = escrow.prove().map_err(|e| format!("prove: {e:?}"))?;
+            proof.verify().map_err(|e| format!("verify: {e:?}"))?;
+            Ok::<_, String>(proof)
         })
         .await
         .map_err(|e| eyre::eyre!("prove task panicked: {e}"))?
-        .map_err(|e| eyre::eyre!("escrow.prove failed: {e}"))?;
+        .map_err(|e| eyre::eyre!("escrow claim proof failed: {e}"))?;
 
         Ok(proof)
     }
@@ -179,17 +197,20 @@ pub fn payment_hash_bytes(preimage: [u8; 32]) -> [u8; 32] {
 
 /// Build the service-owned output note that receives the claimed value.
 /// Uses the standard Poseidon-key derivation:
-///   * `address = Poseidon([service_secret_key, 0])`
-///   * `psi     = Poseidon([service_secret_key, service_secret_key])`
-/// so the resulting note is spendable by anything that owns
-/// `service_secret_key` via the `utxo` circuit's `spend_type == 0`
-/// branch (i.e. a follow-up burn).
-fn service_owned_note(service_secret_key: Element, note_kind: Element, amount: Element) -> Note {
+///   * `address = Poseidon([note_key, 0])`
+///   * `psi     = Poseidon([note_key, note_key])`
+/// so the resulting note is spendable by whoever owns `note_key` via the
+/// `utxo` circuit's `spend_type == 0` branch (i.e. a follow-up burn).
+///
+/// `note_key` is the per-quote `note_secret`, not the shared service key:
+/// a fixed key over a fixed amount/kind yields a colliding output
+/// commitment, which the node rejects as `output-commitments-exists`.
+fn service_owned_note(note_key: Element, note_kind: Element, amount: Element) -> Note {
     Note {
         utxo_kind: Element::new(2),
         note_kind,
-        address: get_address_for_private_key(service_secret_key),
-        psi: hash_merge([service_secret_key, service_secret_key]),
+        address: get_address_for_private_key(note_key),
+        psi: hash_merge([note_key, note_key]),
         value: amount,
     }
 }

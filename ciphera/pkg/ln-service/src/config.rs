@@ -33,8 +33,8 @@ pub struct Config {
     #[arg(long, env = "BIND", default_value = "127.0.0.1:7080")]
     pub bind: String,
 
-    /// External rollup node base URL (must serve /v0/transaction, /v0/elements, /v0/transactions).
-    #[arg(long, env = "ROLLUP_URL", default_value = "http://localhost:8080")]
+    /// External Ciphera node base URL (must serve /v0/transaction, /v0/elements, /v0/transactions).
+    #[arg(long, env = "CIPHERA_URL", default_value = "http://localhost:8080")]
     pub ciphera_url: String,
 
     /// phoenixd HTTP API base URL.
@@ -52,6 +52,14 @@ pub struct Config {
     /// sqlite database file path.
     #[arg(long, env = "DB_PATH", default_value = "offramp.sqlite")]
     pub db_path: String,
+
+    /// Base-layer Citrea chain id, matching the node binary's `--chain-id`
+    /// / `CIPHERA_BASE_CHAIN_ID` (testnet 5115, mainnet 4114). When set,
+    /// the default WCBTC note kind is derived from it. Takes precedence
+    /// over `--citrea-network`; an explicit `--ciphera-btc-note-kind`
+    /// still wins over both.
+    #[arg(long, env = "CIPHERA_BASE_CHAIN_ID")]
+    pub chain_id: Option<u64>,
 
     /// Citrea network the service is bound to. Used to derive the default
     /// WCBTC note kind when `--ciphera-btc-note-kind` is not provided.
@@ -106,16 +114,27 @@ fn parse_element(s: &str) -> Result<Element, String> {
 
 impl Config {
     /// Resolve the WCBTC note kind the service should hand out by default.
-    /// Prefers the explicit `--ciphera-btc-note-kind`; otherwise derives it
-    /// from `--citrea-network`. Returns an error if neither is configured.
+    /// Resolution order: explicit `--ciphera-btc-note-kind`, then
+    /// `--chain-id` (mapped via `CitreaNetwork::try_from_chain_id`), then
+    /// `--citrea-network`. Returns an error if none is configured, or if a
+    /// `--chain-id` is given that isn't a known Citrea chain.
     pub fn resolved_default_note_kind(&self) -> Result<Element, String> {
         if let Some(explicit) = self.ciphera_btc_note_kind {
             return Ok(explicit);
         }
+        if let Some(chain_id) = self.chain_id {
+            let net = CitreaNetwork::try_from_chain_id(chain_id).ok_or_else(|| {
+                format!(
+                    "unsupported --chain-id {chain_id}; expected a known Citrea chain \
+                     (testnet 5115 / mainnet 4114)"
+                )
+            })?;
+            return Ok(citrea_wcbtc_note_kind(net));
+        }
         match self.citrea_network {
             Some(net) => Ok(citrea_wcbtc_note_kind(net.into())),
             None => Err(
-                "either --ciphera-btc-note-kind or --citrea-network must be supplied"
+                "one of --ciphera-btc-note-kind, --chain-id or --citrea-network must be supplied"
                     .to_string(),
             ),
         }
@@ -127,6 +146,7 @@ mod tests {
     use super::*;
 
     fn skeleton(
+        chain_id: Option<u64>,
         net: Option<CitreaNetworkArg>,
         explicit: Option<Element>,
     ) -> Config {
@@ -137,6 +157,7 @@ mod tests {
             phoenixd_api_password: "x".into(),
             mempool_url: "x".into(),
             db_path: "x".into(),
+            chain_id,
             citrea_network: net,
             ciphera_btc_note_kind: explicit,
             service_evm_address: Element::ZERO,
@@ -150,27 +171,48 @@ mod tests {
 
     #[test]
     fn resolved_note_kind_prefers_explicit_override() {
-        let cfg = skeleton(Some(CitreaNetworkArg::Mainnet), Some(Element::new(42)));
+        let cfg = skeleton(Some(4114), Some(CitreaNetworkArg::Mainnet), Some(Element::new(42)));
         assert_eq!(cfg.resolved_default_note_kind().unwrap(), Element::new(42));
     }
 
     #[test]
+    fn resolved_note_kind_derives_from_chain_id() {
+        let cfg = skeleton(Some(5115), None, None);
+        let expected = citrea_wcbtc_note_kind(CitreaNetwork::Testnet);
+        assert_eq!(cfg.resolved_default_note_kind().unwrap(), expected);
+    }
+
+    #[test]
+    fn resolved_note_kind_chain_id_takes_precedence_over_network() {
+        // chain id maps to testnet even though the network arg says mainnet.
+        let cfg = skeleton(Some(5115), Some(CitreaNetworkArg::Mainnet), None);
+        let expected = citrea_wcbtc_note_kind(CitreaNetwork::Testnet);
+        assert_eq!(cfg.resolved_default_note_kind().unwrap(), expected);
+    }
+
+    #[test]
+    fn resolved_note_kind_errors_on_unknown_chain_id() {
+        let cfg = skeleton(Some(1), None, None);
+        assert!(cfg.resolved_default_note_kind().is_err());
+    }
+
+    #[test]
     fn resolved_note_kind_derives_from_testnet_network() {
-        let cfg = skeleton(Some(CitreaNetworkArg::Testnet), None);
+        let cfg = skeleton(None, Some(CitreaNetworkArg::Testnet), None);
         let expected = citrea_wcbtc_note_kind(CitreaNetwork::Testnet);
         assert_eq!(cfg.resolved_default_note_kind().unwrap(), expected);
     }
 
     #[test]
     fn resolved_note_kind_derives_from_mainnet_network() {
-        let cfg = skeleton(Some(CitreaNetworkArg::Mainnet), None);
+        let cfg = skeleton(None, Some(CitreaNetworkArg::Mainnet), None);
         let expected = citrea_wcbtc_note_kind(CitreaNetwork::Mainnet);
         assert_eq!(cfg.resolved_default_note_kind().unwrap(), expected);
     }
 
     #[test]
     fn resolved_note_kind_errors_when_neither_supplied() {
-        let cfg = skeleton(None, None);
+        let cfg = skeleton(None, None, None);
         assert!(cfg.resolved_default_note_kind().is_err());
     }
 }

@@ -1,4 +1,4 @@
-//! Offramp service: rollup notes -> Lightning, redeemed via SlowBurn.
+//! Offramp service: ciphera notes -> Lightning, redeemed via SlowBurn.
 //!
 //! See `/workspace/offramp-service-plan.md` for the historical design notes.
 
