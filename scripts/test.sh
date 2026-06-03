@@ -18,7 +18,11 @@ CITREA_DIR="$REPO_ROOT/.citrea/$CITREA_VERSION"
 CITREA_BASE_IMAGE="satsbridge/ciphera:citrea"
 DOCKER_IMAGE="satsbridge/ciphera:dev"
 BB_VERSION="${BB_VERSION:-3.0.0-nightly.20251030-2}"
-DOCKER_PLATFORM="${DOCKER_PLATFORM:-linux/amd64}"
+case "$(uname -m)" in
+    arm64|aarch64) DEFAULT_DOCKER_PLATFORM="linux/arm64" ;;
+    *)             DEFAULT_DOCKER_PLATFORM="linux/amd64" ;;
+esac
+DOCKER_PLATFORM="${DOCKER_PLATFORM:-$DEFAULT_DOCKER_PLATFORM}"
 
 # --- Parse args ---
 VERBOSE=0
