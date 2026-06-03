@@ -53,13 +53,6 @@ impl WireMessage for TxnFormat {
 }
 
 impl TxnFormat {
-    /// Borrow the inner txn metadata regardless of variant.
-    pub(crate) fn metadata(&self) -> &TxnMetadata {
-        match self {
-            Self::V1(_, m) | Self::V2(_, m) => m,
-        }
-    }
-
     /// Mutable borrow of the inner txn metadata regardless of variant.
     pub(crate) fn metadata_mut(&mut self) -> &mut TxnMetadata {
         match self {
