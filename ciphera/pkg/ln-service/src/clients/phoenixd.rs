@@ -9,10 +9,11 @@
 //!
 //! Endpoints exercised (via the SDK):
 //!   - `POST /payinvoice`
-//!   - `GET  /payments/outgoing/{payment_hash}`
+//!   - `GET  /payments/outgoingbyhash/{payment_hash}`
 
 use async_trait::async_trait;
 use phoenixd_rs::{Error as PhoenixdError, Phoenixd};
+use tracing::debug;
 
 #[derive(Debug, Clone)]
 pub enum LightningPaymentStatus {
@@ -104,9 +105,10 @@ impl LightningClient for PhoenixdClient {
     }
 
     async fn payment_status(&self, payment_hash_hex: &str) -> eyre::Result<LightningPaymentStatus> {
-        // phoenixd-rs maps HTTP 404 to `Error::NotFound`; treat that the
-        // same as "still routing, no payment record yet" so the
-        // settlement worker can keep polling without erroring.
+        // The SDK looks the payment up by hash
+        // (`/payments/outgoingbyhash/{hash}`) and maps a clean 404 to
+        // `Error::NotFound`. We know the payment hash from quote
+        // creation, so this is the right surface.
         match self.phoenixd.get_outgoing_invoice(payment_hash_hex).await {
             Ok(body) => {
                 if body.is_paid {
@@ -118,7 +120,22 @@ impl LightningClient for PhoenixdClient {
                     Ok(LightningPaymentStatus::Pending)
                 }
             }
+            // No outgoing record yet -- the pay call is still in flight or
+            // never landed. Keep polling.
             Err(PhoenixdError::NotFound) => Ok(LightningPaymentStatus::Pending),
+            // phoenixd can answer a not-found lookup with an empty body.
+            // The SDK's `make_get` decodes the body before inspecting the
+            // status, so that case surfaces as a reqwest decode error
+            // rather than `NotFound`. Treat it the same -- no record yet,
+            // keep polling -- instead of hard-failing every tick.
+            Err(PhoenixdError::ReqwestError(re)) if re.is_decode() => {
+                debug!(
+                    payment_hash = payment_hash_hex,
+                    "phoenixd returned an undecodable body for outgoing payment; \
+                     treating as no-record-yet and continuing to poll"
+                );
+                Ok(LightningPaymentStatus::Pending)
+            }
             Err(other) => Err(eyre::eyre!("phoenixd get_outgoing_invoice: {other:?}")),
         }
     }

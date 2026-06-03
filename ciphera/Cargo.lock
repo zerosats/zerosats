@@ -6026,7 +6026,7 @@ dependencies = [
 [[package]]
 name = "phoenixd-rs"
 version = "0.5.0"
-source = "git+https://github.com/evd0kim/phoenixd-rs.git?rev=4557d06373e5bdf8aeabb6df726ede92923d560f#4557d06373e5bdf8aeabb6df726ede92923d560f"
+source = "git+https://github.com/evd0kim/phoenixd-rs.git?rev=d3ca44c41cad3491afecbe2076633211a77ee219#d3ca44c41cad3491afecbe2076633211a77ee219"
 dependencies = [
  "anyhow",
  "async-trait",

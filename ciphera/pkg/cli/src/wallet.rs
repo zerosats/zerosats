@@ -532,6 +532,31 @@ impl Wallet {
         Ok((staged, utxo, escrow_note))
     }
 
+    /// Commit funds into a pre-built HTLC escrow note. Unlike
+    /// `escrow_lock`, the output note's commitment fields (address, psi,
+    /// value, note_kind, utxo_kind) are dictated by an external party
+    /// -- the ln-service `/v0/offramp` response -- which is the redeemer
+    /// and bound the claim branch to its own key and the bolt11 payment
+    /// hash. This wallet is only the locker: it spends inputs to
+    /// materialise the note, keeps no preimage, and persists no
+    /// `EscrowInputNote`. The ticker is derived from the note's
+    /// `note_kind` so input selection stays on the same asset.
+    fn escrow_lock_to_note(&mut self, htlc_note: Note) -> Result<Utxo, WalletError> {
+        let ticker = citrea_ticker_from_contract(htlc_note.note_kind);
+        let amount = self.get_note_amount(&htlc_note)?;
+        let (inputs, change) = self.select_input_notes(&ticker, amount)?;
+        Ok(Utxo::new_send(inputs, [htlc_note, change]))
+    }
+
+    pub fn prepare_escrow_lock_to_note(
+        &self,
+        htlc_note: Note,
+    ) -> Result<(Self, Utxo), WalletError> {
+        let mut staged = self.clone();
+        let utxo = staged.escrow_lock_to_note(htlc_note)?;
+        Ok((staged, utxo))
+    }
+
     fn escrow_redeem(
         &mut self,
         htlc_input_note: &EscrowInputNote,

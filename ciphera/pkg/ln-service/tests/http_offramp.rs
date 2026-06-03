@@ -52,7 +52,7 @@ fn test_note_kind() -> Element {
 fn make_config(db_path: &std::path::Path) -> Config {
     Config {
         bind: "127.0.0.1:0".into(),
-        rollup_url: "http://nope".into(),
+        ciphera_url: "http://nope".into(),
         phoenixd_url: "http://nope".into(),
         phoenixd_api_password: "x".into(),
         mempool_url: "http://nope".into(),

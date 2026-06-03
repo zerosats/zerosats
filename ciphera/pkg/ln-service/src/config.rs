@@ -35,7 +35,7 @@ pub struct Config {
 
     /// External rollup node base URL (must serve /v0/transaction, /v0/elements, /v0/transactions).
     #[arg(long, env = "ROLLUP_URL", default_value = "http://localhost:8080")]
-    pub rollup_url: String,
+    pub ciphera_url: String,
 
     /// phoenixd HTTP API base URL.
     #[arg(long, env = "PHOENIXD_URL", default_value = "http://localhost:9740")]
@@ -132,7 +132,7 @@ mod tests {
     ) -> Config {
         Config {
             bind: "x".into(),
-            rollup_url: "x".into(),
+            ciphera_url: "x".into(),
             phoenixd_url: "x".into(),
             phoenixd_api_password: "x".into(),
             mempool_url: "x".into(),
