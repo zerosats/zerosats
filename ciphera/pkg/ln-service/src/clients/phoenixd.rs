@@ -12,7 +12,7 @@
 //!   - `GET  /payments/outgoingbyhash/{payment_hash}`
 
 use async_trait::async_trait;
-use phoenixd_rs::{Error as PhoenixdError, Phoenixd};
+use phoenixd_rs::{Error as PhoenixdError, InvoiceRequest, Phoenixd};
 use tracing::debug;
 
 #[derive(Debug, Clone)]
@@ -37,12 +37,32 @@ pub trait LightningClient: Send + Sync {
     async fn pay_invoice(&self, bolt11: &str) -> eyre::Result<PayResult>;
 
     async fn payment_status(&self, payment_hash: &str) -> eyre::Result<LightningPaymentStatus>;
+
+    /// Issue a bolt11 invoice for `amount_sat`. phoenixd owns the
+    /// preimage; it is only revealed once the invoice is paid (see
+    /// [`LightningClient::incoming_preimage`]). Used by the onramp flow.
+    async fn create_invoice(
+        &self,
+        amount_sat: u64,
+        description: &str,
+    ) -> eyre::Result<CreatedInvoice>;
+
+    /// Return the preimage of a previously-issued *incoming* invoice once
+    /// it has been paid; `Ok(None)` while still unpaid / unknown. Lets the
+    /// onramp worker learn the preimage phoenixd generated.
+    async fn incoming_preimage(&self, payment_hash: &str) -> eyre::Result<Option<[u8; 32]>>;
 }
 
 #[derive(Debug, Clone)]
 pub struct PayResult {
     pub payment_hash: [u8; 32],
     pub preimage: Option<[u8; 32]>,
+}
+
+#[derive(Debug, Clone)]
+pub struct CreatedInvoice {
+    pub payment_hash: [u8; 32],
+    pub bolt11: String,
 }
 
 // ---------------------------------------------------------------------------
@@ -137,6 +157,41 @@ impl LightningClient for PhoenixdClient {
                 Ok(LightningPaymentStatus::Pending)
             }
             Err(other) => Err(eyre::eyre!("phoenixd get_outgoing_invoice: {other:?}")),
+        }
+    }
+
+    async fn create_invoice(
+        &self,
+        amount_sat: u64,
+        description: &str,
+    ) -> eyre::Result<CreatedInvoice> {
+        let req = InvoiceRequest::new(amount_sat, None, Some(description.to_string()), None, None)
+            .map_err(|e| eyre::eyre!("phoenixd InvoiceRequest: {e:?}"))?;
+        let resp = self
+            .phoenixd
+            .create_invoice(req)
+            .await
+            .map_err(|e| eyre::eyre!("phoenixd create_invoice: {e:?}"))?;
+        Ok(CreatedInvoice {
+            payment_hash: parse_bytearray(&resp.payment_hash)?,
+            bolt11: resp.serialized,
+        })
+    }
+
+    async fn incoming_preimage(&self, payment_hash_hex: &str) -> eyre::Result<Option<[u8; 32]>> {
+        // The SDK's incoming lookup returns `anyhow::Result` (unlike the
+        // outgoing one), so we can't match its error variants. Our invoice
+        // exists from creation onward, so the normal path is `Ok` with
+        // `is_paid` flipping true once settled; genuine errors propagate.
+        let body = self
+            .phoenixd
+            .get_incoming_invoice(payment_hash_hex)
+            .await
+            .map_err(|e| eyre::eyre!("phoenixd get_incoming_invoice: {e:?}"))?;
+        if body.is_paid {
+            Ok(Some(parse_bytearray(&body.preimage)?))
+        } else {
+            Ok(None)
         }
     }
 }

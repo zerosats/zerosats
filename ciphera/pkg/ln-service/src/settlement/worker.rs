@@ -1,9 +1,9 @@
 use crate::clients::{
     CipheraClient, ElementStatus, LightningClient, LightningPaymentStatus, SubmitError,
 };
-use crate::db::{DbPool, quotes};
-use crate::domain::{Quote, QuoteStatus};
-use crate::settlement::proof::EscrowClaimProver;
+use crate::db::{DbPool, quotes, service_notes};
+use crate::domain::{Quote, QuoteStatus, ServiceNote};
+use crate::settlement::proof::{EscrowClaimProver, service_owned_note};
 use chrono::Utc;
 use element::Element;
 use std::sync::Arc;
@@ -180,10 +180,42 @@ async fn step_confirm_claim(ctx: &SettlementContext, q: &Quote) -> eyre::Result<
     };
     if ctx.ciphera.transaction_height(txn_hash).await?.is_some() {
         info!(payment_hash = %hex::encode(q.payment_hash), "claim proof confirmed on ciphera");
+
+        // The claim minted a service-owned output note (keyed by
+        // `note_secret`). Now that it is on chain and spendable, record it
+        // in the service-note ledger so the onramp flow can spend it as
+        // withdrawal liquidity. Idempotent on commitment.
+        record_service_note(ctx, q).await?;
+
         // Previously stamped `LightningPaid` here, which would have
         // looped the state machine back into the claim-submit step
         // forever. `ClaimConfirmed` is the canonical terminal.
         quotes::update_status(&ctx.db, q.payment_hash, QuoteStatus::ClaimConfirmed).await?;
     }
+    Ok(())
+}
+
+/// Add the claim's service-owned output note to the ledger so onramps can
+/// spend it. Mirrors the note built in `EscrowClaimProver::build_and_prove`.
+async fn record_service_note(ctx: &SettlementContext, q: &Quote) -> eyre::Result<()> {
+    let note = service_owned_note(q.note_secret, q.note_kind, q.amount);
+    let limbs = q.amount.to_u64_array();
+    if limbs[1] != 0 || limbs[2] != 0 || limbs[3] != 0 {
+        // Beyond u64 wei the ledger can't range-select it; skip rather
+        // than store a truncated value.
+        warn!(payment_hash = %hex::encode(q.payment_hash), "claim amount exceeds u64; not added to service ledger");
+        return Ok(());
+    }
+    let svc = ServiceNote {
+        commitment: note.commitment(),
+        note_secret: q.note_secret,
+        note_kind: q.note_kind,
+        value: limbs[0],
+        spent: false,
+        source_payment_hash: Some(q.payment_hash),
+        created_at: Utc::now(),
+        updated_at: Utc::now(),
+    };
+    service_notes::insert(&ctx.db, &svc).await?;
     Ok(())
 }

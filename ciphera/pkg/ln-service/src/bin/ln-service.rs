@@ -5,7 +5,9 @@ use ln_service::clients::{MempoolClient, PhoenixdClient, ReqwestCipheraClient};
 use ln_service::config::Config;
 use ln_service::db;
 use ln_service::http::{AppState, configure_routes};
-use ln_service::settlement::{SettlementContext, run_supervisor};
+use ln_service::settlement::{
+    OnrampContext, SettlementContext, run_onramp_supervisor, run_supervisor,
+};
 use ln_service::settlement::proof::LocalEscrowClaimProver;
 use std::sync::Arc;
 use std::time::Duration;
@@ -42,7 +44,7 @@ async fn main() -> eyre::Result<()> {
     let settlement_ctx = SettlementContext {
         db: pool.clone(),
         ciphera: ciphera.clone(),
-        lightning,
+        lightning: lightning.clone(),
         prover,
         service_evm_address: config.service_evm_address,
         service_secret_key: config.service_secret_key,
@@ -50,11 +52,20 @@ async fn main() -> eyre::Result<()> {
     };
     tokio::spawn(run_supervisor(settlement_ctx));
 
+    let onramp_ctx = OnrampContext {
+        db: pool.clone(),
+        ciphera: ciphera.clone(),
+        lightning: lightning.clone(),
+        tick: Duration::from_millis(config.worker_tick_ms),
+    };
+    tokio::spawn(run_onramp_supervisor(onramp_ctx));
+
     let bind = config.bind.clone();
     let app_state = AppState {
         config: config.clone(),
         db: pool,
         chain_tip,
+        lightning,
         default_note_kind,
     };
 

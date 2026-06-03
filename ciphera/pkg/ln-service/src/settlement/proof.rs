@@ -205,7 +205,11 @@ pub fn payment_hash_bytes(preimage: [u8; 32]) -> [u8; 32] {
 /// `note_key` is the per-quote `note_secret`, not the shared service key:
 /// a fixed key over a fixed amount/kind yields a colliding output
 /// commitment, which the node rejects as `output-commitments-exists`.
-fn service_owned_note(note_key: Element, note_kind: Element, amount: Element) -> Note {
+///
+/// `pub(crate)` so the onramp flow can mint matching change notes and the
+/// settlement worker can recompute a claim's output commitment for the
+/// service-note ledger.
+pub(crate) fn service_owned_note(note_key: Element, note_kind: Element, amount: Element) -> Note {
     Note {
         utxo_kind: Element::new(2),
         note_kind,

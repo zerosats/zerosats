@@ -10,7 +10,9 @@ use bitcoin::secp256k1::{Secp256k1, SecretKey};
 use element::Element;
 use lightning_invoice::{Currency, InvoiceBuilder};
 use lightning_types::payment::PaymentSecret;
-use ln_service::clients::ChainTipClient;
+use ln_service::clients::{
+    ChainTipClient, CreatedInvoice, LightningClient, LightningPaymentStatus, PayResult,
+};
 use ln_service::config::Config;
 use ln_service::db;
 use ln_service::http::{AppState, configure_routes};
@@ -24,6 +26,26 @@ struct FixedTip(pub [u8; 32]);
 impl ChainTipClient for FixedTip {
     async fn tip_hash(&self) -> eyre::Result<[u8; 32]> {
         Ok(self.0)
+    }
+}
+
+/// The offramp endpoints never touch Lightning, so this stub just
+/// satisfies the `AppState::lightning` field.
+struct StubLightning;
+
+#[async_trait]
+impl LightningClient for StubLightning {
+    async fn pay_invoice(&self, _bolt11: &str) -> eyre::Result<PayResult> {
+        eyre::bail!("stub")
+    }
+    async fn payment_status(&self, _hash: &str) -> eyre::Result<LightningPaymentStatus> {
+        eyre::bail!("stub")
+    }
+    async fn create_invoice(&self, _amount_sat: u64, _desc: &str) -> eyre::Result<CreatedInvoice> {
+        eyre::bail!("stub")
+    }
+    async fn incoming_preimage(&self, _hash: &str) -> eyre::Result<Option<[u8; 32]>> {
+        eyre::bail!("stub")
     }
 }
 
@@ -78,6 +100,7 @@ async fn post_offramp_persists_quote() {
         config: Arc::new(make_config(&db_path)),
         db: pool,
         chain_tip: Arc::new(FixedTip([0x7; 32])),
+        lightning: Arc::new(StubLightning),
         default_note_kind: test_note_kind(),
     };
     let app = test::init_service(
@@ -117,6 +140,7 @@ async fn cancel_pending_quote_transitions_to_cancelled() {
         config: Arc::new(make_config(&db_path)),
         db: pool,
         chain_tip: Arc::new(FixedTip([0x7; 32])),
+        lightning: Arc::new(StubLightning),
         default_note_kind: test_note_kind(),
     };
     let app = test::init_service(
@@ -152,6 +176,7 @@ async fn rejects_invalid_bolt11() {
         config: Arc::new(make_config(&db_path)),
         db: pool,
         chain_tip: Arc::new(FixedTip([0x7; 32])),
+        lightning: Arc::new(StubLightning),
         default_note_kind: test_note_kind(),
     };
     let app = test::init_service(

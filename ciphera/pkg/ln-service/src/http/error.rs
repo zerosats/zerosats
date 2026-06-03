@@ -63,3 +63,17 @@ impl From<crate::db::quotes::Error> for ApiError {
         }
     }
 }
+
+impl From<crate::db::onramps::Error> for ApiError {
+    fn from(e: crate::db::onramps::Error) -> Self {
+        use crate::db::onramps::Error as DbErr;
+        match e {
+            DbErr::NotFound => ApiError::NotFound,
+            DbErr::DuplicatePaymentHash => {
+                ApiError::Conflict("payment_hash already in use".into())
+            }
+            DbErr::Sqlx(e) => ApiError::Internal(format!("db error: {e}")),
+            DbErr::Row(e) => ApiError::Internal(format!("row decode: {e}")),
+        }
+    }
+}
