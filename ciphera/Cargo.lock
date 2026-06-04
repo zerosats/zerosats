@@ -1600,6 +1600,7 @@ version = "0.0.0"
 dependencies = [
  "barretenberg",
  "bs58 0.5.0",
+ "chrono",
  "clap",
  "color-eyre",
  "contracts",

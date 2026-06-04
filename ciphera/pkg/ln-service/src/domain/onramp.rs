@@ -3,39 +3,42 @@ use element::Element;
 
 /// Per-onramp state.
 ///
-/// Flow: the user requests an onramp; the service issues a phoenixd
-/// invoice and parks the row in `InvoicePending`. Once the invoice is
-/// paid, phoenixd reveals the preimage, which the worker stores
-/// (`Paid`). The worker then spends a service-owned note (collected from
-/// offramp claims) into a fresh UTXO locked by the preimage's low-half
-/// field element (`NoteSubmitted`), and finally confirms it on chain
-/// (`NoteConfirmed`).
+/// The service generates the preimage up front, so it can both lock the
+/// deposit note to it and reclaim it. Flow:
+///   * `InvoicePending` -> a bolt11 has been issued; the worker commits a
+///     preimage-locked note on chain, funded from the service balance.
+///   * `Committed` -> the note is on chain. While the invoice is unpaid the
+///     preimage stays secret. On payment -> `Settled` (preimage revealed,
+///     user redeems). Past the TTL with no payment -> the worker spends the
+///     note back (`Refunding`).
+///   * `Settled` (terminal) -> paid; preimage exposed via the status route.
+///   * `Refunding` -> refund Send submitted; `Refunded` (terminal) once it
+///     confirms and the liquidity is back in the service ledger.
 ///
-/// Failure exits: `Expired` (invoice never paid within the TTL) and
-/// `Failed` (unrecoverable).
+/// `Failed` is the unrecoverable terminal exit.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum OnrampStatus {
     InvoicePending,
-    Paid,
-    NoteSubmitted,
-    NoteConfirmed,
-    Expired,
+    Committed,
+    Settled,
+    Refunding,
+    Refunded,
     Failed,
 }
 
 impl OnrampStatus {
     /// Terminal states the onramp worker stops touching.
     pub fn is_terminal(self) -> bool {
-        matches!(self, Self::NoteConfirmed | Self::Expired | Self::Failed)
+        matches!(self, Self::Settled | Self::Refunded | Self::Failed)
     }
 
     pub fn as_str(self) -> &'static str {
         match self {
             Self::InvoicePending => "InvoicePending",
-            Self::Paid => "Paid",
-            Self::NoteSubmitted => "NoteSubmitted",
-            Self::NoteConfirmed => "NoteConfirmed",
-            Self::Expired => "Expired",
+            Self::Committed => "Committed",
+            Self::Settled => "Settled",
+            Self::Refunding => "Refunding",
+            Self::Refunded => "Refunded",
             Self::Failed => "Failed",
         }
     }
@@ -47,10 +50,10 @@ impl std::str::FromStr for OnrampStatus {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         Ok(match s {
             "InvoicePending" => Self::InvoicePending,
-            "Paid" => Self::Paid,
-            "NoteSubmitted" => Self::NoteSubmitted,
-            "NoteConfirmed" => Self::NoteConfirmed,
-            "Expired" => Self::Expired,
+            "Committed" => Self::Committed,
+            "Settled" => Self::Settled,
+            "Refunding" => Self::Refunding,
+            "Refunded" => Self::Refunded,
             "Failed" => Self::Failed,
             other => return Err(format!("unknown OnrampStatus {other:?}")),
         })
@@ -58,8 +61,8 @@ impl std::str::FromStr for OnrampStatus {
 }
 
 /// One onramp row, mirrors the `onramps` table. Keyed by `payment_hash`
-/// (the bolt11 invoice hash), which doubles as the `/onramp/{hash}` path
-/// parameter.
+/// (the bolt11 invoice hash), which doubles as the `/onramp/{payment_hash}`
+/// path parameter.
 #[derive(Debug, Clone)]
 pub struct Onramp {
     pub payment_hash: [u8; 32],
@@ -67,14 +70,16 @@ pub struct Onramp {
     /// Note value in wei (sat * 1e10).
     pub amount: Element,
     pub note_kind: Element,
-    /// Lightning preimage; `None` until the invoice is paid. Revealed to
-    /// the user via `GET /onramp/{payment_hash}` to help them redeem.
-    pub preimage: Option<[u8; 32]>,
-    /// Commitment of the preimage-locked note, set once the funding Send
-    /// is built.
+    /// The **service-generated** preimage that keys the deposit note. Set
+    /// at creation, but only revealed to the user (via the status route)
+    /// once the invoice is `Settled`.
+    pub preimage: [u8; 32],
+    /// Commitment of the preimage-locked note, set once committed on chain.
     pub note_commitment: Option<Element>,
-    /// Ciphera tx hash of the funding Send, set at `NoteSubmitted`.
+    /// Ciphera tx hash of the funding (commit) Send.
     pub txn_hash: Option<Element>,
+    /// Ciphera tx hash of the refund Send, set when refunding on timeout.
+    pub refund_txn_hash: Option<Element>,
     pub status: OnrampStatus,
     pub last_error: Option<String>,
     pub expires_at: DateTime<Utc>,

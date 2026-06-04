@@ -2,6 +2,7 @@ use async_trait::async_trait;
 use element::Element;
 use node_interface::{ElementsResponseSingle, TransactionRequest, TransactionResponse};
 use reqwest::{Client, StatusCode};
+use tracing::warn;
 use zk_primitives::{EscrowProof, LeafProof, UtxoProof};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -147,16 +148,27 @@ impl CipheraClient for ReqwestCipheraClient {
 
     async fn transaction_height(&self, txn_hash: Element) -> eyre::Result<Option<u64>> {
         let url = format!("{}/v0/transactions/{}", self.base_url, txn_hash);
-        let resp = self.http.get(url).send().await?;
+        // A transport error here (node restarting / briefly unreachable)
+        // just means "can't tell if it's confirmed yet" -- treat it as
+        // not-yet-confirmed so the confirm step keeps polling instead of
+        // flipping the quote into an error state every tick.
+        let resp = match self.http.get(&url).send().await {
+            Ok(r) => r,
+            Err(e) => {
+                warn!(%url, error = %e, "transaction_height request failed; treating as pending");
+                return Ok(None);
+            }
+        };
         match resp.status() {
             StatusCode::OK => {
-                // The full response carries more than we need; we only care
-                // that it exists and pull `block_height` opportunistically.
+                // Node shape is `GetTxnResponse { txn: { block_height, .. } }`
+                // -- `block_height` is nested under `txn`, not top-level.
+                // We only need to know it exists + pull the height.
                 let value: serde_json::Value = resp.json().await?;
                 Ok(value
-                    .get("block_height")
-                    .and_then(|v| v.as_u64())
-                    .or_else(|| value.get("height").and_then(|v| v.as_u64())))
+                    .get("txn")
+                    .and_then(|t| t.get("block_height"))
+                    .and_then(|v| v.as_u64()))
             }
             StatusCode::NOT_FOUND => Ok(None),
             other => {

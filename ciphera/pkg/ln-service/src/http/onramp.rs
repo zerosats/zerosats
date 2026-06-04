@@ -2,9 +2,12 @@ use crate::db::{onramps, service_notes};
 use crate::domain::{Onramp, OnrampStatus};
 use crate::http::AppState;
 use crate::http::error::ApiError;
+use crate::settlement::onramp::{preimage_field, preimage_locked_note};
 use actix_web::web;
 use chrono::{Duration, Utc};
 use element::Element;
+use rand::RngCore;
+use rand::rngs::OsRng;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Deserialize)]
@@ -73,6 +76,12 @@ pub async fn create_onramp(
         .await
         .map_err(|e| ApiError::Internal(format!("invoice creation: {e}")))?;
 
+    // Service-generated preimage that keys the deposit note. Kept secret
+    // (stored, but not returned) until the invoice is paid; the worker
+    // also uses it to refund the note on timeout.
+    let mut preimage = [0u8; 32];
+    OsRng.fill_bytes(&mut preimage);
+
     let now = Utc::now();
     let expires_at = now + Duration::seconds(state.config.quote_ttl_seconds);
     let onramp = Onramp {
@@ -80,9 +89,10 @@ pub async fn create_onramp(
         bolt11: invoice.bolt11.clone(),
         amount,
         note_kind: state.default_note_kind,
-        preimage: None,
+        preimage,
         note_commitment: None,
         txn_hash: None,
+        refund_txn_hash: None,
         status: OnrampStatus::InvoicePending,
         last_error: None,
         expires_at,
@@ -101,13 +111,28 @@ pub async fn create_onramp(
 }
 
 #[derive(Debug, Serialize)]
+pub struct NoteResponse {
+    pub utxo_kind: String,
+    pub note_kind: String,
+    pub address: String,
+    pub psi: String,
+    pub value: String,
+}
+
+#[derive(Debug, Serialize)]
 pub struct StatusResponse {
     pub payment_hash: String,
     pub status: String,
     /// Lightning preimage, hex-encoded, once the invoice is paid. The user
     /// derives the note's spend key from this (low 16 bytes) to redeem.
     pub preimage: Option<String>,
-    /// Commitment of the preimage-locked note, once funded on chain.
+    /// The committed deposit note (commitment fields), once funded on
+    /// chain. Mirrors the offramp's `note` so the CLI reconstructs the note
+    /// from authoritative service data rather than re-deriving it. Safe to
+    /// expose pre-payment: address/psi are one-way hashes of the secret
+    /// preimage, exactly as already implied by `note_commitment`.
+    pub note: Option<NoteResponse>,
+    /// Commitment of the committed deposit note.
     pub note_commitment: Option<String>,
     pub bolt11: String,
     pub updated_at: String,
@@ -125,10 +150,31 @@ pub async fn get_onramp(
         .map_err(|_| ApiError::InvalidPaymentHash)?;
 
     let o = onramps::get(&state.db, payment_hash).await?;
+    // Reveal the preimage ONLY once the invoice is paid (`Settled`).
+    // Exposing it earlier would let anyone spend the committed note for
+    // free, before paying.
+    let preimage = if o.status == OnrampStatus::Settled {
+        Some(hex::encode(o.preimage))
+    } else {
+        None
+    };
+    // Once committed, expose the note's commitment fields, reconstructed
+    // from the same inputs the worker used. The CLI redeems against these.
+    let note = o.note_commitment.map(|_| {
+        let n = preimage_locked_note(preimage_field(o.preimage), o.note_kind, o.amount);
+        NoteResponse {
+            utxo_kind: n.utxo_kind.to_string(),
+            note_kind: n.note_kind.to_string(),
+            address: n.address.to_string(),
+            psi: n.psi.to_string(),
+            value: n.value.to_string(),
+        }
+    });
     Ok(web::Json(StatusResponse {
         payment_hash: hex::encode(o.payment_hash),
         status: o.status.as_str().into(),
-        preimage: o.preimage.map(hex::encode),
+        preimage,
+        note,
         note_commitment: o.note_commitment.map(|c| c.to_string()),
         bolt11: o.bolt11,
         updated_at: o.updated_at.to_rfc3339(),

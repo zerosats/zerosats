@@ -28,21 +28,23 @@ pub async fn insert(pool: &DbPool, o: &Onramp) -> Result<(), Error> {
             preimage,
             note_commitment,
             txn_hash,
+            refund_txn_hash,
             status,
             last_error,
             expires_at,
             created_at,
             updated_at
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12);
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13);
         "#,
     )
-    .bind(&o.payment_hash[..])
+    .bind(o.payment_hash.to_vec())
     .bind(&o.bolt11)
     .bind(element_bytes(&o.amount))
     .bind(element_bytes(&o.note_kind))
-    .bind(o.preimage.as_ref().map(|p| p.to_vec()))
+    .bind(o.preimage.to_vec())
     .bind(o.note_commitment.as_ref().map(element_bytes))
     .bind(o.txn_hash.as_ref().map(element_bytes))
+    .bind(o.refund_txn_hash.as_ref().map(element_bytes))
     .bind(o.status.as_str())
     .bind(&o.last_error)
     .bind(o.expires_at.timestamp())
@@ -62,7 +64,7 @@ pub async fn insert(pool: &DbPool, o: &Onramp) -> Result<(), Error> {
 
 pub async fn get(pool: &DbPool, payment_hash: [u8; 32]) -> Result<Onramp, Error> {
     let row = sqlx::query(r#"SELECT * FROM onramps WHERE payment_hash = ?1"#)
-        .bind(&payment_hash[..])
+        .bind(payment_hash.to_vec())
         .fetch_optional(pool)
         .await?;
     row_to_onramp(row.ok_or(Error::NotFound)?)
@@ -73,7 +75,7 @@ pub async fn list_non_terminal(pool: &DbPool) -> Result<Vec<Onramp>, Error> {
     let rows = sqlx::query(
         r#"
         SELECT * FROM onramps
-        WHERE status NOT IN ('NoteConfirmed', 'Expired', 'Failed')
+        WHERE status NOT IN ('Settled', 'Refunded', 'Failed')
         ORDER BY created_at ASC
         "#,
     )
@@ -90,38 +92,15 @@ pub async fn update_status(
     sqlx::query(r#"UPDATE onramps SET status = ?1, updated_at = ?2 WHERE payment_hash = ?3"#)
         .bind(status.as_str())
         .bind(Utc::now().timestamp())
-        .bind(&payment_hash[..])
+        .bind(payment_hash.to_vec())
         .execute(pool)
         .await?;
     Ok(())
 }
 
-/// Store the revealed Lightning preimage and transition to `Paid`.
-pub async fn record_preimage(
-    pool: &DbPool,
-    payment_hash: [u8; 32],
-    preimage: [u8; 32],
-) -> Result<(), Error> {
-    sqlx::query(
-        r#"
-        UPDATE onramps
-        SET status = 'Paid',
-            preimage = ?1,
-            updated_at = ?2
-        WHERE payment_hash = ?3
-        "#,
-    )
-    .bind(preimage.to_vec())
-    .bind(Utc::now().timestamp())
-    .bind(&payment_hash[..])
-    .execute(pool)
-    .await?;
-    Ok(())
-}
-
 /// Stamp the funding-Send commitment + tx hash and transition to
-/// `NoteSubmitted`.
-pub async fn record_note_submitted(
+/// `Committed`.
+pub async fn record_committed(
     pool: &DbPool,
     payment_hash: [u8; 32],
     note_commitment: Element,
@@ -130,7 +109,7 @@ pub async fn record_note_submitted(
     sqlx::query(
         r#"
         UPDATE onramps
-        SET status = 'NoteSubmitted',
+        SET status = 'Committed',
             note_commitment = ?1,
             txn_hash = ?2,
             updated_at = ?3
@@ -140,7 +119,30 @@ pub async fn record_note_submitted(
     .bind(element_bytes(&note_commitment))
     .bind(element_bytes(&txn_hash))
     .bind(Utc::now().timestamp())
-    .bind(&payment_hash[..])
+    .bind(payment_hash.to_vec())
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+/// Stamp the refund-Send tx hash and transition to `Refunding`.
+pub async fn record_refunding(
+    pool: &DbPool,
+    payment_hash: [u8; 32],
+    refund_txn_hash: Element,
+) -> Result<(), Error> {
+    sqlx::query(
+        r#"
+        UPDATE onramps
+        SET status = 'Refunding',
+            refund_txn_hash = ?1,
+            updated_at = ?2
+        WHERE payment_hash = ?3
+        "#,
+    )
+    .bind(element_bytes(&refund_txn_hash))
+    .bind(Utc::now().timestamp())
+    .bind(payment_hash.to_vec())
     .execute(pool)
     .await?;
     Ok(())
@@ -154,7 +156,7 @@ pub async fn record_error(
     sqlx::query(r#"UPDATE onramps SET last_error = ?1, updated_at = ?2 WHERE payment_hash = ?3"#)
         .bind(message)
         .bind(Utc::now().timestamp())
-        .bind(&payment_hash[..])
+        .bind(payment_hash.to_vec())
         .execute(pool)
         .await?;
     Ok(())
@@ -193,9 +195,10 @@ fn row_to_onramp(row: sqlx::sqlite::SqliteRow) -> Result<Onramp, Error> {
     let bolt11: String = row.try_get("bolt11")?;
     let amount: Vec<u8> = row.try_get("amount")?;
     let note_kind: Vec<u8> = row.try_get("note_kind")?;
-    let preimage: Option<Vec<u8>> = row.try_get("preimage")?;
+    let preimage: Vec<u8> = row.try_get("preimage")?;
     let note_commitment: Option<Vec<u8>> = row.try_get("note_commitment")?;
     let txn_hash: Option<Vec<u8>> = row.try_get("txn_hash")?;
+    let refund_txn_hash: Option<Vec<u8>> = row.try_get("refund_txn_hash")?;
     let status_str: String = row.try_get("status")?;
     let last_error: Option<String> = row.try_get("last_error")?;
     let expires_at: i64 = row.try_get("expires_at")?;
@@ -207,9 +210,10 @@ fn row_to_onramp(row: sqlx::sqlite::SqliteRow) -> Result<Onramp, Error> {
         bolt11,
         amount: element_from_bytes(&amount)?,
         note_kind: element_from_bytes(&note_kind)?,
-        preimage: preimage.map(|b| fixed32(&b)).transpose()?,
+        preimage: fixed32(&preimage)?,
         note_commitment: note_commitment.map(|b| element_from_bytes(&b)).transpose()?,
         txn_hash: txn_hash.map(|b| element_from_bytes(&b)).transpose()?,
+        refund_txn_hash: refund_txn_hash.map(|b| element_from_bytes(&b)).transpose()?,
         status: OnrampStatus::from_str(&status_str).map_err(Error::Row)?,
         last_error,
         expires_at: ts(expires_at)?,

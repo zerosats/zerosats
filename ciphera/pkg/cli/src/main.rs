@@ -950,9 +950,12 @@ fn preimage_field(preimage: [u8; 32]) -> Element {
 }
 
 /// ln-service onramp deposit. Step 1 requests a bolt11 invoice for
-/// `amount_sat` and prints it to pay. Step 2 polls until the ln-service
-/// funds the preimage-locked note on chain, then redeems it into this
-/// wallet using `preimage_field(preimage)` as the spend key.
+/// `amount_sat` and prints it to pay — the ln-service commits the
+/// preimage-locked note on chain right away (funded from its own balance).
+/// Step 2 polls until the invoice settles (`Settled`), at which point the
+/// service reveals the preimage and the note fields; we then redeem the
+/// note into this wallet using `preimage_field(preimage)` as the spend
+/// key. If the invoice is never paid the service refunds the note itself.
 async fn handle_depo_ln(
     name: &str,
     host: &str,
@@ -989,25 +992,37 @@ async fn handle_depo_ln(
         .ok_or_else(|| color_eyre::eyre::eyre!("Missing 'bolt11' in ln-service response"))?
         .to_string();
 
+    // Poll until the onramp's own expiry (+ grace for the refund to land),
+    // not a fixed short window: the service holds the committed note until
+    // `expires_at`, then refunds it. We track that so a slow payment isn't
+    // abandoned while the deposit is still live.
+    const POLL_INTERVAL_SECS: u64 = 4;
+    const POLL_GRACE_SECS: i64 = 300; // wait past expiry to catch the refund
+    const FALLBACK_TTL_SECS: i64 = 3600; // if the service omits expires_at
+
+    let deadline = data["expires_at"]
+        .as_str()
+        .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+        .map(|t| t.with_timezone(&chrono::Utc) + chrono::Duration::seconds(POLL_GRACE_SECS))
+        .unwrap_or_else(|| chrono::Utc::now() + chrono::Duration::seconds(FALLBACK_TTL_SECS));
+
     println!("\n⚡ Pay this Lightning invoice:");
     println!("   {bolt11}");
     println!("\n   Payment hash: {payment_hash}");
-    println!("\nWaiting for the ln-service to fund the deposit note...\n");
+    println!(
+        "\nWaiting for the ln-service to settle the deposit (until {})...\n",
+        deadline.to_rfc3339()
+    );
 
-    // Step 2 — poll /v0/onramp/{payment_hash} until the note is confirmed.
-    const MAX_POLL_ATTEMPTS: u32 = 150; // ~10 minutes at 4 s intervals
-    const POLL_INTERVAL_SECS: u64 = 4;
-
+    // Step 2 — poll /v0/onramp/{payment_hash} until the invoice settles.
     let status_url = format!("{ln_service_uri}/v0/onramp/{payment_hash}");
-    let mut attempts = 0u32;
-    let (preimage_hex, note_commitment_hex) = loop {
+    let (preimage_hex, note_json, note_commitment_hex) = loop {
         tokio::time::sleep(std::time::Duration::from_secs(POLL_INTERVAL_SECS)).await;
 
-        attempts += 1;
-        if attempts > MAX_POLL_ATTEMPTS {
+        if chrono::Utc::now() > deadline {
             return Err(color_eyre::eyre::eyre!(
-                "Timed out waiting for onramp note after {} attempts",
-                MAX_POLL_ATTEMPTS
+                "Timed out waiting for onramp to settle (deadline {})",
+                deadline.to_rfc3339()
             ));
         }
 
@@ -1027,58 +1042,87 @@ async fn handle_depo_ln(
 
         let status = s["status"].as_str().unwrap_or("");
         println!("State: {status}");
+
+        // Redeem as soon as the data allows: the deposit note is on chain
+        // (`note_commitment` present) AND the service has revealed the
+        // preimage. Keying off the payload rather than a specific status
+        // string keeps this working across ln-service versions
+        // (`Settled` / `NoteConfirmed` / ...).
+        if let (Some(preimage), Some(note_commitment)) =
+            (s["preimage"].as_str(), s["note_commitment"].as_str())
+        {
+            break (
+                preimage.to_string(),
+                s["note"].clone(),
+                note_commitment.to_string(),
+            );
+        }
+
+        // Terminal states where the deposit will not be credited.
         match status {
-            "NoteConfirmed" => {
-                let preimage = s["preimage"].as_str().ok_or_else(|| {
-                    color_eyre::eyre::eyre!("note confirmed but 'preimage' missing")
-                })?;
-                let note_commitment = s["note_commitment"].as_str().map(str::to_string);
-                break (preimage.to_string(), note_commitment);
-            }
-            "Expired" | "Failed" => {
+            "Refunded" | "Refunding" | "Failed" | "Expired" | "Cancelled" => {
                 return Err(color_eyre::eyre::eyre!(
-                    "Onramp reached terminal state {status}"
+                    "Onramp reached terminal state {status} (deposit not credited)"
                 ));
             }
-            _ => {} // InvoicePending / Paid / NoteSubmitted -- keep polling.
+            _ => {} // keep polling
         }
     };
 
-    // Step 3 — reconstruct the preimage-locked note and redeem it. The
-    // ln-service built a standard Poseidon-key note whose key is the
-    // preimage's low-half field element, so we can spend it once we know
-    // the preimage (revealed by the status endpoint after payment).
+    // Step 3 — reconstruct the deposit note and redeem it. The note's spend
+    // key is the preimage's low-half field element, which we now know.
     let preimage = parse_preimage_hex(&preimage_hex)?;
     let unlock_key = preimage_field(preimage);
-    let amount_wei = units::sats_to_wei(amount_sat);
-    let (utxo_kind, note_kind) =
-        cli::address::citrea_token_data(cli::address::network_for_chain(chain), "WCBTC");
 
-    let note = Note {
-        utxo_kind,
-        note_kind,
-        address: get_address_for_private_key(unlock_key),
-        psi: hash_merge([unlock_key, unlock_key]),
-        value: Element::new(amount_wei),
+    let note = if note_json.is_object() {
+        // Modern ln-service returns the authoritative note fields (same
+        // shape as the offramp flow).
+        Note {
+            utxo_kind: parse_element_field(&note_json, "utxo_kind")?,
+            note_kind: parse_element_field(&note_json, "note_kind")?,
+            address: parse_element_field(&note_json, "address")?,
+            psi: parse_element_field(&note_json, "psi")?,
+            value: parse_element_field(&note_json, "value")?,
+        }
+    } else {
+        // Older ln-service returns only a commitment; derive the note from
+        // the preimage and this wallet's chain note kind.
+        let (utxo_kind, note_kind) =
+            cli::address::citrea_token_data(cli::address::network_for_chain(chain), "WCBTC");
+        Note {
+            utxo_kind,
+            note_kind,
+            address: get_address_for_private_key(unlock_key),
+            psi: hash_merge([unlock_key, unlock_key]),
+            value: Element::new(units::sats_to_wei(amount_sat)),
+        }
     };
 
-    // Sanity check against the commitment the service reported -- catches a
-    // note_kind / amount / preimage-convention mismatch before we persist a
-    // note we can't actually spend.
-    if let Some(nc) = note_commitment_hex {
-        let expected = Element::from_str(&nc)
-            .map_err(|e| color_eyre::eyre::eyre!("invalid note_commitment from service: {e}"))?;
-        if note.commitment() != expected {
-            return Err(color_eyre::eyre::eyre!(
-                "reconstructed note commitment {} != service commitment {}; \
-                 note_kind/amount/preimage convention disagree",
-                note.commitment(),
-                expected
-            ));
-        }
+    // The revealed preimage must actually unlock this note: its derived key
+    // has to reproduce the note's address.
+    if get_address_for_private_key(unlock_key) != note.address {
+        return Err(color_eyre::eyre::eyre!(
+            "preimage does not unlock the service note (address mismatch); \
+             preimage convention disagrees with the ln-service"
+        ));
     }
 
-    let input_note = InputNote::new(note.clone(), unlock_key);
+    // Cross-check the reconstructed note against the commitment the service
+    // reported -- catches a note_kind / amount mismatch (e.g. wrong --chain)
+    // before persisting a note that isn't actually on chain.
+    let expected = Element::from_str(&note_commitment_hex)
+        .map_err(|e| color_eyre::eyre::eyre!("invalid note_commitment from service: {e}"))?;
+    if note.commitment() != expected {
+        return Err(color_eyre::eyre::eyre!(
+            "reconstructed note commitment {} != service commitment {}; \
+             note_kind/amount disagree (check --chain matches the service)",
+            note.commitment(),
+            expected
+        ));
+    }
+
+    let amount_wei = note.value.to_u64_array()[0];
+    let input_note = InputNote::new(note, unlock_key);
 
     let mut client = NodeClient::builder()
         .name(name)
