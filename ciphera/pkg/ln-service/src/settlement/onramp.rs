@@ -24,10 +24,12 @@ use barretenberg::Prove;
 use chrono::Utc;
 use element::Element;
 use hash::hash_merge;
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
+use tokio::sync::Mutex;
 use tokio::time;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 use zk_primitives::{InputNote, Note, Utxo, get_address_for_private_key};
 
 #[derive(Clone)]
@@ -39,23 +41,40 @@ pub struct OnrampContext {
 }
 
 pub async fn run_onramp_supervisor(ctx: OnrampContext) {
+    let ctx = Arc::new(ctx);
+    let inflight: Arc<Mutex<HashSet<[u8; 32]>>> = Arc::new(Mutex::new(HashSet::new()));
     let mut ticker = time::interval(ctx.tick);
     ticker.set_missed_tick_behavior(time::MissedTickBehavior::Skip);
 
     loop {
         ticker.tick().await;
-        if let Err(e) = tick_once(&ctx).await {
-            error!(error = ?e, "onramp supervisor tick failed");
+        if let Err(e) = dispatch(&ctx, &inflight).await {
+            error!(error = ?e, "onramp supervisor dispatch failed");
         }
     }
 }
 
-async fn tick_once(ctx: &OnrampContext) -> eyre::Result<()> {
+/// Spawn an independent task per non-terminal onramp so a slow step (heavy
+/// proving in commit/refund) can't stall the others. `inflight` guards each
+/// onramp so it is handled by at most one task at a time across ticks.
+async fn dispatch(
+    ctx: &Arc<OnrampContext>,
+    inflight: &Arc<Mutex<HashSet<[u8; 32]>>>,
+) -> eyre::Result<()> {
     for o in onramps::list_non_terminal(&ctx.db).await? {
-        if let Err(e) = step(ctx, &o).await {
-            tracing::warn!(payment_hash = %hex::encode(o.payment_hash), error = ?e, "onramp step failed; will retry");
-            let _ = onramps::record_error(&ctx.db, o.payment_hash, &e.to_string()).await;
+        let ph = o.payment_hash;
+        if !inflight.lock().await.insert(ph) {
+            continue;
         }
+        let ctx = ctx.clone();
+        let inflight = inflight.clone();
+        tokio::spawn(async move {
+            if let Err(e) = step(&ctx, &o).await {
+                warn!(payment_hash = %hex::encode(ph), error = ?e, "onramp step failed; will retry");
+                let _ = onramps::record_error(&ctx.db, ph, &e.to_string()).await;
+            }
+            inflight.lock().await.remove(&ph);
+        });
     }
     Ok(())
 }

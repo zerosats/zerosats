@@ -6,8 +6,10 @@ use crate::domain::{Quote, QuoteStatus, ServiceNote};
 use crate::settlement::proof::{EscrowClaimProver, service_owned_note};
 use chrono::Utc;
 use element::Element;
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
+use tokio::sync::Mutex;
 use tokio::time;
 use tracing::{error, info, warn};
 
@@ -30,24 +32,44 @@ pub struct SettlementContext {
 }
 
 pub async fn run_supervisor(ctx: SettlementContext) {
+    let ctx = Arc::new(ctx);
+    let inflight: Arc<Mutex<HashSet<[u8; 32]>>> = Arc::new(Mutex::new(HashSet::new()));
     let mut ticker = time::interval(ctx.tick);
     ticker.set_missed_tick_behavior(time::MissedTickBehavior::Skip);
 
     loop {
         ticker.tick().await;
-        if let Err(e) = tick_once(&ctx).await {
-            error!(error = ?e, "settlement supervisor tick failed");
+        if let Err(e) = dispatch(&ctx, &inflight).await {
+            error!(error = ?e, "settlement supervisor dispatch failed");
         }
     }
 }
 
-async fn tick_once(ctx: &SettlementContext) -> eyre::Result<()> {
+/// Spawn an independent task per non-terminal quote so a slow step -- the
+/// synchronous `pay_invoice`, or heavy claim proving -- can't stall the
+/// others. `inflight` guards each quote so it is handled by at most one
+/// task at a time across ticks; the dispatcher itself never awaits a step,
+/// so new quotes always get picked up on the next tick regardless of what
+/// any in-flight quote is doing.
+async fn dispatch(
+    ctx: &Arc<SettlementContext>,
+    inflight: &Arc<Mutex<HashSet<[u8; 32]>>>,
+) -> eyre::Result<()> {
     let quotes_list = quotes::list_non_terminal(&ctx.db).await?;
     for q in quotes_list {
-        if let Err(e) = step(ctx, &q).await {
-            warn!(payment_hash = %hex::encode(q.payment_hash), error = ?e, "step failed; will retry");
-            let _ = quotes::record_error(&ctx.db, q.payment_hash, &e.to_string()).await;
+        let ph = q.payment_hash;
+        if !inflight.lock().await.insert(ph) {
+            continue; // already being processed by an earlier tick's task
         }
+        let ctx = ctx.clone();
+        let inflight = inflight.clone();
+        tokio::spawn(async move {
+            if let Err(e) = step(&ctx, &q).await {
+                warn!(payment_hash = %hex::encode(ph), error = ?e, "step failed; will retry");
+                let _ = quotes::record_error(&ctx.db, ph, &e.to_string()).await;
+            }
+            inflight.lock().await.remove(&ph);
+        });
     }
     Ok(())
 }
@@ -86,8 +108,14 @@ async fn step_pay_invoice(ctx: &SettlementContext, q: &Quote) -> eyre::Result<()
     // LightningPaying up front so a crash mid-call doesn't lose the row's
     // state.
     quotes::record_payment_started(&ctx.db, q.payment_hash).await?;
-    match ctx.lightning.pay_invoice(&q.bolt11).await {
-        Ok(result) => {
+    // `pay_invoice` blocks until phoenixd settles or fails the payment.
+    // Cap it: the quote is already `LightningPaying`, so on timeout we just
+    // poll `payment_status` on a later tick (phoenixd tracks the payment by
+    // hash regardless of whether we awaited this response). This stops a
+    // stuck HTLC from pinning the quote's task indefinitely.
+    const PAY_TIMEOUT: Duration = Duration::from_secs(90);
+    match time::timeout(PAY_TIMEOUT, ctx.lightning.pay_invoice(&q.bolt11)).await {
+        Ok(Ok(result)) => {
             if let Some(preimage) = result.preimage {
                 quotes::record_payment_succeeded(&ctx.db, q.payment_hash, preimage).await?;
             } else {
@@ -96,10 +124,12 @@ async fn step_pay_invoice(ctx: &SettlementContext, q: &Quote) -> eyre::Result<()
                 quotes::record_payment_started(&ctx.db, q.payment_hash).await?;
             }
         }
-        Err(e) => {
+        Ok(Err(e)) => {
             warn!(payment_hash = %hex::encode(q.payment_hash), error = ?e, "pay_invoice errored; will poll status next tick");
-            quotes::record_payment_started(&ctx.db, q.payment_hash).await?;
             quotes::record_error(&ctx.db, q.payment_hash, &e.to_string()).await?;
+        }
+        Err(_elapsed) => {
+            warn!(payment_hash = %hex::encode(q.payment_hash), "pay_invoice timed out; payment may still settle, will poll status next tick");
         }
     }
     Ok(())
