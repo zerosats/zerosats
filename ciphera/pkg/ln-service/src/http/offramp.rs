@@ -62,11 +62,15 @@ pub async fn create_offramp(
         .amount_milli_satoshis()
         .ok_or_else(|| ApiError::BadRequest("bolt11 must specify an amount".into()))?;
 
-    // use amount_sat only for config check
-    let amount_sat = amount_msat / 1_000;
-    if amount_sat > state.config.max_amount_sat {
+    let max_amount_msat = state
+        .config
+        .max_amount_sat
+        .checked_mul(1_000)
+        .ok_or_else(|| ApiError::Internal("max_amount_sat overflows msat conversion".into()))?;
+    if amount_msat > max_amount_msat {
+        let amount_sat = amount_msat / 1_000;
         return Err(ApiError::BadRequest(format!(
-            "amount {amount_sat} sat exceeds cap {}",
+            "amount {amount_sat} sat ({amount_msat} msat) exceeds cap {} sat",
             state.config.max_amount_sat
         )));
     }
@@ -259,4 +263,3 @@ fn status_response(q: &Quote) -> StatusResponse {
         updated_at: q.updated_at.to_rfc3339(),
     }
 }
-

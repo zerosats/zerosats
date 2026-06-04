@@ -43,7 +43,7 @@ RUN tar -xzf barretenberg.tar.gz && \
     mv bb /usr/local/bin/bb && \
     rm barretenberg.tar.gz
 
-ENV PATH="/usr/local/cargo/bin:/usr/local/bin:$PATH"
+ENV PATH="/root/.cargo/bin:/usr/local/bin:$PATH"
 
 # Set bash as entrypoint with login shell to ensure profile is sourced
 ENTRYPOINT ["/bin/bash", "--login"]

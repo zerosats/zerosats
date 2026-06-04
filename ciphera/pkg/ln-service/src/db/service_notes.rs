@@ -78,6 +78,19 @@ pub async fn mark_spent(pool: &DbPool, commitment: Element) -> Result<u64, Error
     Ok(res.rows_affected())
 }
 
+/// Roll back a previous spend mark if submit/prove failed before a real
+/// on-chain spend occurred.
+pub async fn mark_unspent(pool: &DbPool, commitment: Element) -> Result<u64, Error> {
+    let res = sqlx::query(
+        r#"UPDATE service_notes SET spent = 0, updated_at = ?1 WHERE commitment = ?2 AND spent = 1"#,
+    )
+    .bind(Utc::now().timestamp())
+    .bind(element_bytes(&commitment))
+    .execute(pool)
+    .await?;
+    Ok(res.rows_affected())
+}
+
 fn element_bytes(e: &Element) -> Vec<u8> {
     e.to_be_bytes().to_vec()
 }

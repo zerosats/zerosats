@@ -116,8 +116,8 @@ impl LightningClient for PhoenixdClient {
             .await
             .map_err(|e| eyre::eyre!("phoenixd pay_bolt11_invoice: {e:?}"))?;
 
-        let preimage = parse_bytearray(&resp.payment_preimage)?;
-        let payment_hash = parse_bytearray(&resp.payment_hash)?;
+        let preimage = parse_bytearray(&resp.payment_preimage, "preimage")?;
+        let payment_hash = parse_bytearray(&resp.payment_hash, "payment hash")?;
         Ok(PayResult {
             payment_hash,
             preimage: Some(preimage),
@@ -132,7 +132,7 @@ impl LightningClient for PhoenixdClient {
         match self.phoenixd.get_outgoing_invoice(payment_hash_hex).await {
             Ok(body) => {
                 if body.is_paid {
-                    let preimage = parse_bytearray(&body.preimage)?;
+                    let preimage = parse_bytearray(&body.preimage, "preimage")?;
                     Ok(LightningPaymentStatus::Succeeded { preimage })
                 } else if body.completed_at.is_some() {
                     Ok(LightningPaymentStatus::Failed)
@@ -173,7 +173,7 @@ impl LightningClient for PhoenixdClient {
             .await
             .map_err(|e| eyre::eyre!("phoenixd create_invoice: {e:?}"))?;
         Ok(CreatedInvoice {
-            payment_hash: parse_bytearray(&resp.payment_hash)?,
+            payment_hash: parse_bytearray(&resp.payment_hash, "payment hash")?,
             bolt11: resp.serialized,
         })
     }
@@ -189,17 +189,17 @@ impl LightningClient for PhoenixdClient {
             .await
             .map_err(|e| eyre::eyre!("phoenixd get_incoming_invoice: {e:?}"))?;
         if body.is_paid {
-            Ok(Some(parse_bytearray(&body.preimage)?))
+            Ok(Some(parse_bytearray(&body.preimage, "preimage")?))
         } else {
             Ok(None)
         }
     }
 }
 
-fn parse_bytearray(hex_str: &str) -> eyre::Result<[u8; 32]> {
+fn parse_bytearray(hex_str: &str, field_name: &str) -> eyre::Result<[u8; 32]> {
     let bytes = hex::decode(hex_str.trim_start_matches("0x"))?;
     if bytes.len() != 32 {
-        eyre::bail!("expected 32-byte preimage, got {} bytes", bytes.len());
+        eyre::bail!("expected 32-byte {field_name}, got {} bytes", bytes.len());
     }
     let mut out = [0u8; 32];
     out.copy_from_slice(&bytes);

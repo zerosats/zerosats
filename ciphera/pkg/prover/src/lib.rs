@@ -84,6 +84,13 @@ pub enum Error {
 
     #[error("vec to array conversion failed, expected {expected}, got {actual}")]
     VecToArrayConversion { expected: usize, actual: usize },
+
+    #[error("{bucket} bucket exceeds capacity {capacity}: got {actual}")]
+    BucketOverflow {
+        bucket: &'static str,
+        capacity: usize,
+        actual: usize,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -93,6 +100,26 @@ pub struct Transaction {
     /// (`AggUtxo` vs `AggEscrow`) before combining them via
     /// `AggAgg::new_mixed`.
     pub proof: LeafProof,
+}
+
+fn vec_to_slots(
+    bucket: &'static str,
+    items: Vec<Transaction>,
+) -> Result<[Transaction; UTXO_AGG_NUMBER], Error> {
+    items.try_into().map_err(|v: Vec<_>| {
+        if v.len() > UTXO_AGG_NUMBER {
+            Error::BucketOverflow {
+                bucket,
+                capacity: UTXO_AGG_NUMBER,
+                actual: v.len(),
+            }
+        } else {
+            Error::VecToArrayConversion {
+                expected: UTXO_AGG_NUMBER,
+                actual: v.len(),
+            }
+        }
+    })
 }
 
 impl Transaction {
@@ -282,17 +309,9 @@ impl Prover {
         txns: [Option<Transaction>; 6],
         current_block: u64,
     ) -> Result<AggAggProof, Error> {
-        // Fan-out: route each leaf into the bucket whose aggregator
-        // accepts it. Each bucket holds three `UTXO_AGG_NUMBER` slots
-        // (utxo and escrow share the slot count because both leaf
-        // circuits produce the same public-input shape).
-        //
-        // After fan-out, both buckets always hold exactly 3 entries
-        // (real or padding). They then aggregate independently into
-        // an `AggUtxoProof` / `AggEscrowProof` and combine in a
-        // heterogeneous `AggAgg::new_mixed` if any escrow proof was
-        // present, or the cheap homogeneous `AggAgg::new` otherwise.
-        let mut utxo_bucket: Vec<Transaction> = Vec::with_capacity(UTXO_AGG_NUMBER);
+        // Fan-out: route each leaf into the bucket whose aggregator accepts it.
+        // Pure-UTXO blocks may use both aggregator slots as UTXO buckets.
+        let mut utxo_bucket: Vec<Transaction> = Vec::with_capacity(UTXO_AGG_NUMBER * UTXO_AGGREGATIONS);
         let mut escrow_bucket: Vec<Transaction> = Vec::with_capacity(UTXO_AGG_NUMBER);
 
         for slot in txns.into_iter() {
@@ -303,24 +322,8 @@ impl Prover {
             }
         }
 
-        // Pad each bucket up to UTXO_AGG_NUMBER (3) with default
-        // padding proofs of the matching circuit flavour. The
-        // aggregator circuits expect exactly 3 slots and treat
-        // padding entries specially.
-        while utxo_bucket.len() < UTXO_AGG_NUMBER {
-            utxo_bucket.push(Transaction::new(LeafProof::Utxo(UtxoProof::default())));
-        }
-        while escrow_bucket.len() < UTXO_AGG_NUMBER {
-            escrow_bucket.push(Transaction::new(LeafProof::Escrow(EscrowProof::default())));
-        }
-
-        // Report the real (non-padding) leaves routed into each bucket so
-        // the flavour split through the aggregator is visible at `info`.
-        let real_utxo = utxo_bucket.iter().filter(|t| !t.proof.is_padding()).count();
-        let real_escrow = escrow_bucket
-            .iter()
-            .filter(|t| !t.proof.is_padding())
-            .count();
+        let real_utxo = utxo_bucket.len();
+        let real_escrow = escrow_bucket.len();
         info!(
             block = current_block,
             utxo = real_utxo,
@@ -328,13 +331,47 @@ impl Prover {
             "Aggregating {real_utxo} utxo + {real_escrow} escrow leaf proof(s) into AggUtxo + AggEscrow buckets"
         );
 
-        #[allow(clippy::unwrap_used)]
-        let utxo_slots: [Transaction; UTXO_AGG_NUMBER] = utxo_bucket.try_into().unwrap();
-        #[allow(clippy::unwrap_used)]
-        let escrow_slots: [Transaction; UTXO_AGG_NUMBER] = escrow_bucket.try_into().unwrap();
+        if real_escrow == 0 {
+            while utxo_bucket.len() < UTXO_AGG_NUMBER * UTXO_AGGREGATIONS {
+                utxo_bucket.push(Transaction::new(LeafProof::Utxo(UtxoProof::default())));
+            }
+            let second_bucket = utxo_bucket.split_off(UTXO_AGG_NUMBER);
+            let utxo_slots_0 = vec_to_slots("utxo", utxo_bucket)?;
+            let utxo_slots_1 = vec_to_slots("utxo", second_bucket)?;
 
-        let utxo_agg_proof = self.aggregate_utxo(tree, utxo_slots, current_block)?;
-        let escrow_agg_proof = self.aggregate_escrow(tree, escrow_slots, current_block)?;
+            let agg_0 = self.aggregate_utxo(tree, utxo_slots_0, current_block)?;
+            let agg_1 = self.aggregate_utxo(tree, utxo_slots_1, current_block)?;
+            let proof = AggAgg::new([agg_0, agg_1])
+                .prove()
+                .map_err(|e| Error::BarretenbergProve(e.to_string()))?;
+            return Ok(proof);
+        }
+
+        if real_utxo > UTXO_AGG_NUMBER {
+            return Err(Error::BucketOverflow {
+                bucket: "utxo",
+                capacity: UTXO_AGG_NUMBER,
+                actual: real_utxo,
+            });
+        }
+        if real_escrow > UTXO_AGG_NUMBER {
+            return Err(Error::BucketOverflow {
+                bucket: "escrow",
+                capacity: UTXO_AGG_NUMBER,
+                actual: real_escrow,
+            });
+        }
+
+        while utxo_bucket.len() < UTXO_AGG_NUMBER {
+            utxo_bucket.push(Transaction::new(LeafProof::Utxo(UtxoProof::default())));
+        }
+        while escrow_bucket.len() < UTXO_AGG_NUMBER {
+            escrow_bucket.push(Transaction::new(LeafProof::Escrow(EscrowProof::default())));
+        }
+
+        let utxo_agg_proof = self.aggregate_utxo(tree, vec_to_slots("utxo", utxo_bucket)?, current_block)?;
+        let escrow_agg_proof =
+            self.aggregate_escrow(tree, vec_to_slots("escrow", escrow_bucket)?, current_block)?;
 
         // Slot 0 must always carry the non-padding aggregator so that
         // `AggAgg::old_root()` (which unconditionally reads proofs[0].old_root)

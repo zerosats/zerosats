@@ -138,12 +138,27 @@ async fn step_create_note(ctx: &OnrampContext, o: &Onramp) -> eyre::Result<()> {
     }
 
     info!(payment_hash = %hex::encode(o.payment_hash), "submitting onramp funding Send");
-    let proof = tokio::task::spawn_blocking(move || utxo.prove().map_err(|e| format!("{e:?}")))
+    let proof = match tokio::task::spawn_blocking(move || utxo.prove().map_err(|e| format!("{e:?}")))
         .await
-        .map_err(|e| eyre::eyre!("prove task panicked: {e}"))?
-        .map_err(|e| eyre::eyre!("onramp utxo.prove failed: {e}"))?;
+    {
+        Ok(Ok(proof)) => proof,
+        Ok(Err(e)) => {
+            let _ = service_notes::mark_unspent(&ctx.db, svc.commitment).await;
+            return Err(eyre::eyre!("onramp utxo.prove failed: {e}"));
+        }
+        Err(e) => {
+            let _ = service_notes::mark_unspent(&ctx.db, svc.commitment).await;
+            return Err(eyre::eyre!("prove task panicked: {e}"));
+        }
+    };
 
-    let resp = ctx.ciphera.submit_transaction(proof).await?;
+    let resp = match ctx.ciphera.submit_transaction(proof).await {
+        Ok(resp) => resp,
+        Err(e) => {
+            let _ = service_notes::mark_unspent(&ctx.db, svc.commitment).await;
+            return Err(e);
+        }
+    };
 
     if let Some(change) = change {
         service_notes::insert(&ctx.db, &change).await?;
