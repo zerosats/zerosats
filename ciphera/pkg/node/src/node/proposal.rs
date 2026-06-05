@@ -2,6 +2,7 @@ use std::{sync::Arc, time::Instant};
 
 use doomslug::ApprovalValidated;
 use primitives::hash::CryptoHash;
+use prover::{UTXO_AGGREGATIONS, UTXO_AGG_NUMBER};
 use tracing::{debug, info, instrument, warn};
 use zk_primitives::count_flavours;
 
@@ -180,7 +181,48 @@ impl NodeShared {
                 }
             }
 
-            utxos.into_iter().map(|(_, utxo)| utxo).collect::<Vec<_>>()
+            // Cap the proposed flavour mix to what the prover's aggregator
+            // topology can actually prove. `AggAgg` combines exactly two
+            // aggregators of `UTXO_AGG_NUMBER` leaves, each an `AggUtxo` or
+            // `AggEscrow`. So a provable block is either:
+            //   * up to `UTXO_AGG_NUMBER * UTXO_AGGREGATIONS` utxo leaves
+            //     (both slots used as utxo), or
+            //   * up to `UTXO_AGG_NUMBER` utxo + up to `UTXO_AGG_NUMBER`
+            //     escrow (one slot each).
+            // Including a flavour mix outside this envelope (e.g. 4 utxo + 1
+            // escrow, or 4+ escrow) yields a block that commits but cannot be
+            // proven -> the rollup halts. Select a provable subset in
+            // priority order; any deferred txns are freed back to the mempool
+            // when this lease commits and retried in a later block.
+            let mut utxo_count = 0usize;
+            let mut escrow_count = 0usize;
+            let mut selected = Vec::with_capacity(utxos.len());
+            for (_, txn) in utxos {
+                let fits = if txn.is_escrow() {
+                    // Escrow occupies its own aggregator slot, so the other
+                    // slot must remain available for utxo (<= one slot).
+                    escrow_count < UTXO_AGG_NUMBER && utxo_count <= UTXO_AGG_NUMBER
+                } else {
+                    let utxo_cap = if escrow_count > 0 {
+                        UTXO_AGG_NUMBER
+                    } else {
+                        UTXO_AGG_NUMBER * UTXO_AGGREGATIONS
+                    };
+                    utxo_count < utxo_cap
+                };
+
+                if fits {
+                    if txn.is_escrow() {
+                        escrow_count += 1;
+                    } else {
+                        utxo_count += 1;
+                    }
+                    selected.push(txn);
+                }
+                // Otherwise leave it leased; `commit` frees it back to the
+                // pool for a later block.
+            }
+            selected
         };
 
         let (utxo_count, escrow_count) = count_flavours(&txns);

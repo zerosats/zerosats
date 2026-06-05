@@ -3,12 +3,10 @@
 
 mod constants;
 pub mod smirk_metadata;
-use crate::constants::{
-    MERKLE_TREE_DEPTH, MERKLE_TREE_PATH_DEPTH, UTXO_AGG_LEAVES, UTXO_AGG_NUMBER, UTXO_AGGREGATIONS,
-};
+use crate::constants::{MERKLE_TREE_DEPTH, MERKLE_TREE_PATH_DEPTH, UTXO_AGG_LEAVES};
 use barretenberg::Prove;
 use borsh::{BorshDeserialize, BorshSerialize};
-pub use constants::MAXIMUM_TXNS;
+pub use constants::{MAXIMUM_TXNS, UTXO_AGGREGATIONS, UTXO_AGG_NUMBER};
 use contracts::RollupContract;
 use element::Element;
 use ethereum_types::H256;
