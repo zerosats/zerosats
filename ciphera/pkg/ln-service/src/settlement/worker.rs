@@ -103,6 +103,14 @@ async fn step_detect_escrow(ctx: &SettlementContext, q: &Quote) -> eyre::Result<
 }
 
 async fn step_pay_invoice(ctx: &SettlementContext, q: &Quote) -> eyre::Result<()> {
+    // Double check if quote is not expired yet. Implicitly checks timelock condition
+    // should be fine, unless phoenixd is eclipsed
+    if Utc::now() > q.expires_at {
+        info!(payment_hash = %hex::encode(q.payment_hash), "quote expired before payment; cancelling");
+        quotes::update_status(&ctx.db, q.payment_hash, QuoteStatus::Cancelled).await?;
+        return Ok(());
+    }
+
     info!(payment_hash = %hex::encode(q.payment_hash), "paying bolt11 invoice");
     // phoenixd-rs's pay_bolt11_invoice blocks until settled. Mark
     // LightningPaying up front so a crash mid-call doesn't lose the row's
