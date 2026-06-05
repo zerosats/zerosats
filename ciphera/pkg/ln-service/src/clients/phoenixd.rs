@@ -7,13 +7,19 @@
 //! mocking lightning behaviour in tests, and so the concrete error type
 //! is collapsed to `eyre::Report` at the settlement-worker boundary.
 //!
-//! Endpoints exercised (via the SDK):
+//! All phoenixd calls go through the SDK (`phoenixd_rs::Phoenixd`), which
+//! owns the HTTP client and its timeouts. Endpoints exercised:
 //!   - `POST /payinvoice`
-//!   - `GET  /payments/outgoingbyhash/{payment_hash}`
+//!   - `POST /createinvoice`
+//!   - `GET  /payments/outgoingbyhash/{payment_hash}` (outgoing status)
+//!   - `GET  /payments/incoming/{payment_hash}`       (incoming preimage)
+//!
+//! The SDK's outgoing-payment `preimage` is `Option` (phoenixd omits it for
+//! unpaid / failed payments), so a failed payment deserializes cleanly and
+//! maps to [`LightningPaymentStatus::Failed`].
 
 use async_trait::async_trait;
-use phoenixd_rs::{Error as PhoenixdError, InvoiceRequest, Phoenixd};
-use tracing::debug;
+use phoenixd_rs::{InvoiceRequest, Phoenixd};
 
 #[derive(Debug, Clone)]
 pub enum LightningPaymentStatus {
@@ -124,39 +130,33 @@ impl LightningClient for PhoenixdClient {
         })
     }
 
-    async fn payment_status(&self, payment_hash_hex: &str) -> eyre::Result<LightningPaymentStatus> {
-        // The SDK looks the payment up by hash
-        // (`/payments/outgoingbyhash/{hash}`) and maps a clean 404 to
-        // `Error::NotFound`. We know the payment hash from quote
-        // creation, so this is the right surface.
-        match self.phoenixd.get_outgoing_invoice(payment_hash_hex).await {
-            Ok(body) => {
-                if body.is_paid {
-                    let preimage = parse_bytearray(&body.preimage, "preimage")?;
-                    Ok(LightningPaymentStatus::Succeeded { preimage })
-                } else if body.completed_at.is_some() {
+    async fn payment_status(&self, payment_hash: &str) -> eyre::Result<LightningPaymentStatus> {
+        let resp = self
+            .phoenixd
+            .get_outgoing_payment_by_hash(payment_hash)
+            .await
+            .map_err(|e| eyre::eyre!("phoenixd get_outgoing_payment_by_hash: {e:?}"))?;
+
+        match resp {
+            Some(p) => {
+                if p.is_paid {
+                    let preimage = p
+                        .preimage
+                        .ok_or_else(|| eyre::eyre!("phoenixd reports a paid payment with no preimage"))?;
+                    Ok(LightningPaymentStatus::Succeeded {
+                        preimage: parse_bytearray(&preimage, "preimage")?,
+                    })
+                } else if p.completed_at.is_some() {
+                    // Terminal but not paid -> the payment failed.
                     Ok(LightningPaymentStatus::Failed)
                 } else {
                     Ok(LightningPaymentStatus::Pending)
                 }
             }
             // No outgoing record yet -- the pay call is still in flight or
-            // never landed. Keep polling.
-            Err(PhoenixdError::NotFound) => Ok(LightningPaymentStatus::Pending),
-            // phoenixd can answer a not-found lookup with an empty body.
-            // The SDK's `make_get` decodes the body before inspecting the
-            // status, so that case surfaces as a reqwest decode error
-            // rather than `NotFound`. Treat it the same -- no record yet,
-            // keep polling -- instead of hard-failing every tick.
-            Err(PhoenixdError::ReqwestError(re)) if re.is_decode() => {
-                debug!(
-                    payment_hash = payment_hash_hex,
-                    "phoenixd returned an undecodable body for outgoing payment; \
-                     treating as no-record-yet and continuing to poll"
-                );
-                Ok(LightningPaymentStatus::Pending)
-            }
-            Err(other) => Err(eyre::eyre!("phoenixd get_outgoing_invoice: {other:?}")),
+            // hasn't been registered. Keep polling rather than erroring
+            // every tick.
+            None => Ok(LightningPaymentStatus::Pending),
         }
     }
 
@@ -165,8 +165,14 @@ impl LightningClient for PhoenixdClient {
         amount_sat: u64,
         description: &str,
     ) -> eyre::Result<CreatedInvoice> {
-        let req = InvoiceRequest::new(amount_sat, None, Some(description.to_string()), None, None)
-            .map_err(|e| eyre::eyre!("phoenixd InvoiceRequest: {e:?}"))?;
+        let req = InvoiceRequest {
+            external_id: None,
+            description: Some(description.to_string()),
+            webhook_url: None,
+            amount_sat,
+            description_hash: None,
+        };
+
         let resp = self
             .phoenixd
             .create_invoice(req)
@@ -178,18 +184,15 @@ impl LightningClient for PhoenixdClient {
         })
     }
 
-    async fn incoming_preimage(&self, payment_hash_hex: &str) -> eyre::Result<Option<[u8; 32]>> {
-        // The SDK's incoming lookup returns `anyhow::Result` (unlike the
-        // outgoing one), so we can't match its error variants. Our invoice
-        // exists from creation onward, so the normal path is `Ok` with
-        // `is_paid` flipping true once settled; genuine errors propagate.
-        let body = self
+    async fn incoming_preimage(&self, payment_hash: &str) -> eyre::Result<Option<[u8; 32]>> {
+        let resp = self
             .phoenixd
-            .get_incoming_invoice(payment_hash_hex)
+            .get_incoming_invoice(payment_hash)
             .await
             .map_err(|e| eyre::eyre!("phoenixd get_incoming_invoice: {e:?}"))?;
-        if body.is_paid {
-            Ok(Some(parse_bytearray(&body.preimage, "preimage")?))
+
+        if resp.is_paid {
+            Ok(Some(parse_bytearray(&resp.preimage, "preimage")?))
         } else {
             Ok(None)
         }
