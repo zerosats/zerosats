@@ -11,7 +11,7 @@ pub trait ChainTipClient: Send + Sync {
     /// commitment hashes these bytes as-is, so the only invariant is that
     /// the prover (off-chain) uses the same orientation when assembling
     /// the TimeProof headers.
-    async fn tip_hash(&self) -> eyre::Result<[u8; 32]>;
+    async fn tip_hash(&self, reverse: bool) -> eyre::Result<[u8; 32]>;
 }
 
 /// Real impl backed by mempool.space's `GET /api/blocks/tip/hash` endpoint.
@@ -32,7 +32,7 @@ impl MempoolClient {
 
 #[async_trait]
 impl ChainTipClient for MempoolClient {
-    async fn tip_hash(&self) -> eyre::Result<[u8; 32]> {
+    async fn tip_hash(&self, reverse: bool) -> eyre::Result<[u8; 32]> {
         let tip_hash_hex: String = self
             .http
             .get(format!("{}/api/blocks/tip/hash", self.base_url))
@@ -42,10 +42,16 @@ impl ChainTipClient for MempoolClient {
             .text()
             .await?;
 
-        let bytes = hex::decode(tip_hash_hex.trim())?;
+        let mut bytes = hex::decode(tip_hash_hex.trim())?;
+
         if bytes.len() != 32 {
             eyre::bail!("expected 32-byte block hash, got {} bytes", bytes.len());
         }
+
+        if reverse {
+            bytes.reverse();
+        }
+
         let mut out = [0u8; 32];
         out.copy_from_slice(&bytes);
         Ok(out)

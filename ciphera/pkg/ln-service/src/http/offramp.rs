@@ -101,7 +101,7 @@ pub async fn create_offramp(
 
     let zero_block_hash = state
         .chain_tip
-        .tip_hash()
+        .tip_hash(true)
         .await
         .map_err(|e| ApiError::Internal(format!("chain tip fetch: {e}")))?;
 

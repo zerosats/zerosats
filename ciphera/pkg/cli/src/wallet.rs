@@ -5,9 +5,11 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::num::ParseIntError;
 use std::path::{Path, PathBuf};
-use zk_primitives::{CitreaNetwork, Escrow, EscrowInputNote, InputNote, Note, UtxoKind, Utxo};
+use zk_primitives::{
+    CitreaNetwork, Escrow, EscrowInputNote, InputNote, Note, TimeLock, TimeProof, UtxoKind, Utxo,
+};
 
-use crate::escrow::{htlc_claim_address, htlc_refund_psi, pow_two_block_lock, pow_two_block_proof};
+use crate::escrow::{htlc_claim_address, htlc_refund_psi};
 
 use crate::CipheraAddress;
 use crate::address::{CLI_NETWORK, citrea_ticker_from_contract, citrea_token_data, network_for_chain};
@@ -488,6 +490,7 @@ impl Wallet {
         ticker: &str,
         htlc_secret_key: Element,
         preimage: [u8; 32],
+        lock: &TimeLock,
     ) -> Result<(Utxo, EscrowInputNote), WalletError> {
         let (inputs, change) = self.select_input_notes(ticker, amount)?;
         let (utxo_kind, note_kind) = citrea_token_data(self.network(), ticker);
@@ -496,21 +499,29 @@ impl Wallet {
             utxo_kind,
             note_kind,
             address: htlc_claim_address(htlc_secret_key, preimage),
-            psi: htlc_refund_psi(htlc_secret_key, &pow_two_block_lock()),
+            // Bind the refund branch to the real timelock (anchored to the
+            // current Bitcoin tip); the refund spend must later present a
+            // PoW chain extending `lock.zero_block` by `lock.n_blocks`.
+            psi: htlc_refund_psi(htlc_secret_key, lock),
             value: Element::from(amount),
         };
 
         // EscrowInputNote default sets spend_type=0; pin it to the HTLC
         // branch (3) up-front and stash the witness data so the redeem
         // / refund CLI commands can spend it without re-deriving
-        // anything. The persisted JSON is what gets passed between
-        // alice (locker) and bob (redeemer) in a real two-party flow.
+        // anything. Persist the lock (headers filled in at refund time)
+        // so the refund command knows which anchor to extend. The persisted
+        // JSON is what gets passed between alice (locker) and bob
+        // (redeemer) in a real two-party flow.
         let escrow_input_note = EscrowInputNote {
             note: htlc_note.clone(),
             spend_type: 3,
             secret_key: htlc_secret_key,
             preimage,
-            ..EscrowInputNote::default()
+            time_proof: TimeProof {
+                lock: lock.clone(),
+                ..TimeProof::default()
+            },
         };
 
         Ok((
@@ -525,10 +536,11 @@ impl Wallet {
         ticker: &str,
         htlc_secret_key: Element,
         preimage: [u8; 32],
+        lock: &TimeLock,
     ) -> Result<(Self, Utxo, EscrowInputNote), WalletError> {
         let mut staged = self.clone();
         let (utxo, escrow_note) =
-            staged.escrow_lock(amount, ticker, htlc_secret_key, preimage)?;
+            staged.escrow_lock(amount, ticker, htlc_secret_key, preimage, lock)?;
         Ok((staged, utxo, escrow_note))
     }
 
@@ -600,20 +612,22 @@ impl Wallet {
     fn escrow_refund(
         &mut self,
         htlc_input_note: &EscrowInputNote,
+        time_proof: TimeProof,
     ) -> Result<(Escrow, InputNote), WalletError> {
         let ticker = citrea_ticker_from_contract(htlc_input_note.note.note_kind);
         let amount = self.get_note_amount(&htlc_input_note.note)?;
 
-        // Refund branch: preimage is zeroed and the PoW witness for the
-        // configured timelock is attached. `secret_key` must match the
-        // one whose `key_hash` was baked into `psi` at lock time --
-        // for the test flow that's the same key used for claim.
+        // Refund branch: preimage is zeroed and the PoW witness extending
+        // the lock anchor is attached (`time_proof`, built from real
+        // Bitcoin headers by the caller). `secret_key` must match the one
+        // whose `key_hash` was baked into `psi` at lock time, and
+        // `time_proof.lock` must be the lock that `psi` committed to.
         let refund_input = EscrowInputNote {
             note: htlc_input_note.note.clone(),
             spend_type: 3,
             secret_key: htlc_input_note.secret_key,
             preimage: [0u8; 32],
-            time_proof: pow_two_block_proof(),
+            time_proof,
         };
 
         let received: InputNote = self.receive_note(amount, &ticker);
@@ -633,9 +647,10 @@ impl Wallet {
     pub fn prepare_escrow_refund(
         &self,
         htlc_input_note: &EscrowInputNote,
+        time_proof: TimeProof,
     ) -> Result<(Self, Escrow, InputNote), WalletError> {
         let mut staged = self.clone();
-        let (escrow, received) = staged.escrow_refund(htlc_input_note)?;
+        let (escrow, received) = staged.escrow_refund(htlc_input_note, time_proof)?;
         Ok((staged, escrow, received))
     }
 

@@ -57,6 +57,13 @@ struct Cli {
         default_value = "0xbd57b7d47d66934509f9ca31248598eb6cb3fafd"
     )]
     rollup: String,
+
+    /// mempool.space-compatible API base URL for Bitcoin block data, used
+    /// by the HTLC escrow timelock (anchor at lock time, PoW headers at
+    /// refund time). Point at the instance matching the Bitcoin network the
+    /// rollup anchors to, e.g. `https://mempool.space/testnet4`.
+    #[arg(global = true, long, default_value = "https://mempool.space")]
+    btc_explorer: String,
 }
 
 #[derive(Subcommand, Debug)]
@@ -615,6 +622,7 @@ async fn handle_escrow_lock(
     amount_wei: u64,
     ticker: &str,
     preimage_hex: &str,
+    btc_explorer: &str,
 ) -> Result<()> {
     let mut client = NodeClient::builder()
         .name(name)
@@ -622,6 +630,19 @@ async fn handle_escrow_lock(
         .build(chain, false)?;
 
     let preimage = parse_preimage_hex(preimage_hex)?;
+
+    // Anchor the HTLC refund timelock to the *current Bitcoin tip*. The
+    // refund branch (later) must present a PoW chain extending this anchor
+    // by `n_blocks`, so the timelock only opens once that many blocks are
+    // mined. (Tests use a fixed fixture; production uses real blocks.)
+    let lock = cli::mempool::MempoolClient::new(btc_explorer)
+        .tip_lock()
+        .await?;
+    println!(
+        "\n🔒 Timelock anchored to Bitcoin tip {} (+{} blocks)",
+        hex::encode(lock.zero_block),
+        lock.n_blocks,
+    );
 
     // For this single-key test flow the same secret key gates both the
     // claim and refund branches: convenient for a single-wallet
@@ -633,7 +654,7 @@ async fn handle_escrow_lock(
 
     let (prepared_wallet, utxo, escrow_input_note) = client
         .get_wallet()
-        .prepare_escrow_lock(amount_wei, ticker, htlc_secret_key, preimage)?;
+        .prepare_escrow_lock(amount_wei, ticker, htlc_secret_key, preimage, &lock)?;
 
     let snark = utxo.prove().unwrap();
 
@@ -672,6 +693,7 @@ async fn handle_escrow_redeem_or_refund(
     host: &str,
     note_path: &str,
     refund: bool,
+    btc_explorer: &str,
 ) -> Result<()> {
     let mut client = NodeClient::builder()
         .name(name)
@@ -687,7 +709,16 @@ async fn handle_escrow_redeem_or_refund(
     let label = if refund { "Refund" } else { "Redeem" };
 
     let (prepared_wallet, escrow, _received) = if refund {
-        client.get_wallet().prepare_escrow_refund(&htlc_input_note)?
+        // Build the refund PoW witness from real Bitcoin headers extending
+        // the lock anchor committed at lock time. Fails clearly if fewer
+        // than `n_blocks` blocks have been mined since the anchor (the
+        // timelock has not elapsed yet).
+        let time_proof = cli::mempool::MempoolClient::new(btc_explorer)
+            .refund_proof(&htlc_input_note.time_proof.lock)
+            .await?;
+        client
+            .get_wallet()
+            .prepare_escrow_refund(&htlc_input_note, time_proof)?
     } else {
         client.get_wallet().prepare_escrow_redeem(&htlc_input_note)?
     };
@@ -1396,6 +1427,12 @@ async fn handle_withdraw_ln(
         value: parse_element_field(note_json, "value")?,
     };
 
+    let timelock_json = &data["timelock"];
+/*    let time_lock = TimeLock {
+        zero_block: parse_element_field(note_json, "zero_block")?,
+        n_blocks: parse_element_field(note_json, "n_blocks")?,
+    };*/
+
     println!("\n✅ Escrow data received from ln-service!");
     println!("   Payment hash: {payment_hash}");
     println!("   Note address: {}", htlc_note.address);
@@ -1405,6 +1442,7 @@ async fn handle_withdraw_ln(
         units::wei_to_sats(htlc_note.value.to_u64_array()[0])
     );
     println!("   Quote expiry: {expires_at}");
+    println!("   Timelock: {timelock_json}");
 
     // Step 2 — commit funds by spending wallet notes into the escrow
     // note. Uses the Utxo Send circuit exactly like `escrow-lock`, but
@@ -1920,6 +1958,7 @@ async fn main() -> Result<()> {
                 amount_wei,
                 &ticker_normalized,
                 &preimage,
+                &cli.btc_explorer,
             )
             .await?;
         }
@@ -1930,6 +1969,7 @@ async fn main() -> Result<()> {
                 &cli.host,
                 &note,
                 false,
+                &cli.btc_explorer,
             )
             .await?;
         }
@@ -1940,6 +1980,7 @@ async fn main() -> Result<()> {
                 &cli.host,
                 &note,
                 true,
+                &cli.btc_explorer,
             )
             .await?;
         }
