@@ -1,9 +1,9 @@
 use crate::clients::{
     CipheraClient, ElementStatus, LightningClient, LightningPaymentStatus, SubmitError,
 };
-use crate::db::{DbPool, quotes, service_notes};
+use crate::db::{quotes, service_notes, DbPool};
 use crate::domain::{Quote, QuoteStatus, ServiceNote};
-use crate::settlement::proof::{EscrowClaimProver, service_owned_note};
+use crate::settlement::proof::{service_owned_note, EscrowClaimProver};
 use chrono::Utc;
 use element::Element;
 use std::collections::HashSet;
@@ -86,13 +86,14 @@ async fn step(ctx: &OfframpContext, q: &Quote) -> eyre::Result<()> {
 }
 
 async fn step_detect_escrow(ctx: &OfframpContext, q: &Quote) -> eyre::Result<()> {
-    debug!(payment_hash = %hex::encode(q.payment_hash), "checking EscrowRequested quote");
-
     if Utc::now() > q.expires_at {
         info!(payment_hash = %hex::encode(q.payment_hash), "quote expired before escrow; cancelling");
         quotes::update_status(&ctx.db, q.payment_hash, QuoteStatus::Cancelled).await?;
         return Ok(());
     }
+
+    debug!(payment_hash = %hex::encode(q.payment_hash),
+           committment = format!("{}", q.note_commitment), "checking EscrowRequested quote");
 
     match ctx.ciphera.element_status(q.note_commitment).await? {
         ElementStatus::Unspent { height, .. } => {

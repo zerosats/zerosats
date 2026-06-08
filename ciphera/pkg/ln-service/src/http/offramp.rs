@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 use rand::RngCore;
 use rand::rngs::OsRng;
+use tracing::debug;
 
 #[derive(Debug, Deserialize)]
 pub struct CreateRequest {
@@ -167,6 +168,8 @@ pub async fn create_offramp(
     };
 
     quotes::insert(&state.db, &quote).await?;
+
+    debug!(payment_hash = %hex::encode(payment_hash), "quoted. Responding with escrow data" );
 
     Ok(web::Json(CreateResponse {
         payment_hash: hex::encode(payment_hash),
