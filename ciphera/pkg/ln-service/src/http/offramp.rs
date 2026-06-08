@@ -111,7 +111,7 @@ pub async fn create_offramp(
     // service is the redeemer, not the user) and the refund branch to
     // the user's address. The prover at settlement time witnesses the
     // claim branch using `service_secret_key` from
-    // `SettlementContext` -- this must agree.
+    // `OfframpContext` -- this must agree.
     let note = offramp_htlc_note(
         state.config.service_secret_key,
         user_address,

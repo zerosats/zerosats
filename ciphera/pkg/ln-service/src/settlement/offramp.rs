@@ -11,10 +11,10 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::Mutex;
 use tokio::time;
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 
 #[derive(Clone)]
-pub struct SettlementContext {
+pub struct OfframpContext {
     pub db: DbPool,
     pub ciphera: Arc<dyn CipheraClient>,
     pub lightning: Arc<dyn LightningClient>,
@@ -31,7 +31,7 @@ pub struct SettlementContext {
     pub tick: Duration,
 }
 
-pub async fn run_supervisor(ctx: SettlementContext) {
+pub async fn run_offramp_supervisor(ctx: OfframpContext) {
     let ctx = Arc::new(ctx);
     let inflight: Arc<Mutex<HashSet<[u8; 32]>>> = Arc::new(Mutex::new(HashSet::new()));
     let mut ticker = time::interval(ctx.tick);
@@ -52,7 +52,7 @@ pub async fn run_supervisor(ctx: SettlementContext) {
 /// so new quotes always get picked up on the next tick regardless of what
 /// any in-flight quote is doing.
 async fn dispatch(
-    ctx: &Arc<SettlementContext>,
+    ctx: &Arc<OfframpContext>,
     inflight: &Arc<Mutex<HashSet<[u8; 32]>>>,
 ) -> eyre::Result<()> {
     let quotes_list = quotes::list_non_terminal(&ctx.db).await?;
@@ -74,7 +74,7 @@ async fn dispatch(
     Ok(())
 }
 
-async fn step(ctx: &SettlementContext, q: &Quote) -> eyre::Result<()> {
+async fn step(ctx: &OfframpContext, q: &Quote) -> eyre::Result<()> {
     match q.status {
         QuoteStatus::EscrowRequested => step_detect_escrow(ctx, q).await,
         QuoteStatus::EscrowDetected => step_pay_invoice(ctx, q).await,
@@ -85,7 +85,9 @@ async fn step(ctx: &SettlementContext, q: &Quote) -> eyre::Result<()> {
     }
 }
 
-async fn step_detect_escrow(ctx: &SettlementContext, q: &Quote) -> eyre::Result<()> {
+async fn step_detect_escrow(ctx: &OfframpContext, q: &Quote) -> eyre::Result<()> {
+    debug!(payment_hash = %hex::encode(q.payment_hash), "checking EscrowRequested quote");
+
     if Utc::now() > q.expires_at {
         info!(payment_hash = %hex::encode(q.payment_hash), "quote expired before escrow; cancelling");
         quotes::update_status(&ctx.db, q.payment_hash, QuoteStatus::Cancelled).await?;
@@ -97,12 +99,14 @@ async fn step_detect_escrow(ctx: &SettlementContext, q: &Quote) -> eyre::Result<
             info!(payment_hash = %hex::encode(q.payment_hash), height, "escrow detected on ciphera");
             quotes::update_status(&ctx.db, q.payment_hash, QuoteStatus::EscrowDetected).await?;
         }
-        ElementStatus::NotFound => {}
+        ElementStatus::NotFound => {
+            debug!(payment_hash = %hex::encode(q.payment_hash), "requested escrow hasn't been funded yet");
+        }
     }
     Ok(())
 }
 
-async fn step_pay_invoice(ctx: &SettlementContext, q: &Quote) -> eyre::Result<()> {
+async fn step_pay_invoice(ctx: &OfframpContext, q: &Quote) -> eyre::Result<()> {
     // Double check if quote is not expired yet. Implicitly checks timelock condition
     // should be fine, unless phoenixd is eclipsed
     if Utc::now() > q.expires_at {
@@ -143,7 +147,7 @@ async fn step_pay_invoice(ctx: &SettlementContext, q: &Quote) -> eyre::Result<()
     Ok(())
 }
 
-async fn step_poll_payment(ctx: &SettlementContext, q: &Quote) -> eyre::Result<()> {
+async fn step_poll_payment(ctx: &OfframpContext, q: &Quote) -> eyre::Result<()> {
     let hash_hex = hex::encode(q.payment_hash);
     match ctx.lightning.payment_status(&hash_hex).await? {
         LightningPaymentStatus::Pending => Ok(()),
@@ -160,7 +164,7 @@ async fn step_poll_payment(ctx: &SettlementContext, q: &Quote) -> eyre::Result<(
     }
 }
 
-async fn step_submit_claim(ctx: &SettlementContext, q: &Quote) -> eyre::Result<()> {
+async fn step_submit_claim(ctx: &OfframpContext, q: &Quote) -> eyre::Result<()> {
     let preimage = q
         .preimage
         .ok_or_else(|| eyre::eyre!("LightningPaid without preimage"))?;
@@ -211,7 +215,7 @@ async fn step_submit_claim(ctx: &SettlementContext, q: &Quote) -> eyre::Result<(
     }
 }
 
-async fn step_confirm_claim(ctx: &SettlementContext, q: &Quote) -> eyre::Result<()> {
+async fn step_confirm_claim(ctx: &OfframpContext, q: &Quote) -> eyre::Result<()> {
     let txn_hash = match q.claim_address {
         Some(h) => h,
         None => return Ok(()),
@@ -235,7 +239,7 @@ async fn step_confirm_claim(ctx: &SettlementContext, q: &Quote) -> eyre::Result<
 
 /// Add the claim's service-owned output note to the ledger so onramps can
 /// spend it. Mirrors the note built in `EscrowClaimProver::build_and_prove`.
-async fn record_service_note(ctx: &SettlementContext, q: &Quote) -> eyre::Result<()> {
+async fn record_service_note(ctx: &OfframpContext, q: &Quote) -> eyre::Result<()> {
     let note = service_owned_note(q.note_secret, q.note_kind, q.amount);
     let limbs = q.amount.to_u64_array();
     if limbs[1] != 0 || limbs[2] != 0 || limbs[3] != 0 {

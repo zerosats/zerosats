@@ -1,9 +1,11 @@
+use eyre::Result;
 use async_trait::async_trait;
 use element::Element;
 use node_interface::{ElementsResponseSingle, TransactionRequest, TransactionResponse};
 use reqwest::{Client, StatusCode};
 use tracing::warn;
 use zk_primitives::{EscrowProof, LeafProof, UtxoProof};
+use std::time::Duration;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ElementStatus {
@@ -70,7 +72,7 @@ pub struct ReqwestCipheraClient {
 }
 
 impl ReqwestCipheraClient {
-    pub fn new(base_url: impl Into<String>) -> Self {
+    pub fn new(base_url: impl Into<String>) -> Result<Self> {
         // Trim trailing slashes so the `{base}/v0/transaction` joins
         // don't produce a `//` that proxies tend to 301-normalize. A
         // redirect there is silently fatal for POSTs: reqwest's default
@@ -79,10 +81,15 @@ impl ReqwestCipheraClient {
         // back as 405. GET reads survive the same redirect, which makes
         // the failure look like a node-feature gap rather than a URL one.
         let base_url = base_url.into().trim_end_matches('/').to_string();
-        Self {
+        let http = Client::builder()
+            .connect_timeout(Duration::from_secs(10))
+            .timeout(Duration::from_secs(20))
+            .build()?;
+
+        Ok(Self {
             base_url,
-            http: Client::new(),
-        }
+            http,
+        })
     }
 
     /// Submit any leaf proof to the node's `/v0/transaction` endpoint.

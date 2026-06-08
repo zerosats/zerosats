@@ -7,7 +7,7 @@ use ln_service::config::Config;
 use ln_service::db;
 use ln_service::http::{AppState, configure_routes};
 use ln_service::settlement::{
-    OnrampContext, SettlementContext, run_onramp_supervisor, run_supervisor,
+    OnrampContext, OfframpContext, run_onramp_supervisor, run_offramp_supervisor,
 };
 use ln_service::settlement::proof::LocalEscrowClaimProver;
 use std::sync::Arc;
@@ -36,7 +36,7 @@ async fn main() -> eyre::Result<()> {
 
     let chain_tip: Arc<dyn ln_service::clients::ChainTipClient> =
         Arc::new(BitcoinClock::new(config.mempool_url.clone()));
-    let ciphera = Arc::new(ReqwestCipheraClient::new(config.ciphera_url.clone()));
+    let ciphera = Arc::new(ReqwestCipheraClient::new(config.ciphera_url.clone())?);
     let lightning = Arc::new(PhoenixdClient::new(
         &config.phoenixd_api_password,
         &config.phoenixd_url,
@@ -44,7 +44,7 @@ async fn main() -> eyre::Result<()> {
     let prover = Arc::new(LocalEscrowClaimProver);
 
     if config.offramp {
-        let settlement_ctx = SettlementContext {
+        let offramp_ctx = OfframpContext {
             db: pool.clone(),
             ciphera: ciphera.clone(),
             lightning: lightning.clone(),
@@ -53,7 +53,7 @@ async fn main() -> eyre::Result<()> {
             service_secret_key: config.service_secret_key,
             tick: Duration::from_millis(config.worker_tick_ms),
         };
-        tokio::spawn(run_supervisor(settlement_ctx));
+        tokio::spawn(run_offramp_supervisor(offramp_ctx));
         tracing::info!("offramp enabled");
     }
 

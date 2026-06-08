@@ -1,6 +1,6 @@
 pub mod onramp;
 pub mod proof;
-pub mod worker;
+pub mod offramp;
 
 pub use onramp::{OnrampContext, run_onramp_supervisor};
-pub use worker::{SettlementContext, run_supervisor};
+pub use offramp::{OfframpContext, run_offramp_supervisor};
