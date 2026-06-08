@@ -1,6 +1,6 @@
 use crate::{get_address_for_private_key, note::Note};
 use element::Element;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, Serializer, Deserializer};
 
 /// Anchor + required-work specification for a timelocked spend path.
 ///
@@ -38,11 +38,15 @@ pub fn timelock_address(secret_key: Element, lock: &TimeLock) -> Element {
 ///
 /// Mirrors the Noir `TimeProof` struct used by note kinds 7 (timelock) and
 /// 8 (HTLC refund path). The headers must chain from `lock.zero_block`.
+///
+/// Serializes only the `lock` (anchor + required work); `headers` are
+/// proving-time witnesses and are not persisted.
 #[derive(Clone, Debug)]
 pub struct TimeProof {
     /// The anchor and required number of subsequent blocks.
     pub lock: TimeLock,
     /// Block headers chaining from `lock.zero_block`.
+    /// Not serialized (custom impl) -- filled in at refund time from real Bitcoin headers.
     pub headers: [[u8; 80]; 2],
 }
 
@@ -52,6 +56,28 @@ impl Default for TimeProof {
             lock: TimeLock::default(),
             headers: [[0u8; 80]; 2],
         }
+    }
+}
+
+impl Serialize for TimeProof {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        self.lock.serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for TimeProof {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let lock = TimeLock::deserialize(deserializer)?;
+        Ok(TimeProof {
+            lock,
+            headers: [[0u8; 80]; 2],
+        })
     }
 }
 
@@ -80,9 +106,9 @@ pub struct EscrowInputNote {
     #[serde(default)]
     pub preimage: [u8; 32],
     /// Bitcoin PoW witness for the timelocked spend paths (kind 7, and the
-    /// kind-8 refund path). Not serialized -- it's a proving-time witness,
-    /// not part of the persisted note.
-    #[serde(skip)]
+    /// kind-8 refund path). The lock is serialized (anchor persists to JSON),
+    /// but headers are not (they're filled in at refund time from real blocks).
+    #[serde(default)]
     pub time_proof: TimeProof,
 }
 
@@ -173,7 +199,13 @@ impl EscrowInputNote {
     /// Create a new padding note
     #[must_use]
     pub fn padding_note() -> Self {
-        Self::default()
+        Self {
+            note: Note::padding_note(),
+            spend_type: 0,
+            secret_key: Element::ZERO,
+            preimage: [0u8; 32],
+            time_proof: TimeProof::default(),
+        }
     }
 
     /// Generates a new note with given value, for an ephemeral private key, the private key

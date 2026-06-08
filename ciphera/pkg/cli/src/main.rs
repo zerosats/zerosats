@@ -713,8 +713,18 @@ async fn handle_escrow_redeem_or_refund(
         // the lock anchor committed at lock time. Fails clearly if fewer
         // than `n_blocks` blocks have been mined since the anchor (the
         // timelock has not elapsed yet).
+        // The lock was persisted via TimeProof serialization when the note
+        // was created; we recover it and use it to fetch the PoW headers.
+        let lock = &htlc_input_note.time_proof.lock;
+        if lock.zero_block == [0u8; 32] {
+            return Err(color_eyre::eyre::eyre!(
+                "refund requires a timelock anchor (not found in this note); \
+                 the note may have been created by an old CLI version. \
+                 Create a new escrow lock/refund pair."
+            ));
+        }
         let time_proof = bitcoin_clock::BitcoinClock::new(btc_explorer)
-            .refund_proof(&htlc_input_note.time_proof.lock)
+            .refund_proof(lock)
             .await?;
         client
             .get_wallet()
@@ -1351,6 +1361,47 @@ fn parse_element_field(value: &serde_json::Value, field: &str) -> Result<Element
         .map_err(|e| color_eyre::eyre::eyre!("invalid '{field}' in ln-service response: {e}"))
 }
 
+/// Parse a Bitcoin block hash from the timelock response (stored as hex string).
+fn parse_timelock_hash(value: &serde_json::Value, field: &str) -> Result<[u8; 32]> {
+    let s = value
+        .get(field)
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| color_eyre::eyre::eyre!("missing '{field}' in timelock response"))?;
+    let bytes = hex::decode(s)
+        .map_err(|e| color_eyre::eyre::eyre!("invalid hex in timelock '{field}': {e}"))?;
+    let mut hash = [0u8; 32];
+    if bytes.len() != 32 {
+        return Err(color_eyre::eyre::eyre!(
+            "timelock '{field}' must be 32 bytes, got {}",
+            bytes.len()
+        ));
+    }
+    hash.copy_from_slice(&bytes);
+    Ok(hash)
+}
+
+/// Verify that the service-returned timelock anchor matches the current Bitcoin tip.
+/// Prevents the service from lying about what block the escrow is anchored to.
+async fn verify_timelock_matches_tip(
+    timelock_anchor: [u8; 32],
+    btc_explorer: &str,
+) -> Result<()> {
+    let current_tip = bitcoin_clock::BitcoinClock::new(btc_explorer)
+        .tip_lock(1)
+        .await?;
+
+    if timelock_anchor != current_tip.zero_block {
+        return Err(color_eyre::eyre::eyre!(
+            "timelock anchor {} does not match current Bitcoin tip {}; \
+             service may be returning a stale or incorrect anchor",
+            hex::encode(timelock_anchor),
+            hex::encode(current_tip.zero_block)
+        ));
+    }
+
+    Ok(())
+}
+
 /// ln-service escrow withdrawal. Step 1 requests HTLC escrow data for a
 /// BOLT11 invoice; step 2 commits funds by spending wallet notes into
 /// the returned escrow note. The ln-service holds the claim branch (it
@@ -1364,6 +1415,7 @@ async fn handle_withdraw_ln(
     chain: u64,
     invoice: &str,
     ln_service_uri: &str,
+    btc_explorer: &str,
 ) -> Result<()> {
     let mut client = NodeClient::builder()
         .name(name)
@@ -1428,10 +1480,14 @@ async fn handle_withdraw_ln(
     };
 
     let timelock_json = &data["timelock"];
-/*    let time_lock = TimeLock {
-        zero_block: parse_element_field(note_json, "zero_block")?,
-        n_blocks: parse_element_field(note_json, "n_blocks")?,
-    };*/
+    let timelock = zk_primitives::TimeLock {
+        zero_block: parse_timelock_hash(timelock_json, "zero_block")?,
+        n_blocks: Element::new(
+            timelock_json["n_blocks"]
+                .as_u64()
+                .ok_or_else(|| color_eyre::eyre::eyre!("missing or invalid 'n_blocks' in timelock"))?
+        ),
+    };
 
     println!("\n✅ Escrow data received from ln-service!");
     println!("   Payment hash: {payment_hash}");
@@ -1442,7 +1498,12 @@ async fn handle_withdraw_ln(
         units::wei_to_sats(htlc_note.value.to_u64_array()[0])
     );
     println!("   Quote expiry: {expires_at}");
-    println!("   Timelock: {timelock_json}");
+    println!("   Timelock anchor: {}", hex::encode(timelock.zero_block));
+    println!("   Timelock blocks: {}", timelock.n_blocks);
+
+    println!("\n🔍 Verifying timelock matches current Bitcoin tip...");
+    verify_timelock_matches_tip(timelock.zero_block, btc_explorer).await?;
+    println!("✅ Timelock verified against Bitcoin tip");
 
     // Step 2 — commit funds by spending wallet notes into the escrow
     // note. Uses the Utxo Send circuit exactly like `escrow-lock`, but
@@ -1467,15 +1528,20 @@ async fn handle_withdraw_ln(
             prepared_wallet.save()?;
             client.replace_wallet(prepared_wallet);
 
-            // Persist the escrow note + refund key so the funds are
-            // recoverable via `escrow-refund` if the service never
-            // claims. Refund branch only: no preimage (zeroed).
+            // Persist the escrow note + refund key + timelock so the funds are
+            // recoverable via `escrow-refund` if the service never claims.
+            // The timelock is persisted via TimeProof serialization (only the lock,
+            // not the headers which are filled in at refund time from real blocks).
+            // Refund branch only: no preimage (zeroed).
             let refund_input_note = zk_primitives::EscrowInputNote {
                 note: htlc_note.clone(),
                 spend_type: 3,
                 secret_key: refund_secret_key,
                 preimage: [0u8; 32],
-                ..zk_primitives::EscrowInputNote::default()
+                time_proof: zk_primitives::TimeProof {
+                    lock: timelock.clone(),
+                    ..Default::default()
+                },
             };
             let note_path = format!("{name}-htlc.json");
             let json_str = serde_json::to_string_pretty(&refund_input_note)?;
@@ -1483,6 +1549,8 @@ async fn handle_withdraw_ln(
             println!("\nSaved refund EscrowInputNote to {note_path}");
             println!("  refund secret_key: {refund_secret_key}");
             println!("  refund address:    {refund_address}");
+            println!("  timelock anchor:   {}", hex::encode(timelock.zero_block));
+            println!("  timelock blocks:   {}", timelock.n_blocks);
 
             let ticker = citrea_ticker_from_contract(htlc_note.note_kind);
             let b = client.get_wallet().balance;
@@ -2092,6 +2160,7 @@ async fn main() -> Result<()> {
                 cli.chain,
                 &invoice,
                 &ln_service_uri,
+                &cli.btc_explorer,
             )
             .await?;
         }

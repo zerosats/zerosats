@@ -509,10 +509,10 @@ impl Wallet {
         // EscrowInputNote default sets spend_type=0; pin it to the HTLC
         // branch (3) up-front and stash the witness data so the redeem
         // / refund CLI commands can spend it without re-deriving
-        // anything. Persist the lock (headers filled in at refund time)
-        // so the refund command knows which anchor to extend. The persisted
-        // JSON is what gets passed between alice (locker) and bob
-        // (redeemer) in a real two-party flow.
+        // anything. The lock (anchor + required work) is persisted via
+        // TimeProof serialization, but headers are filled in at refund time
+        // from real Bitcoin blocks. The persisted JSON is what gets passed
+        // between alice (locker) and bob (redeemer) in a real two-party flow.
         let escrow_input_note = EscrowInputNote {
             note: htlc_note.clone(),
             spend_type: 3,
