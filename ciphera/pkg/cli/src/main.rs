@@ -1380,6 +1380,84 @@ fn parse_timelock_hash(value: &serde_json::Value, field: &str) -> Result<[u8; 32
     Ok(hash)
 }
 
+/// Verify escrow note values against the Bolt11 invoice and wallet configuration.
+/// Prevents the service from:
+/// - Switching amounts (user requests 100k sats, service returns 50k)
+/// - Switching tokens/chains (user expects WCBTC on Citrea, service returns something else)
+/// - Using wrong refund address (funds wouldn't be recoverable)
+/// - Mismatching payment hash (wouldn't settle the correct invoice)
+async fn verify_escrow_note_values(
+    invoice: &str,
+    service_payment_hash: &str,
+    escrow_note: &Note,
+    expected_refund_address: &Element,
+    chain: u64,
+    timelock: &zk_primitives::TimeLock,
+) -> Result<()> {
+    // Parse the Bolt11 invoice to extract amount and payment hash
+    let bolt11_invoice = lightning_invoice::Bolt11Invoice::from_str(invoice)
+        .map_err(|e| color_eyre::eyre::eyre!("Failed to parse Bolt11 invoice: {e}"))?;
+
+    let invoice_amount_msats = bolt11_invoice
+        .amount_milli_satoshis()
+        .ok_or_else(|| color_eyre::eyre::eyre!("Bolt11 invoice has no amount specified"))?;
+    let invoice_amount_sats = invoice_amount_msats / 1_000;
+    let invoice_payment_hash = bolt11_invoice.payment_hash();
+
+    // Verify payment hash matches
+    let invoice_payment_hash_hex = format!("{:x}", invoice_payment_hash);
+    if service_payment_hash.to_lowercase() != invoice_payment_hash_hex.to_lowercase() {
+        return Err(color_eyre::eyre::eyre!(
+            "payment hash mismatch: invoice has {} but service returned {}; \
+             service may be trying to settle a different invoice",
+            invoice_payment_hash_hex,
+            service_payment_hash
+        ));
+    }
+
+    // Verify amount matches
+    let escrow_amount_wei = escrow_note.value.to_u64_array()[0];
+    let escrow_amount_sats = units::wei_to_sats(escrow_amount_wei);
+    if escrow_amount_sats != invoice_amount_sats {
+        return Err(color_eyre::eyre::eyre!(
+            "escrow amount mismatch: invoice specifies {} sats but service returned {} sats; \
+             service may be attempting to short the withdrawal",
+            invoice_amount_sats,
+            escrow_amount_sats
+        ));
+    }
+
+    // Verify token kind matches expected chain
+    let (_, expected_note_kind) = cli::address::citrea_token_data(
+        cli::address::network_for_chain(chain),
+        "WCBTC",
+    );
+    if escrow_note.note_kind != expected_note_kind {
+        return Err(color_eyre::eyre::eyre!(
+            "note kind mismatch: expected {} but service returned {}; \
+             service may be trying to return tokens from a different chain",
+            expected_note_kind,
+            escrow_note.note_kind
+        ));
+    }
+
+    // Verify note commitment (psi) encodes the refund address and timelock.
+    // For the HTLC refund branch: psi = Poseidon(key_hash, timelock.commitment())
+    // where key_hash = get_address_for_private_key(refund_secret_key).
+    // We can verify that the returned psi is consistent with our refund address and timelock.
+    let expected_psi = hash::hash_merge([*expected_refund_address, timelock.commitment()]);
+    if escrow_note.psi != expected_psi {
+        return Err(color_eyre::eyre::eyre!(
+            "note psi mismatch: expected {} but service returned {}; \
+             service may be using a different refund address or timelock",
+            expected_psi,
+            escrow_note.psi
+        ));
+    }
+
+    Ok(())
+}
+
 /// Verify that the service-returned timelock anchor matches the current Bitcoin tip.
 /// Prevents the service from lying about what block the escrow is anchored to.
 async fn verify_timelock_matches_tip(
@@ -1500,6 +1578,18 @@ async fn handle_withdraw_ln(
     println!("   Quote expiry: {expires_at}");
     println!("   Timelock anchor: {}", hex::encode(timelock.zero_block));
     println!("   Timelock blocks: {}", timelock.n_blocks);
+
+    // Verify escrow note values against the Bolt11 invoice and wallet state
+    println!("\n🔍 Verifying escrow note against Bolt11 invoice...");
+    verify_escrow_note_values(
+        invoice,
+        &payment_hash,
+        &htlc_note,
+        &refund_address,
+        chain,
+        &timelock,
+    ).await?;
+    println!("✅ Escrow note values verified");
 
     println!("\n🔍 Verifying timelock matches current Bitcoin tip...");
     verify_timelock_matches_tip(timelock.zero_block, btc_explorer).await?;

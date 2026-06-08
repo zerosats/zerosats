@@ -1621,6 +1621,7 @@ dependencies = [
  "ethereum-types",
  "hash",
  "hex",
+ "lightning-invoice",
  "node-interface",
  "once_cell",
  "primitives",
