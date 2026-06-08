@@ -225,8 +225,13 @@ pub async fn cancel_offramp(
 
     match q.status {
         // Pre-payment states: cancellation is just a status flip.
-        QuoteStatus::EscrowRequested | QuoteStatus::EscrowDetected => {
+        QuoteStatus::EscrowRequested => {
             quotes::update_status(&state.db, payment_hash, QuoteStatus::Cancelled).await?;
+        }
+        QuoteStatus::EscrowDetected => {
+            return Err(ApiError::Conflict(
+                "escrow is already funded; refund is possible if lightning payment fails".into(),
+            ));
         }
         // Lightning is in flight or already settled; we can't pull it
         // back without orphaning a Lightning payment.
