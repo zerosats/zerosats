@@ -9,7 +9,6 @@ use element::Element;
 use lightning_invoice::Bolt11Invoice;
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
-use zk_primitives::TimeLock;
 use rand::RngCore;
 use rand::rngs::OsRng;
 
@@ -99,16 +98,14 @@ pub async fn create_offramp(
     })?;
     let amount = Element::from(value_wei);
 
-    let zero_block_hash = state
+    // Anchor the HTLC refund branch to the current Bitcoin mainnet tip,
+    // returned as a ready `TimeLock` (zero_block already in the circuit's
+    // little-endian orientation).
+    let lock = state
         .chain_tip
-        .tip_hash(true)
+        .tip_lock(state.config.timelock_n_blocks)
         .await
         .map_err(|e| ApiError::Internal(format!("chain tip fetch: {e}")))?;
-
-    let lock = TimeLock {
-        zero_block: zero_block_hash,
-        n_blocks: Element::new(state.config.timelock_n_blocks),
-    };
 
     // Bind the HTLC claim branch to the *service's* secret key (the
     // service is the redeemer, not the user) and the refund branch to
@@ -158,7 +155,7 @@ pub async fn create_offramp(
         user_address,
         note_kind,
         amount,
-        zero_block: zero_block_hash,
+        zero_block: lock.zero_block,
         n_blocks: lock.n_blocks,
         note_commitment,
         preimage: None,
@@ -181,7 +178,7 @@ pub async fn create_offramp(
             value: note.value.to_string(),
         },
         timelock: TimelockResponse {
-            zero_block: hex::encode(zero_block_hash),
+            zero_block: hex::encode(lock.zero_block),
             n_blocks: state.config.timelock_n_blocks,
         },
         expires_at: expires_at.to_rfc3339(),

@@ -1158,6 +1158,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "bitcoin-clock"
+version = "0.1.0"
+dependencies = [
+ "element",
+ "eyre",
+ "hex",
+ "reqwest 0.13.4",
+ "serde",
+ "zk-primitives",
+]
+
+[[package]]
 name = "bitcoin-io"
 version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1599,6 +1611,7 @@ name = "cli"
 version = "0.0.0"
 dependencies = [
  "barretenberg",
+ "bitcoin-clock",
  "bs58 0.5.0",
  "chrono",
  "clap",
@@ -4650,6 +4663,7 @@ dependencies = [
  "async-trait",
  "barretenberg",
  "bitcoin",
+ "bitcoin-clock",
  "chrono",
  "clap",
  "element",

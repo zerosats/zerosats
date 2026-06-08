@@ -4,7 +4,6 @@ pub mod wallet;
 
 pub mod address;
 pub mod escrow;
-pub mod mempool;
 pub mod note_url;
 pub mod rpc;
 

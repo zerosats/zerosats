@@ -1,28 +1,34 @@
- //! Minimal mempool.space client for the Bitcoin block data the HTLC
-//! timelock needs: the current tip (anchor for a *lock*) and the two
-//! headers extending it (PoW witness for a *refund*).
+//! Bitcoin "clock": measures elapsed time in **mainnet** Bitcoin blocks for
+//! the HTLC escrow timelock. It provides the anchor for a *lock* (the
+//! current tip) and the PoW witness for a *refund* (the headers extending
+//! the anchor), fetched from a mempool.space-compatible REST API.
+//!
+//! `bitcoin-clock` measures time only against mainnet blocks.
 //!
 //! **Byte order matters.** `TimeLock.zero_block` and the Noir circuit's
 //! `check_pow_chain` (`noir/bitcoin/src/lib.nr`) use the *internal*
 //! little-endian block hash -- the exact bytes that appear in the next
-//! header's `prev_block` field. The mempool.space REST API returns hashes
-//! in *display* (big-endian) form, so we reverse on the way in/out.
+//! header's `prev_block` field. The REST API returns hashes in *display*
+//! (big-endian) form, so we reverse on the way in/out and hand callers a
+//! ready `TimeLock` / `TimeProof`.
 
-use color_eyre::eyre::{Result, bail, eyre};
 use element::Element;
+use eyre::{Result, bail, eyre};
 use serde::Deserialize;
 use std::time::Duration;
 use zk_primitives::{TimeLock, TimeProof};
 
-/// The HTLC `TimeProof` carries exactly two headers, so the refund timelock
-/// is always two Bitcoin blocks of work past the anchor.
-const N_BLOCKS: u64 = 2;
+/// Public mainnet mempool.space API base URL.
+pub const MAINNET: &str = "https://mempool.space";
 
-/// Client for a mempool.space-compatible REST API. `base_url` is the part
-/// before `/api` (e.g. `https://mempool.space` or
-/// `https://mempool.space/testnet4`).
+/// The HTLC `TimeProof` carries exactly two headers, so a refund timelock is
+/// at most two mainnet blocks of work past the anchor.
+const HEADERS: u64 = 2;
+
+/// Client for a mainnet mempool.space-compatible REST API. `base_url` is the
+/// part before `/api`.
 #[derive(Debug, Clone)]
-pub struct MempoolClient {
+pub struct BitcoinClock {
     base_url: String,
     http: reqwest::Client,
 }
@@ -32,7 +38,21 @@ struct BlockInfo {
     height: u64,
 }
 
-impl MempoolClient {
+impl Default for BitcoinClock {
+    fn default() -> Self {
+        Self::mainnet()
+    }
+}
+
+impl BitcoinClock {
+    /// Client against the public mainnet mempool.space API.
+    pub fn mainnet() -> Self {
+        Self::new(MAINNET)
+    }
+
+    /// Client against a mainnet mempool.space-compatible API at `base_url`
+    /// (e.g. a self-hosted instance). The Bitcoin network must be mainnet --
+    /// the timelock is measured in mainnet block work.
     pub fn new(base_url: impl Into<String>) -> Self {
         let http = reqwest::Client::builder()
             .timeout(Duration::from_secs(30))
@@ -45,8 +65,9 @@ impl MempoolClient {
     }
 
     /// Current chain tip as a `TimeLock` anchor: `zero_block` is the tip's
-    /// internal (little-endian) hash, `n_blocks = 2`.
-    pub async fn tip_lock(&self) -> Result<TimeLock> {
+    /// internal (little-endian) hash, ready for the circuit; `n_blocks` is
+    /// the required work on top of it.
+    pub async fn tip_lock(&self, n_blocks: u64) -> Result<TimeLock> {
         let display = self
             .http
             .get(format!("{}/api/blocks/tip/hash", self.base_url))
@@ -57,7 +78,7 @@ impl MempoolClient {
             .await?;
         Ok(TimeLock {
             zero_block: internal_hash(display.trim())?,
-            n_blocks: Element::new(N_BLOCKS),
+            n_blocks: Element::new(n_blocks),
         })
     }
 
@@ -73,7 +94,7 @@ impl MempoolClient {
             .send()
             .await?
             .error_for_status()
-            .map_err(|e| eyre!("anchor block {anchor_display} not found on mempool.space: {e}"))?
+            .map_err(|e| eyre!("anchor block {anchor_display} not found: {e}"))?
             .json()
             .await?;
 
@@ -82,7 +103,7 @@ impl MempoolClient {
 
         // Sanity: the first header must chain from the anchor (this is what
         // the circuit's `check_pow_chain` asserts). Catches a byte-order or
-        // wrong-anchor mistake before we spend a heavy proving cycle.
+        // wrong-anchor mistake before spending a heavy proving cycle.
         if h0[4..36] != lock.zero_block {
             bail!(
                 "fetched header does not chain from the lock anchor \
@@ -104,7 +125,7 @@ impl MempoolClient {
             .await?;
         if resp.status() == reqwest::StatusCode::NOT_FOUND {
             bail!(
-                "block at height {height} is not mined yet; the {N_BLOCKS}-block \
+                "block at height {height} is not mined yet; the {HEADERS}-block \
                  timelock has not elapsed since the anchor"
             );
         }

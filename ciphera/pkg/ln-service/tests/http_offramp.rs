@@ -24,8 +24,11 @@ struct FixedTip(pub [u8; 32]);
 
 #[async_trait]
 impl ChainTipClient for FixedTip {
-    async fn tip_hash(&self) -> eyre::Result<[u8; 32]> {
-        Ok(self.0)
+    async fn tip_lock(&self, n_blocks: u64) -> eyre::Result<zk_primitives::TimeLock> {
+        Ok(zk_primitives::TimeLock {
+            zero_block: self.0,
+            n_blocks: Element::new(n_blocks),
+        })
     }
 }
 

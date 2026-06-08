@@ -58,10 +58,10 @@ struct Cli {
     )]
     rollup: String,
 
-    /// mempool.space-compatible API base URL for Bitcoin block data, used
-    /// by the HTLC escrow timelock (anchor at lock time, PoW headers at
-    /// refund time). Point at the instance matching the Bitcoin network the
-    /// rollup anchors to, e.g. `https://mempool.space/testnet4`.
+    /// Mainnet mempool.space-compatible API base URL for Bitcoin block
+    /// data, used by the HTLC escrow timelock (anchor at lock time, PoW
+    /// headers at refund time). The timelock is measured in mainnet block
+    /// work; point this at a mainnet instance.
     #[arg(global = true, long, default_value = "https://mempool.space")]
     btc_explorer: String,
 }
@@ -635,8 +635,8 @@ async fn handle_escrow_lock(
     // refund branch (later) must present a PoW chain extending this anchor
     // by `n_blocks`, so the timelock only opens once that many blocks are
     // mined. (Tests use a fixed fixture; production uses real blocks.)
-    let lock = cli::mempool::MempoolClient::new(btc_explorer)
-        .tip_lock()
+    let lock = bitcoin_clock::BitcoinClock::new(btc_explorer)
+        .tip_lock(2)
         .await?;
     println!(
         "\n🔒 Timelock anchored to Bitcoin tip {} (+{} blocks)",
@@ -713,7 +713,7 @@ async fn handle_escrow_redeem_or_refund(
         // the lock anchor committed at lock time. Fails clearly if fewer
         // than `n_blocks` blocks have been mined since the anchor (the
         // timelock has not elapsed yet).
-        let time_proof = cli::mempool::MempoolClient::new(btc_explorer)
+        let time_proof = bitcoin_clock::BitcoinClock::new(btc_explorer)
             .refund_proof(&htlc_input_note.time_proof.lock)
             .await?;
         client

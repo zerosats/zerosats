@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 barretenberg = { workspace = true }
+bitcoin-clock = { workspace = true }
 element = { workspace = true }
 hash = { workspace = true }
 node-interface = { workspace = true }

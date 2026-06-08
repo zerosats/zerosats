@@ -1,0 +1,12 @@
+[package]
+name = "bitcoin-clock"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+element = { workspace = true }
+eyre = { workspace = true }
+hex = { workspace = true }
+reqwest = { workspace = true }
+serde = { workspace = true }
+zk-primitives = { workspace = true }

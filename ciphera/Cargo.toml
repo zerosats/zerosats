@@ -17,6 +17,7 @@ opt-level = 3
 [workspace.dependencies]
 atomiq = { path = "./pkg/atomiq" }
 barretenberg = { path = "./pkg/barretenberg" }
+bitcoin-clock = { path = "./pkg/bitcoin-clock" }
 block-store = { path = "./pkg/block-store" }
 burn-substitutor = { path = "./pkg/burn-substitutor" }
 constants = { path = "./pkg/constants" }
