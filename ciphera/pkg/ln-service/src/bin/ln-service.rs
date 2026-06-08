@@ -18,6 +18,11 @@ async fn main() -> eyre::Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
+                .map_err(|e| {
+                    // Print the error to stderr before falling back
+                    eprintln!("Failed to parse RUST_LOG environment variable: {:?}", e);
+                    e
+                })
                 .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("ln_service=info,actix_web=info")),
         )
         .init();

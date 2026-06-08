@@ -175,7 +175,7 @@ mod tests {
             service_evm_address: Element::ZERO,
             service_secret_key: Element::ZERO,
             timelock_n_blocks: 2,
-            quote_ttl_seconds: 600,
+            quote_ttl_seconds: 120,
             max_amount_sat: 1,
             worker_tick_ms: 1,
         }

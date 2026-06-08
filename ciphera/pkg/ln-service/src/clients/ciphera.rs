@@ -135,7 +135,7 @@ impl CipheraClient for ReqwestCipheraClient {
     }
 
     async fn element_status(&self, element: Element) -> eyre::Result<ElementStatus> {
-        let url = format!("{}/v0/elements/{}", self.base_url, element);
+        let url = format!("{}/v0/elements/{:064x}", self.base_url, element);
         let resp = self.http.get(url).send().await?;
         match resp.status() {
             StatusCode::OK => {
@@ -154,7 +154,7 @@ impl CipheraClient for ReqwestCipheraClient {
     }
 
     async fn transaction_height(&self, txn_hash: Element) -> eyre::Result<Option<u64>> {
-        let url = format!("{}/v0/transactions/{}", self.base_url, txn_hash);
+        let url = format!("{}/v0/transactions/{:064x}", self.base_url, txn_hash);
         // A transport error here (node restarting / briefly unreachable)
         // just means "can't tell if it's confirmed yet" -- treat it as
         // not-yet-confirmed so the confirm step keeps polling instead of

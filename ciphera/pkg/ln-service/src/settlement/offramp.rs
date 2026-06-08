@@ -93,15 +93,30 @@ async fn step_detect_escrow(ctx: &OfframpContext, q: &Quote) -> eyre::Result<()>
     }
 
     debug!(payment_hash = %hex::encode(q.payment_hash),
-           committment = format!("{}", q.note_commitment), "checking EscrowRequested quote");
+           committment = format!("{:064x}", q.note_commitment), "checking EscrowRequested quote");
 
-    match ctx.ciphera.element_status(q.note_commitment).await? {
-        ElementStatus::Unspent { height, .. } => {
-            info!(payment_hash = %hex::encode(q.payment_hash), height, "escrow detected on ciphera");
-            quotes::update_status(&ctx.db, q.payment_hash, QuoteStatus::EscrowDetected).await?;
-        }
-        ElementStatus::NotFound => {
-            debug!(payment_hash = %hex::encode(q.payment_hash), "requested escrow hasn't been funded yet");
+    const MAX_RETRIES: usize = 3;
+    const RETRY_DELAY: Duration = Duration::from_secs(2);
+
+    for attempt in 1..=MAX_RETRIES {
+        match ctx.ciphera.element_status(q.note_commitment).await? {
+            ElementStatus::Unspent { height, .. } => {
+                info!(payment_hash = %hex::encode(q.payment_hash), height, "escrow detected on ciphera");
+                quotes::update_status(&ctx.db, q.payment_hash, QuoteStatus::EscrowDetected).await?;
+                return Ok(());
+            }
+            ElementStatus::NotFound => {
+                if attempt < MAX_RETRIES {
+                    debug!(
+                        payment_hash = %hex::encode(q.payment_hash),
+                        attempt,
+                        "requested escrow hasn't been funded yet, retrying in 2s"
+                    );
+                    time::sleep(RETRY_DELAY).await;
+                } else {
+                    debug!(payment_hash = %hex::encode(q.payment_hash), "requested escrow hasn't been funded yet after all retries");
+                }
+            }
         }
     }
     Ok(())
