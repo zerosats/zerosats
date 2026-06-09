@@ -4,13 +4,13 @@ use borsh::{BorshDeserialize, BorshSerialize};
 use derivative::Derivative;
 use doomslug::Approval;
 use element::Element;
-use zk_primitives::UtxoProof;
+use zk_primitives::LeafProof;
 
 #[derive(Debug, Clone, BorshSerialize, BorshDeserialize)]
 pub enum NetworkEvent {
     Approval(Approval),
     Block(Block),
-    Transaction(UtxoProof),
+    Transaction(LeafProof),
 
     /// Request a snapshot from peers.
     SnapshotRequest(SnapshotRequest),

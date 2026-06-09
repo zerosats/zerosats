@@ -19,14 +19,11 @@ use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::Path;
 use std::str::FromStr;
+use element::Element;
 use zk_primitives::{
-    CitreaNetwork, InputNote, Note, citrea_testnet_usdc_note_kind, citrea_wcbtc_note_kind,
+    InputNote, Note, citrea_testnet_usdc_note_kind, citrea_wcbtc_note_kind,
+    get_address_for_private_key,
 };
-
-/// CLI is hardcoded to Citrea testnet today (see
-/// `client::client_tests::CHAIN_ID`). When the CLI grows a `--network` flag
-/// this constant should be threaded through the surrounding code paths.
-const CLI_NETWORK: CitreaNetwork = CitreaNetwork::Testnet;
 
 #[derive(Parser, Debug)]
 #[command(name = "ciphera-cli")]
@@ -60,6 +57,13 @@ struct Cli {
         default_value = "0xbd57b7d47d66934509f9ca31248598eb6cb3fafd"
     )]
     rollup: String,
+
+    /// Mainnet mempool.space-compatible API base URL for Bitcoin block
+    /// data, used by the HTLC escrow timelock (anchor at lock time, PoW
+    /// headers at refund time). The timelock is measured in mainnet block
+    /// work; point this at a mainnet instance.
+    #[arg(global = true, long, default_value = "https://mempool.space")]
+    btc_explorer: String,
 }
 
 #[derive(Subcommand, Debug)]
@@ -205,18 +209,36 @@ enum Commands {
         #[arg(required = true, long, default_value = "alice-htlc.json")]
         note: String,
     },
-    /// Deposit via Lightning Network using an external onramp service
+    /// Deposit via Lightning using the Atomiq exchange trade protocol:
+    /// requests an onramp swap from the Atomiq service, prints the invoice
+    /// to pay, then mints the resulting note via the reveal-preimage flow.
+    AtomiqDepo {
+        /// Amount to deposit in satoshis
+        #[arg(required = true, short, long)]
+        amount_sat: u64,
+
+        /// Atomiq onramp service base URI
+        #[arg(long, default_value = "https://testnet.lx.dev")]
+        onramp_uri: String,
+    },
+    /// Deposit via Lightning through the ln-service onramp flow. Two
+    /// steps: (1) request a bolt11 invoice from the ln-service and pay it,
+    /// then (2) once the service funds the note on chain, redeem it into
+    /// this wallet using the preimage as the note's spend key.
     DepoLn {
         /// Amount to deposit in satoshis
         #[arg(required = true, short, long)]
         amount_sat: u64,
 
-        /// Onramp service base URI
-        #[arg(long, default_value = "https://testnet.lx.dev")]
-        onramp_uri: String,
+        /// ln-service base URI (serves GET /v0/onramp)
+        #[arg(long, default_value = "http://127.0.0.1:7080")]
+        ln_service_uri: String,
     },
-    /// Withdraw via Lightning Network by burning cBTC through an offramp service
-    WithdrawLn {
+    /// Withdraw via Lightning using the Atomiq exchange trade protocol:
+    /// fetches a swap quote from the Atomiq offramp service and burns
+    /// cBTC through a burn substitutor middleware that settles the
+    /// Lightning invoice.
+    AtomiqWithdraw {
         /// BOLT11 Lightning invoice to pay out
         #[arg(required = true, long)]
         invoice: String,
@@ -232,6 +254,20 @@ enum Commands {
         /// Offramp service base URI
         #[arg(long, default_value = "https://testnet.lx.dev")]
         offramp_uri: String,
+    },
+    /// Withdraw via Lightning through the ln-service escrow flow. Two
+    /// steps: (1) request HTLC escrow data for a BOLT11 invoice from the
+    /// ln-service, then (2) commit funds by spending wallet notes into
+    /// the returned escrow note. The ln-service is the redeemer and
+    /// settles the invoice once the escrow lands on chain.
+    WithdrawLn {
+        /// BOLT11 Lightning invoice to pay out
+        #[arg(required = true, long)]
+        invoice: String,
+
+        /// ln-service base URI (serves POST /v0/offramp)
+        #[arg(long, default_value = "http://127.0.0.1:7080")]
+        ln_service_uri: String,
     },
 }
 
@@ -586,6 +622,7 @@ async fn handle_escrow_lock(
     amount_wei: u64,
     ticker: &str,
     preimage_hex: &str,
+    btc_explorer: &str,
 ) -> Result<()> {
     let mut client = NodeClient::builder()
         .name(name)
@@ -593,6 +630,19 @@ async fn handle_escrow_lock(
         .build(chain, false)?;
 
     let preimage = parse_preimage_hex(preimage_hex)?;
+
+    // Anchor the HTLC refund timelock to the *current Bitcoin tip*. The
+    // refund branch (later) must present a PoW chain extending this anchor
+    // by `n_blocks`, so the timelock only opens once that many blocks are
+    // mined. (Tests use a fixed fixture; production uses real blocks.)
+    let lock = bitcoin_clock::BitcoinClock::new(btc_explorer)
+        .tip_lock(2)
+        .await?;
+    println!(
+        "\n🔒 Timelock anchored to Bitcoin tip {} (+{} blocks)",
+        hex::encode(lock.zero_block),
+        lock.n_blocks,
+    );
 
     // For this single-key test flow the same secret key gates both the
     // claim and refund branches: convenient for a single-wallet
@@ -604,7 +654,7 @@ async fn handle_escrow_lock(
 
     let (prepared_wallet, utxo, escrow_input_note) = client
         .get_wallet()
-        .prepare_escrow_lock(amount_wei, ticker, htlc_secret_key, preimage)?;
+        .prepare_escrow_lock(amount_wei, ticker, htlc_secret_key, preimage, &lock)?;
 
     let snark = utxo.prove().unwrap();
 
@@ -643,8 +693,9 @@ async fn handle_escrow_redeem_or_refund(
     host: &str,
     note_path: &str,
     refund: bool,
+    btc_explorer: &str,
 ) -> Result<()> {
-    let client = NodeClient::builder()
+    let mut client = NodeClient::builder()
         .name(name)
         .host(host)
         .build(chain, false)?;
@@ -657,8 +708,27 @@ async fn handle_escrow_redeem_or_refund(
     let ticker = cli::address::citrea_ticker_from_contract(htlc_input_note.note.note_kind);
     let label = if refund { "Refund" } else { "Redeem" };
 
-    let (_prepared_wallet, escrow, _received) = if refund {
-        client.get_wallet().prepare_escrow_refund(&htlc_input_note)?
+    let (prepared_wallet, escrow, _received) = if refund {
+        // Build the refund PoW witness from real Bitcoin headers extending
+        // the lock anchor committed at lock time. Fails clearly if fewer
+        // than `n_blocks` blocks have been mined since the anchor (the
+        // timelock has not elapsed yet).
+        // The lock was persisted via TimeProof serialization when the note
+        // was created; we recover it and use it to fetch the PoW headers.
+        let lock = &htlc_input_note.time_proof.lock;
+        if lock.zero_block == [0u8; 32] {
+            return Err(color_eyre::eyre::eyre!(
+                "refund requires a timelock anchor (not found in this note); \
+                 the note may have been created by an old CLI version. \
+                 Create a new escrow lock/refund pair."
+            ));
+        }
+        let time_proof = bitcoin_clock::BitcoinClock::new(btc_explorer)
+            .refund_proof(lock)
+            .await?;
+        client
+            .get_wallet()
+            .prepare_escrow_refund(&htlc_input_note, time_proof)?
     } else {
         client.get_wallet().prepare_escrow_redeem(&htlc_input_note)?
     };
@@ -669,36 +739,38 @@ async fn handle_escrow_redeem_or_refund(
         .map_err(|e| color_eyre::eyre::eyre!("escrow.prove() failed: {e}"))?;
     println!("✅ EscrowProof generated ({} bytes)", snark.proof.0.len());
 
-    // Local self-verification: catches witness-level bugs (wrong
-    // preimage, stale PoW chain, secret_key mismatched against the
-    // baked-in commitment) before we even think about on-chain
-    // submission.
+    // Local self-verification before going on chain. Catches
+    // witness-level bugs (wrong preimage, stale PoW chain,
+    // secret_key mismatched against the baked-in commitment)
+    // without burning a node round-trip.
     snark
         .verify()
         .map_err(|e| color_eyre::eyre::eyre!("escrow.verify() failed: {e}"))?;
     println!("✅ Local verification of EscrowProof succeeded");
 
-    let proof_path = format!("{name}-htlc-{}.snark.json", label.to_lowercase());
-    std::fs::write(&proof_path, serde_json::to_string_pretty(&snark)?)?;
-    println!("📦 Saved proof to {proof_path}");
+    // Submit through the node's `/v0/transaction` endpoint as
+    // `LeafProof::Escrow`. The endpoint accepts both leaf flavours
+    // since the heterogeneous-aggregation refactor; the node routes
+    // escrow proofs through the agg_escrow → agg_agg slot pair on
+    // commit.
+    match client.transaction_escrow(&snark).await {
+        Ok(tx) => {
+            println!("\n✅ {label} transaction {} has been submitted!", tx.txn_hash);
+            println!("   Height:    {}", tx.height);
+            println!("   Root hash: {}", tx.root_hash);
 
-    println!(
-        "\nℹ️  {label} EscrowProof is valid locally; on-chain submission via the existing\n   \
-         `/transaction` endpoint is NOT yet wired up -- that endpoint accepts UtxoProof\n   \
-         only, see pkg/cli/src/client.rs::transaction. Extending the node mempool +\n   \
-         prover-side aggregation (agg_escrow → agg_agg with sources=[AggUtxo, AggEscrow])\n   \
-         is required to turn this proof into a tree-applied transaction.\n"
-    );
+            prepared_wallet.save()?;
+            client.replace_wallet(prepared_wallet);
 
-    // The wallet hasn't actually received the redeemed/refunded value
-    // on chain, so we do NOT persist the staged wallet changes here --
-    // doing so would desync the wallet from the chain root once a real
-    // submission path lands. Persistence happens when the proof is
-    // actually accepted by the node.
-
-    let b = client.get_wallet().balance;
-    println!("Balance {} sats {ticker} (unchanged: redeem not yet submitted)", units::wei_to_sats(b));
-    Ok(())
+            let b = client.get_wallet().balance;
+            println!("\nBalance {} sats {ticker}", units::wei_to_sats(b));
+            Ok(())
+        }
+        Err(e) => {
+            eprintln!("\n❌ {label} submission failed: {e}");
+            Err(e)
+        }
+    }
 }
 
 async fn handle_import(name: &str, notefile: &str) -> Result<()> {
@@ -717,7 +789,7 @@ async fn handle_import(name: &str, notefile: &str) -> Result<()> {
     }
 }
 
-async fn handle_depo_ln(
+async fn handle_atomiq_depo(
     name: &str,
     host: &str,
     chain: u64,
@@ -907,8 +979,209 @@ async fn handle_depo_ln(
     }
 }
 
+/// Reduce a 32-byte Lightning preimage to a single BN254 field element by
+/// taking its **low 16 bytes**. Must match the ln-service convention
+/// (`settlement::onramp::preimage_field`): a full 32-byte value can exceed
+/// the field modulus, so only the trailing 128 bits (big-endian low half)
+/// are used as the note's spend key.
+fn preimage_field(preimage: [u8; 32]) -> Element {
+    let mut buf = [0u8; 32];
+    buf[16..].copy_from_slice(&preimage[16..]);
+    Element::from_be_bytes(buf)
+}
+
+/// ln-service onramp deposit. Step 1 requests a bolt11 invoice for
+/// `amount_sat` and prints it to pay — the ln-service commits the
+/// preimage-locked note on chain right away (funded from its own balance).
+/// Step 2 polls until the invoice settles (`Settled`), at which point the
+/// service reveals the preimage and the note fields; we then redeem the
+/// note into this wallet using `preimage_field(preimage)` as the spend
+/// key. If the invoice is never paid the service refunds the note itself.
+async fn handle_depo_ln(
+    name: &str,
+    host: &str,
+    chain: u64,
+    amount_sat: u64,
+    ln_service_uri: &str,
+) -> Result<()> {
+    let http = reqwest::Client::new();
+
+    // Step 1 — GET /v0/onramp?amount_sat=N -> { payment_hash, bolt11 }.
+    let create_url = format!("{ln_service_uri}/v0/onramp?amount_sat={amount_sat}");
+    println!("\n⚡ Requesting onramp invoice from ln-service...");
+    let resp = http
+        .get(&create_url)
+        .send()
+        .await
+        .map_err(|e| color_eyre::eyre::eyre!("Failed to reach ln-service: {}", e))?;
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        return Err(color_eyre::eyre::eyre!("ln-service error {}: {}", status, body));
+    }
+    let data: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| color_eyre::eyre::eyre!("Failed to parse ln-service response: {}", e))?;
+
+    let payment_hash = data["payment_hash"]
+        .as_str()
+        .ok_or_else(|| color_eyre::eyre::eyre!("Missing 'payment_hash' in ln-service response"))?
+        .to_string();
+    let bolt11 = data["bolt11"]
+        .as_str()
+        .ok_or_else(|| color_eyre::eyre::eyre!("Missing 'bolt11' in ln-service response"))?
+        .to_string();
+
+    // Poll until the onramp's own expiry (+ grace for the refund to land),
+    // not a fixed short window: the service holds the committed note until
+    // `expires_at`, then refunds it. We track that so a slow payment isn't
+    // abandoned while the deposit is still live.
+    const POLL_INTERVAL_SECS: u64 = 4;
+    const POLL_GRACE_SECS: i64 = 300; // wait past expiry to catch the refund
+    const FALLBACK_TTL_SECS: i64 = 3600; // if the service omits expires_at
+
+    let deadline = data["expires_at"]
+        .as_str()
+        .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+        .map(|t| t.with_timezone(&chrono::Utc) + chrono::Duration::seconds(POLL_GRACE_SECS))
+        .unwrap_or_else(|| chrono::Utc::now() + chrono::Duration::seconds(FALLBACK_TTL_SECS));
+
+    println!("\n⚡ Pay this Lightning invoice:");
+    println!("   {bolt11}");
+    println!("\n   Payment hash: {payment_hash}");
+    println!(
+        "\nWaiting for the ln-service to settle the deposit (until {})...\n",
+        deadline.to_rfc3339()
+    );
+
+    // Step 2 — poll /v0/onramp/{payment_hash} until the invoice settles.
+    let status_url = format!("{ln_service_uri}/v0/onramp/{payment_hash}");
+    let (preimage_hex, note_json, note_commitment_hex) = loop {
+        tokio::time::sleep(std::time::Duration::from_secs(POLL_INTERVAL_SECS)).await;
+
+        if chrono::Utc::now() > deadline {
+            return Err(color_eyre::eyre::eyre!(
+                "Timed out waiting for onramp to settle (deadline {})",
+                deadline.to_rfc3339()
+            ));
+        }
+
+        let resp = http
+            .get(&status_url)
+            .send()
+            .await
+            .map_err(|e| color_eyre::eyre::eyre!("Poll error: {}", e))?;
+        if !resp.status().is_success() {
+            let body = resp.text().await.unwrap_or_default();
+            return Err(color_eyre::eyre::eyre!("Onramp status check failed: {}", body));
+        }
+        let s: serde_json::Value = resp
+            .json()
+            .await
+            .map_err(|e| color_eyre::eyre::eyre!("Failed to parse onramp status: {}", e))?;
+
+        let status = s["status"].as_str().unwrap_or("");
+        println!("State: {status}");
+
+        // Redeem as soon as the data allows: the deposit note is on chain
+        // (`note_commitment` present) AND the service has revealed the
+        // preimage. Keying off the payload rather than a specific status
+        // string keeps this working across ln-service versions
+        // (`Settled` / `NoteConfirmed` / ...).
+        if let (Some(preimage), Some(note_commitment)) =
+            (s["preimage"].as_str(), s["note_commitment"].as_str())
+        {
+            break (
+                preimage.to_string(),
+                s["note"].clone(),
+                note_commitment.to_string(),
+            );
+        }
+
+        // Terminal states where the deposit will not be credited.
+        match status {
+            "Refunded" | "Refunding" | "Failed" | "Expired" | "Cancelled" => {
+                return Err(color_eyre::eyre::eyre!(
+                    "Onramp reached terminal state {status} (deposit not credited)"
+                ));
+            }
+            _ => {} // keep polling
+        }
+    };
+
+    // Step 3 — reconstruct the deposit note and redeem it. The note's spend
+    // key is the preimage's low-half field element, which we now know.
+    let preimage = parse_preimage_hex(&preimage_hex)?;
+    let unlock_key = preimage_field(preimage);
+
+    let note = if note_json.is_object() {
+        // Modern ln-service returns the authoritative note fields (same
+        // shape as the offramp flow).
+        Note {
+            utxo_kind: parse_element_field(&note_json, "utxo_kind")?,
+            note_kind: parse_element_field(&note_json, "note_kind")?,
+            address: parse_element_field(&note_json, "address")?,
+            psi: parse_element_field(&note_json, "psi")?,
+            value: parse_element_field(&note_json, "value")?,
+        }
+    } else {
+        // Older ln-service returns only a commitment; derive the note from
+        // the preimage and this wallet's chain note kind.
+        let (utxo_kind, note_kind) =
+            cli::address::citrea_token_data(cli::address::network_for_chain(chain), "WCBTC");
+        Note {
+            utxo_kind,
+            note_kind,
+            address: get_address_for_private_key(unlock_key),
+            psi: hash_merge([unlock_key, unlock_key]),
+            value: Element::new(units::sats_to_wei(amount_sat)),
+        }
+    };
+
+    // The revealed preimage must actually unlock this note: its derived key
+    // has to reproduce the note's address.
+    if get_address_for_private_key(unlock_key) != note.address {
+        return Err(color_eyre::eyre::eyre!(
+            "preimage does not unlock the service note (address mismatch); \
+             preimage convention disagrees with the ln-service"
+        ));
+    }
+
+    // Cross-check the reconstructed note against the commitment the service
+    // reported -- catches a note_kind / amount mismatch (e.g. wrong --chain)
+    // before persisting a note that isn't actually on chain.
+    let expected = Element::from_str(&note_commitment_hex)
+        .map_err(|e| color_eyre::eyre::eyre!("invalid note_commitment from service: {e}"))?;
+    if note.commitment() != expected {
+        return Err(color_eyre::eyre::eyre!(
+            "reconstructed note commitment {} != service commitment {}; \
+             note_kind/amount disagree (check --chain matches the service)",
+            note.commitment(),
+            expected
+        ));
+    }
+
+    let amount_wei = note.value.to_u64_array()[0];
+    let input_note = InputNote::new(note, unlock_key);
+
+    let mut client = NodeClient::builder()
+        .name(name)
+        .host(host)
+        .build(chain, false)?;
+    let (prepared_wallet, ()) = client.get_wallet().prepare_add_to_avail(input_note)?;
+    prepared_wallet.save()?;
+    client.replace_wallet(prepared_wallet);
+
+    println!("\n✅ Deposit note redeemed into wallet.");
+    println!("   note value: {} sats", units::wei_to_sats(amount_wei));
+    let b = client.get_wallet().balance;
+    println!("\nBalance {} sats WCBTC", units::wei_to_sats(b));
+    Ok(())
+}
+
 #[allow(clippy::too_many_arguments)]
-async fn handle_withdraw_ln(
+async fn handle_atomiq_withdraw(
     name: &str,
     host: &str,
     chain: u64,
@@ -1077,6 +1350,313 @@ async fn handle_withdraw_ln(
     Ok(())
 }
 
+/// Parse an `Element` field out of the ln-service JSON response,
+/// mirroring the `Element::to_string()` encoding the service emits.
+fn parse_element_field(value: &serde_json::Value, field: &str) -> Result<Element> {
+    let s = value
+        .get(field)
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| color_eyre::eyre::eyre!("missing '{field}' in ln-service response"))?;
+    Element::from_str(s)
+        .map_err(|e| color_eyre::eyre::eyre!("invalid '{field}' in ln-service response: {e}"))
+}
+
+/// Parse a Bitcoin block hash from the timelock response (stored as hex string).
+fn parse_timelock_hash(value: &serde_json::Value, field: &str) -> Result<[u8; 32]> {
+    let s = value
+        .get(field)
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| color_eyre::eyre::eyre!("missing '{field}' in timelock response"))?;
+    let bytes = hex::decode(s)
+        .map_err(|e| color_eyre::eyre::eyre!("invalid hex in timelock '{field}': {e}"))?;
+    let mut hash = [0u8; 32];
+    if bytes.len() != 32 {
+        return Err(color_eyre::eyre::eyre!(
+            "timelock '{field}' must be 32 bytes, got {}",
+            bytes.len()
+        ));
+    }
+    hash.copy_from_slice(&bytes);
+    Ok(hash)
+}
+
+/// Verify escrow note values against the Bolt11 invoice and wallet configuration.
+/// Prevents the service from:
+/// - Switching amounts (user requests 100k sats, service returns 50k)
+/// - Switching tokens/chains (user expects WCBTC on Citrea, service returns something else)
+/// - Using wrong refund address (funds wouldn't be recoverable)
+/// - Mismatching payment hash (wouldn't settle the correct invoice)
+async fn verify_escrow_note_values(
+    invoice: &str,
+    service_payment_hash: &str,
+    escrow_note: &Note,
+    expected_refund_address: &Element,
+    chain: u64,
+    timelock: &zk_primitives::TimeLock,
+) -> Result<()> {
+    // Parse the Bolt11 invoice to extract amount and payment hash
+    let bolt11_invoice = lightning_invoice::Bolt11Invoice::from_str(invoice)
+        .map_err(|e| color_eyre::eyre::eyre!("Failed to parse Bolt11 invoice: {e}"))?;
+
+    let invoice_amount_msats = bolt11_invoice
+        .amount_milli_satoshis()
+        .ok_or_else(|| color_eyre::eyre::eyre!("Bolt11 invoice has no amount specified"))?;
+    let invoice_amount_sats = invoice_amount_msats / 1_000;
+    let invoice_payment_hash = bolt11_invoice.payment_hash();
+
+    // Verify payment hash matches
+    let invoice_payment_hash_hex = format!("{:x}", invoice_payment_hash);
+    if service_payment_hash.to_lowercase() != invoice_payment_hash_hex.to_lowercase() {
+        return Err(color_eyre::eyre::eyre!(
+            "payment hash mismatch: invoice has {} but service returned {}; \
+             service may be trying to settle a different invoice",
+            invoice_payment_hash_hex,
+            service_payment_hash
+        ));
+    }
+
+    // Verify amount matches
+    let escrow_amount_wei = escrow_note.value.to_u64_array()[0];
+    let escrow_amount_sats = units::wei_to_sats(escrow_amount_wei);
+    if escrow_amount_sats != invoice_amount_sats {
+        return Err(color_eyre::eyre::eyre!(
+            "escrow amount mismatch: invoice specifies {} sats but service returned {} sats; \
+             service may be attempting to short the withdrawal",
+            invoice_amount_sats,
+            escrow_amount_sats
+        ));
+    }
+
+    // Verify token kind matches expected chain
+    let (_, expected_note_kind) = cli::address::citrea_token_data(
+        cli::address::network_for_chain(chain),
+        "WCBTC",
+    );
+    if escrow_note.note_kind != expected_note_kind {
+        return Err(color_eyre::eyre::eyre!(
+            "note kind mismatch: expected {} but service returned {}; \
+             service may be trying to return tokens from a different chain",
+            expected_note_kind,
+            escrow_note.note_kind
+        ));
+    }
+
+    // Verify note commitment (psi) encodes the refund address and timelock.
+    // For the HTLC refund branch: psi = Poseidon(key_hash, timelock.commitment())
+    // where key_hash = get_address_for_private_key(refund_secret_key).
+    // We can verify that the returned psi is consistent with our refund address and timelock.
+    let expected_psi = hash::hash_merge([*expected_refund_address, timelock.commitment()]);
+    if escrow_note.psi != expected_psi {
+        return Err(color_eyre::eyre::eyre!(
+            "note psi mismatch: expected {} but service returned {}; \
+             service may be using a different refund address or timelock",
+            expected_psi,
+            escrow_note.psi
+        ));
+    }
+
+    Ok(())
+}
+
+/// Verify that the service-returned timelock anchor matches the current Bitcoin tip.
+/// Prevents the service from lying about what block the escrow is anchored to.
+async fn verify_timelock_matches_tip(
+    timelock_anchor: [u8; 32],
+    btc_explorer: &str,
+) -> Result<()> {
+    let current_tip = bitcoin_clock::BitcoinClock::new(btc_explorer)
+        .tip_lock(1)
+        .await?;
+
+    if timelock_anchor != current_tip.zero_block {
+        return Err(color_eyre::eyre::eyre!(
+            "timelock anchor {} does not match current Bitcoin tip {}; \
+             service may be returning a stale or incorrect anchor",
+            hex::encode(timelock_anchor),
+            hex::encode(current_tip.zero_block)
+        ));
+    }
+
+    Ok(())
+}
+
+/// ln-service escrow withdrawal. Step 1 requests HTLC escrow data for a
+/// BOLT11 invoice; step 2 commits funds by spending wallet notes into
+/// the returned escrow note. The ln-service holds the claim branch (it
+/// is the redeemer and settles the invoice). The refund branch is bound
+/// to a fresh wallet-owned key so the funds return to this wallet in the
+/// fallback scenario where the service never claims; that key is
+/// persisted alongside the escrow note for a later `escrow-refund`.
+async fn handle_withdraw_ln(
+    name: &str,
+    host: &str,
+    chain: u64,
+    invoice: &str,
+    ln_service_uri: &str,
+    btc_explorer: &str,
+) -> Result<()> {
+    let mut client = NodeClient::builder()
+        .name(name)
+        .host(host)
+        .build(chain, false)?;
+
+    // Refund key is the wallet's own: the escrow's refund branch binds
+    // `psi` to `get_address_for_private_key(refund_secret_key)`, so only
+    // this wallet can reclaim the funds if the service never settles.
+    let refund_secret_key = client.get_wallet().gen_pk();
+    let refund_address = get_address_for_private_key(refund_secret_key);
+
+    // Step 1 — POST /v0/offramp { bolt11, address }. The service returns
+    // the HTLC note skeleton (commitment fields), its timelock, the
+    // payment hash and the quote expiry. `address` is our refund target.
+    let http = reqwest::Client::new();
+    let create_url = format!("{ln_service_uri}/v0/offramp");
+
+    println!("\n⚡ Requesting escrow data from ln-service...");
+
+    let resp = http
+        .post(&create_url)
+        .json(&serde_json::json!({
+            "bolt11": invoice,
+            "address": refund_address.to_string(),
+        }))
+        .send()
+        .await
+        .map_err(|e| color_eyre::eyre::eyre!("Failed to reach ln-service: {}", e))?;
+
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        return Err(color_eyre::eyre::eyre!(
+            "ln-service error {}: {}",
+            status,
+            body
+        ));
+    }
+
+    let data: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| color_eyre::eyre::eyre!("Failed to parse ln-service response: {}", e))?;
+
+    let payment_hash = data["payment_hash"]
+        .as_str()
+        .ok_or_else(|| color_eyre::eyre::eyre!("Missing 'payment_hash' in ln-service response"))?
+        .to_string();
+    let expires_at = data["expires_at"].as_str().unwrap_or("unknown").to_string();
+
+    // Reconstruct the escrow output note from the service's commitment
+    // fields. We spend into this note verbatim -- its commitment must
+    // match what the service expects to claim against.
+    let note_json = &data["note"];
+    let htlc_note = Note {
+        utxo_kind: parse_element_field(note_json, "utxo_kind")?,
+        note_kind: parse_element_field(note_json, "note_kind")?,
+        address: parse_element_field(note_json, "address")?,
+        psi: parse_element_field(note_json, "psi")?,
+        value: parse_element_field(note_json, "value")?,
+    };
+
+    let timelock_json = &data["timelock"];
+    let timelock = zk_primitives::TimeLock {
+        zero_block: parse_timelock_hash(timelock_json, "zero_block")?,
+        n_blocks: Element::new(
+            timelock_json["n_blocks"]
+                .as_u64()
+                .ok_or_else(|| color_eyre::eyre::eyre!("missing or invalid 'n_blocks' in timelock"))?
+        ),
+    };
+
+    println!("\n✅ Escrow data received from ln-service!");
+    println!("   Payment hash: {payment_hash}");
+    println!("   Note address: {}", htlc_note.address);
+    println!("   Note psi:     {}", htlc_note.psi);
+    println!(
+        "   Note value:   {} sats",
+        units::wei_to_sats(htlc_note.value.to_u64_array()[0])
+    );
+    println!("   Quote expiry: {expires_at}");
+    println!("   Timelock anchor: {}", hex::encode(timelock.zero_block));
+    println!("   Timelock blocks: {}", timelock.n_blocks);
+
+    // Verify escrow note values against the Bolt11 invoice and wallet state
+    println!("\n🔍 Verifying escrow note against Bolt11 invoice...");
+    verify_escrow_note_values(
+        invoice,
+        &payment_hash,
+        &htlc_note,
+        &refund_address,
+        chain,
+        &timelock,
+    ).await?;
+    println!("✅ Escrow note values verified");
+
+    println!("\n🔍 Verifying timelock matches current Bitcoin tip...");
+    verify_timelock_matches_tip(timelock.zero_block, btc_explorer).await?;
+    println!("✅ Timelock verified against Bitcoin tip");
+
+    // Step 2 — commit funds by spending wallet notes into the escrow
+    // note. Uses the Utxo Send circuit exactly like `escrow-lock`, but
+    // the output note is dictated by the service rather than derived
+    // locally, and we keep no preimage (the service is the redeemer).
+    println!("\n   Committing funds to escrow...");
+
+    let (prepared_wallet, utxo) = client
+        .get_wallet()
+        .prepare_escrow_lock_to_note(htlc_note.clone())?;
+
+    let snark = utxo
+        .prove()
+        .map_err(|e| color_eyre::eyre::eyre!("utxo.prove() failed: {e}"))?;
+
+    match client.transaction(&snark).await {
+        Ok(tx) => {
+            println!("\n✅ Escrow lock transaction {} submitted", tx.txn_hash);
+            println!("   Height:    {}", tx.height);
+            println!("   Root hash: {}", tx.root_hash);
+
+            prepared_wallet.save()?;
+            client.replace_wallet(prepared_wallet);
+
+            // Persist the escrow note + refund key + timelock so the funds are
+            // recoverable via `escrow-refund` if the service never claims.
+            // The timelock is persisted via TimeProof serialization (only the lock,
+            // not the headers which are filled in at refund time from real blocks).
+            // Refund branch only: no preimage (zeroed).
+            let refund_input_note = zk_primitives::EscrowInputNote {
+                note: htlc_note.clone(),
+                spend_type: 3,
+                secret_key: refund_secret_key,
+                preimage: [0u8; 32],
+                time_proof: zk_primitives::TimeProof {
+                    lock: timelock.clone(),
+                    ..Default::default()
+                },
+            };
+            let note_path = format!("{name}-htlc.json");
+            let json_str = serde_json::to_string_pretty(&refund_input_note)?;
+            std::fs::write(&note_path, json_str)?;
+            println!("\nSaved refund EscrowInputNote to {note_path}");
+            println!("  refund secret_key: {refund_secret_key}");
+            println!("  refund address:    {refund_address}");
+            println!("  timelock anchor:   {}", hex::encode(timelock.zero_block));
+            println!("  timelock blocks:   {}", timelock.n_blocks);
+
+            let ticker = citrea_ticker_from_contract(htlc_note.note_kind);
+            let b = client.get_wallet().balance;
+            println!("\nBalance {} sats {ticker}", units::wei_to_sats(b));
+            println!(
+                "\nThe ln-service will settle the Lightning invoice once the escrow confirms."
+            );
+            Ok(())
+        }
+        Err(e) => {
+            eprintln!("\n❌ Could not submit escrow lock transaction!");
+            Err(e)
+        }
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn handle_mint(
     name: &str,
@@ -1097,17 +1677,8 @@ async fn handle_mint(
 
     let (prepared_wallet, utxo) = client.get_wallet().prepare_mint(amount_wei, ticker)?;
     let snark = utxo.prove().unwrap();
-    let erc20_contract = "0x4370e27F7d91D9341bFf232d7Ee8bdfE3a9933a0";
+
     if !only_snark {
-
-        client.admin_approve(
-            geth_rpc.clone(),
-            chain.clone(),
-            secret.clone(),
-            rollup.clone(),
-            erc20_contract,
-        );
-
         client
             .admin_mint(
                 geth_rpc,
@@ -1267,10 +1838,14 @@ async fn handle_release_slow_burn(
     // The event only carries hash, burnAddr, amount; brute-force the
     // remaining note_kind across the supported tokens by recomputing the
     // key and matching it against the indexed `key` topic.
+    // Derive the network from the `--chain` argument so the WCBTC note
+    // kind we brute-force against matches the chain we're actually talking
+    // to, instead of a hardcoded enum.
+    let network = cli::address::network_for_chain(chain);
     let candidate_kinds: Vec<(&str, H256)> = vec![
         (
             "WCBTC",
-            convert_element_to_h256(&citrea_wcbtc_note_kind(CLI_NETWORK)),
+            convert_element_to_h256(&citrea_wcbtc_note_kind(network)),
         ),
         (
             "USDC",
@@ -1541,6 +2116,7 @@ async fn main() -> Result<()> {
                 amount_wei,
                 &ticker_normalized,
                 &preimage,
+                &cli.btc_explorer,
             )
             .await?;
         }
@@ -1551,6 +2127,7 @@ async fn main() -> Result<()> {
                 &cli.host,
                 &note,
                 false,
+                &cli.btc_explorer,
             )
             .await?;
         }
@@ -1561,6 +2138,7 @@ async fn main() -> Result<()> {
                 &cli.host,
                 &note,
                 true,
+                &cli.btc_explorer,
             )
             .await?;
         }
@@ -1619,11 +2197,11 @@ async fn main() -> Result<()> {
             handle_release_slow_burn(&geth_rpc, cli.chain, &cli.rollup, &secret, &key, blocks)
                 .await?;
         }
-        Commands::DepoLn {
+        Commands::AtomiqDepo {
             amount_sat,
             onramp_uri,
         } => {
-            handle_depo_ln(
+            handle_atomiq_depo(
                 &cli.name,
                 &cli.host,
                 cli.chain,
@@ -1632,13 +2210,26 @@ async fn main() -> Result<()> {
             )
             .await?;
         }
-        Commands::WithdrawLn {
+        Commands::DepoLn {
+            amount_sat,
+            ln_service_uri,
+        } => {
+            handle_depo_ln(
+                &cli.name,
+                &cli.host,
+                cli.chain,
+                amount_sat,
+                &ln_service_uri,
+            )
+            .await?;
+        }
+        Commands::AtomiqWithdraw {
             invoice,
             substitutor,
             address,
             offramp_uri,
         } => {
-            handle_withdraw_ln(
+            handle_atomiq_withdraw(
                 &cli.name,
                 &cli.host,
                 cli.chain,
@@ -1646,6 +2237,20 @@ async fn main() -> Result<()> {
                 &substitutor,
                 &address,
                 &offramp_uri,
+            )
+            .await?;
+        }
+        Commands::WithdrawLn {
+            invoice,
+            ln_service_uri,
+        } => {
+            handle_withdraw_ln(
+                &cli.name,
+                &cli.host,
+                cli.chain,
+                &invoice,
+                &ln_service_uri,
+                &cli.btc_explorer,
             )
             .await?;
         }

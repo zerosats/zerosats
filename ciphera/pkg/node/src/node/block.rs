@@ -46,13 +46,13 @@ impl NodeShared {
         let insert_leaves = state
             .txns
             .iter()
-            .flat_map(|txn| txn.public_inputs.output_commitments)
+            .flat_map(|txn| txn.public_inputs().output_commitments)
             .filter(|e| !e.is_zero());
 
         let remove_leaves = state
             .txns
             .iter()
-            .flat_map(|txn| txn.public_inputs.input_commitments)
+            .flat_map(|txn| txn.public_inputs().input_commitments)
             .filter(|e| !e.is_zero());
 
         let metadata = SmirkMetadata::inserted_in(current_height.0);

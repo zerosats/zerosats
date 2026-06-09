@@ -136,8 +136,13 @@ pub async fn get_block(
     };
 
     let (block, metadata) = match block.upgrade(&mut ()).unwrap() {
-        node::BlockFormat::V1(_) => unreachable!("already upgraded"),
-        node::BlockFormat::V2(block, metadata) => (block, metadata),
+        // `upgrade(&mut ())` walks V1 → V2 → V3, so only V3 reaches
+        // here. The pre-V3 arms are kept as `unreachable!` so the
+        // upgrade chain stays exhaustive at the type level.
+        node::BlockFormat::V1(_) | node::BlockFormat::V2(_, _) => {
+            unreachable!("already upgraded")
+        }
+        node::BlockFormat::V3(block, metadata) => (block, metadata),
     };
 
     let max_height = state.node.max_height();
@@ -235,8 +240,10 @@ pub async fn list_blocks(
     let (cursor, blocks) = Paginator::new(
         blocks.map(|r| {
             let (block, metadata) = match r?.upgrade(&mut ()).unwrap() {
-                node::BlockFormat::V1(_) => unreachable!("already upgraded"),
-                node::BlockFormat::V2(block, metadata) => (block, metadata),
+                node::BlockFormat::V1(_) | node::BlockFormat::V2(_, _) => {
+                    unreachable!("already upgraded")
+                }
+                node::BlockFormat::V3(block, metadata) => (block, metadata),
             };
 
             let time = metadata

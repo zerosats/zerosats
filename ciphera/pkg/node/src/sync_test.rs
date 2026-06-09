@@ -12,14 +12,14 @@ fn make_block(height: u64, root: Element, inputs: [Element; 2], outputs: [Elemen
     let mut block = Block::default();
     block.content.header.height = BlockHeight(height);
     block.content.state.root_hash = root;
-    block.content.state.txns = vec![UtxoProof {
+    block.content.state.txns = vec![zk_primitives::LeafProof::Utxo(UtxoProof {
         proof: Default::default(),
         public_inputs: UtxoPublicInput {
             input_commitments: inputs,
             output_commitments: outputs,
             messages: [Element::ZERO; 5],
         },
-    }];
+    })];
     block
 }
 
@@ -35,12 +35,12 @@ fn compute_fast_snapshot_diffs(
     // Elements for the last block in the chunk (ignoring ZERO)
     let mut last_block_elements = std::collections::HashMap::<Element, bool>::new();
     for utxo in block.content.state.txns.iter() {
-        for e in &utxo.public_inputs.input_commitments {
+        for e in &utxo.public_inputs().input_commitments {
             if *e != Element::ZERO {
                 last_block_elements.insert(*e, false);
             }
         }
-        for e in &utxo.public_inputs.output_commitments {
+        for e in &utxo.public_inputs().output_commitments {
             if *e != Element::ZERO {
                 last_block_elements.insert(*e, true);
             }

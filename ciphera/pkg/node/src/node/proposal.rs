@@ -2,7 +2,9 @@ use std::{sync::Arc, time::Instant};
 
 use doomslug::ApprovalValidated;
 use primitives::hash::CryptoHash;
-use tracing::{info, instrument, warn};
+use prover::{UTXO_AGGREGATIONS, UTXO_AGG_NUMBER};
+use tracing::{debug, info, instrument, warn};
+use zk_primitives::count_flavours;
 
 use crate::{
     BlockFormat, Error, Mode, NodeShared, Result,
@@ -18,8 +20,17 @@ impl NodeShared {
         let state = &block.content.state;
         let height = block.content.header.height;
 
-        // Commit proposal
-        info!(counter.commit_height = ?height, "Commit");
+        // Commit proposal. Highlight the leaf mix (utxo vs escrow) in
+        // the one-line block summary so the flavour split is visible at
+        // `info` without scanning the per-txn lines below.
+        let (utxo_count, escrow_count) = count_flavours(&state.txns);
+        info!(
+            counter.commit_height = ?height,
+            txns = state.txns.len(),
+            utxo = utxo_count,
+            escrow = escrow_count,
+            "Commit block {height:?}: {utxo_count} utxo + {escrow_count} escrow txn(s)"
+        );
 
         // Update the last_commit time
         let commit_time = chrono::Utc::now();
@@ -36,22 +47,32 @@ impl NodeShared {
             .collect::<Result<Vec<_>>>()?;
 
         for utxo_proof in &block.content.state.txns {
+            // Concise, flavour-highlighted line at `info`; the bulky
+            // commitment / message dump drops to `debug`.
             info!(
-                hash = format!("0x{}", utxo_proof.hash()),
+                flavour = utxo_proof.flavour(),
+                kind = ?utxo_proof.kind(),
+                hash = %format!("0x{}", utxo_proof.hash()),
+                "Committing {} transaction",
+                utxo_proof.flavour().to_uppercase()
+            );
+            debug!(
+                flavour = utxo_proof.flavour(),
+                hash = %format!("0x{}", utxo_proof.hash()),
                 kind = ?utxo_proof.kind(),
                 kind_messages = ?utxo_proof.kind_messages(),
-                messages =  ?utxo_proof.public_inputs.messages.iter().map(|l| format!("0x{l:x}")).collect::<Vec<_>>(),
-                input_leaves = ?utxo_proof.public_inputs.input_commitments.iter().map(|l| format!("0x{l:x}")).collect::<Vec<_>>(),
-                output_leaves = ?utxo_proof.public_inputs.output_commitments.iter().map(|l| format!("0x{l:x}")).collect::<Vec<_>>(),
-                "Committing transaction"
-            )
+                messages =  ?utxo_proof.public_inputs().messages.iter().map(|l| format!("0x{l:x}")).collect::<Vec<_>>(),
+                input_leaves = ?utxo_proof.public_inputs().input_commitments.iter().map(|l| format!("0x{l:x}")).collect::<Vec<_>>(),
+                output_leaves = ?utxo_proof.public_inputs().output_commitments.iter().map(|l| format!("0x{l:x}")).collect::<Vec<_>>(),
+                "Committed transaction details"
+            );
         }
 
         // Input commitments (to be removed from the tree)
         let block_input_commitments = state
             .txns
             .iter()
-            .flat_map(|utxo_proof| utxo_proof.public_inputs.input_commitments)
+            .flat_map(|utxo_proof| utxo_proof.public_inputs().input_commitments)
             .filter(|l: &_| !l.is_zero())
             .collect::<Vec<_>>();
 
@@ -73,7 +94,11 @@ impl NodeShared {
         // If we exit after commiting to block store,
         // but before commiting to notes tree, we
         // can detect it by checking the previous block's root hash.
-        self.block_store.set(&BlockFormat::V2(
+        // V3 is the current on-disk format whose inner `Block` carries
+        // `Vec<LeafProof>` (heterogeneous utxo / escrow txns). V1 and
+        // V2 are retained for reading legacy blocks and are never
+        // written.
+        self.block_store.set(&BlockFormat::V3(
             block.clone(),
             BlockMetadata {
                 timestamp_unix_s: Some(commit_time.timestamp() as u64),
@@ -156,17 +181,67 @@ impl NodeShared {
                 }
             }
 
-            utxos.into_iter().map(|(_, utxo)| utxo).collect::<Vec<_>>()
+            // Cap the proposed flavour mix to what the prover's aggregator
+            // topology can actually prove. `AggAgg` combines exactly two
+            // aggregators of `UTXO_AGG_NUMBER` leaves, each an `AggUtxo` or
+            // `AggEscrow`. So a provable block is either:
+            //   * up to `UTXO_AGG_NUMBER * UTXO_AGGREGATIONS` utxo leaves
+            //     (both slots used as utxo), or
+            //   * up to `UTXO_AGG_NUMBER` utxo + up to `UTXO_AGG_NUMBER`
+            //     escrow (one slot each).
+            // Including a flavour mix outside this envelope (e.g. 4 utxo + 1
+            // escrow, or 4+ escrow) yields a block that commits but cannot be
+            // proven -> the rollup halts. Select a provable subset in
+            // priority order; any deferred txns are freed back to the mempool
+            // when this lease commits and retried in a later block.
+            let mut utxo_count = 0usize;
+            let mut escrow_count = 0usize;
+            let mut selected = Vec::with_capacity(utxos.len());
+            for (_, txn) in utxos {
+                let fits = if txn.is_escrow() {
+                    // Escrow occupies its own aggregator slot, so the other
+                    // slot must remain available for utxo (<= one slot).
+                    escrow_count < UTXO_AGG_NUMBER && utxo_count <= UTXO_AGG_NUMBER
+                } else {
+                    let utxo_cap = if escrow_count > 0 {
+                        UTXO_AGG_NUMBER
+                    } else {
+                        UTXO_AGG_NUMBER * UTXO_AGGREGATIONS
+                    };
+                    utxo_count < utxo_cap
+                };
+
+                if fits {
+                    if txn.is_escrow() {
+                        escrow_count += 1;
+                    } else {
+                        utxo_count += 1;
+                    }
+                    selected.push(txn);
+                }
+                // Otherwise leave it leased; `commit` frees it back to the
+                // pool for a later block.
+            }
+            selected
         };
+
+        let (utxo_count, escrow_count) = count_flavours(&txns);
+        info!(
+            ?height,
+            txns = txns.len(),
+            utxo = utxo_count,
+            escrow = escrow_count,
+            "Proposing block {height:?}: {utxo_count} utxo + {escrow_count} escrow txn(s)"
+        );
 
         let insert_leaves = txns
             .iter()
-            .flat_map(|utxo| utxo.public_inputs.output_commitments)
+            .flat_map(|utxo| utxo.public_inputs().output_commitments)
             .filter(|l| !l.is_zero())
             .collect::<Vec<_>>();
         let remove_leaves = txns
             .iter()
-            .flat_map(|utxo| utxo.public_inputs.input_commitments)
+            .flat_map(|utxo| utxo.public_inputs().input_commitments)
             .filter(|l| !l.is_zero())
             .collect::<Vec<_>>();
 

@@ -16,42 +16,73 @@ use rpc::error::{HTTPError, HttpResult};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use wire_message::WireMessage;
+use zk_primitives::LeafProof;
+#[cfg(test)]
 use zk_primitives::UtxoProof;
+use tracing::{debug, info, error};
 
 #[tracing::instrument(err, skip_all)]
 pub async fn submit_txn(
     state: web::Data<State>,
     web::Json(data): web::Json<TransactionRequest>,
 ) -> HttpResult<web::Json<TransactionResponse>> {
-    let utxo_proof = data.proof;
+    let leaf_proof = data.proof;
 
-    tracing::info!(
+    // Highlight the leaf flavour (utxo vs escrow) and kind at `info`;
+    // keep the bulky full-proof JSON at `debug` for when a specific
+    // payload needs inspecting.
+    info!(
         method = "submit_txn",
-        proof = serde_json::to_string(&utxo_proof).unwrap(),
-        "Incoming request"
+        flavour = leaf_proof.flavour(),
+        kind = ?leaf_proof.kind(),
+        hash = %format!("0x{}", leaf_proof.hash()),
+        "Incoming {} transaction",
+        leaf_proof.flavour().to_uppercase()
+    );
+    debug!(
+        method = "submit_txn",
+        flavour = leaf_proof.flavour(),
+        proof = serde_json::to_string(&leaf_proof).unwrap_or_default(),
+        "Incoming transaction proof payload"
     );
 
-    if let Err(_err) = utxo_proof.verify() {
+    // Each leaf flavour is verified against its own embedded
+    // verification key (`UtxoProof` against the utxo VK, `EscrowProof`
+    // against the escrow VK); both implementations live in
+    // `barretenberg::circuits` and are dispatched here on the enum.
+    let verify_result = match &leaf_proof {
+        LeafProof::Utxo(p) => p.verify(),
+        LeafProof::Escrow(p) => p.verify(),
+    };
+
+    if let Err(_err) = verify_result {
+        error!(
+            flavour = leaf_proof.flavour(),
+            kind = ?leaf_proof.kind(),
+            ?_err,
+            "{} proof verification failed",
+            leaf_proof.flavour().to_uppercase()
+        );
         return Err(RpcError::InvalidProof)?;
     }
 
-    let utxo_hash = utxo_proof.hash();
+    let txn_hash = leaf_proof.hash();
 
     let node = Arc::clone(&state.node);
-    let block = tokio::spawn(async move { node.submit_transaction_and_wait(utxo_proof).await })
+    let block = tokio::spawn(async move { node.submit_transaction_and_wait(leaf_proof).await })
         .await
         .context("tokio spawn join handle error")??;
 
     Ok(web::Json(TransactionResponse {
         height: block.content.header.height,
         root_hash: block.content.state.root_hash,
-        txn_hash: utxo_hash,
+        txn_hash,
     }))
 }
 
 #[derive(Serialize)]
 pub(crate) struct TxnWithInfo {
-    pub(crate) proof: UtxoProof,
+    pub(crate) proof: LeafProof,
     pub(crate) index_in_block: u64,
     pub(crate) hash: Element,
     pub(crate) block_height: BlockHeight,
@@ -105,7 +136,7 @@ pub async fn list_txns(
     path: web::Path<()>,
     web::Query(query): web::Query<ListTxnsQuery>,
 ) -> HttpResult<web::Json<ListTxnsResponse>> {
-    tracing::info!(method = "list_txns", ?path, ?query, "Incoming request");
+    info!(method = "list_txns", ?path, ?query, "Incoming request");
 
     let make_block_fetcher = |s: web::Data<State>| {
         move |cursor: &Option<CursorChoice<BlockHeight>>,
@@ -202,8 +233,10 @@ fn list_txns_inner<I: Iterator<Item = Result<BlockFormat, node::Error>>>(
         .map(|r| {
             r.map(|r| {
                 let (block, metadata) = match r.upgrade(&mut ()).unwrap() {
-                    node::BlockFormat::V1(_) => unreachable!("already upgraded"),
-                    node::BlockFormat::V2(block, metadata) => (block, metadata),
+                    node::BlockFormat::V1(_) | node::BlockFormat::V2(_, _) => {
+                        unreachable!("already upgraded")
+                    }
+                    node::BlockFormat::V3(block, metadata) => (block, metadata),
                 };
 
                 block
@@ -281,7 +314,7 @@ pub async fn get_txn(
     state: web::Data<State>,
     path: web::Path<(Element,)>,
 ) -> HttpResult<web::Json<GetTxnResponse>> {
-    tracing::info!(method = "get_txn", ?path, "Incoming request");
+    info!(method = "get_txn", ?path, "Incoming request");
 
     let (txn_hash,) = path.into_inner();
 
@@ -321,14 +354,14 @@ mod tests {
 
         let store = block_store::BlockStore::<BlockFormat>::create_or_load(tempdir.path()).unwrap();
 
-        let new_block = |height: u64, txns: Vec<UtxoProof>| {
+        let new_block = |height: u64, txns: Vec<LeafProof>| {
             let mut block = Block::default();
             block.content.header.height = BlockHeight(height);
             block.content.state.txns = txns;
             block
         };
 
-        let new_proof = || UtxoProof::default();
+        let new_proof = || LeafProof::Utxo(UtxoProof::default());
 
         let blocks = [
             new_block(1, vec![]),
@@ -340,7 +373,17 @@ mod tests {
         let max_height = blocks.last().unwrap().content.header.height;
 
         for block in &blocks {
-            store.set(&BlockFormat::V1(block.clone())).unwrap();
+            // Test fixture uses the modern V3 variant (the only one
+            // the proposal path actually writes today). V1/V2 stay
+            // around solely for legacy on-disk back-compat.
+            store
+                .set(&BlockFormat::V3(
+                    block.clone(),
+                    node::BlockMetadata {
+                        timestamp_unix_s: None,
+                    },
+                ))
+                .unwrap();
         }
 
         let block_fetcher =

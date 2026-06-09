@@ -93,7 +93,7 @@ fn get_element_response_unspent(
         .state
         .txns
         .iter()
-        .find(|txn| txn.public_inputs.commitments().contains(&element))
+        .find(|txn| txn.public_inputs().commitments().contains(&element))
         .ok_or(Error::ElementNotInTxn {
             element,
             block_height: block.block_height(),
@@ -128,7 +128,7 @@ fn get_element_response_from_history(
         .state
         .txns
         .iter()
-        .find(|txn| txn.public_inputs.commitments().contains(&element))
+        .find(|txn| txn.public_inputs().commitments().contains(&element))
         .ok_or(Error::ElementNotInTxn {
             element,
             block_height: info.output_height,

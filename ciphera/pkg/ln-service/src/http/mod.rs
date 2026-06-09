@@ -1,0 +1,58 @@
+pub mod error;
+pub mod offramp;
+pub mod onramp;
+
+use crate::clients::{ChainTipClient, LightningClient};
+use crate::config::Config;
+use crate::db::DbPool;
+use actix_web::web;
+use element::Element;
+use std::sync::Arc;
+
+/// Shared state injected into every actix handler.
+#[derive(Clone)]
+pub struct AppState {
+    pub config: Arc<Config>,
+    pub db: DbPool,
+    pub chain_tip: Arc<dyn ChainTipClient>,
+    /// Lightning client — used by the onramp endpoint to issue invoices.
+    pub lightning: Arc<dyn LightningClient>,
+    /// Resolved default note kind — `Config::resolved_default_note_kind`
+    /// evaluated once at startup so handlers don't re-resolve on each request.
+    pub default_note_kind: Element,
+}
+
+pub fn configure_routes(state: AppState) -> impl FnOnce(&mut web::ServiceConfig) {
+    move |cfg: &mut web::ServiceConfig| {
+        // Read the toggles before `state` is moved into app data. Each
+        // family of routes is only registered when its flag is set.
+        let offramp_enabled = state.config.offramp;
+        let onramp_enabled = state.config.onramp;
+        cfg.app_data(web::Data::new(state));
+
+        let mut scope = web::scope("/v0");
+        if offramp_enabled {
+            scope = scope
+                .service(
+                    web::resource("/offramp").route(web::post().to(offramp::create_offramp)),
+                )
+                .service(
+                    web::resource("/offramp/{payment_hash}")
+                        .route(web::get().to(offramp::get_offramp)),
+                )
+                .service(
+                    web::resource("/offramp/{payment_hash}/cancel")
+                        .route(web::post().to(offramp::cancel_offramp)),
+                );
+        }
+        if onramp_enabled {
+            scope = scope
+                .service(web::resource("/onramp").route(web::get().to(onramp::create_onramp)))
+                .service(
+                    web::resource("/onramp/{payment_hash}")
+                        .route(web::get().to(onramp::get_onramp)),
+                );
+        }
+        cfg.service(scope);
+    }
+}

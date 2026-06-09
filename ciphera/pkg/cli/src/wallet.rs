@@ -5,12 +5,14 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::num::ParseIntError;
 use std::path::{Path, PathBuf};
-use zk_primitives::{Escrow, EscrowInputNote, InputNote, Note, UtxoKind, Utxo};
+use zk_primitives::{
+    CitreaNetwork, Escrow, EscrowInputNote, InputNote, Note, TimeLock, TimeProof, UtxoKind, Utxo,
+};
 
-use crate::escrow::{htlc_claim_address, htlc_refund_psi, pow_two_block_lock, pow_two_block_proof};
+use crate::escrow::{htlc_claim_address, htlc_refund_psi};
 
 use crate::CipheraAddress;
-use crate::address::{citrea_ticker_from_contract, citrea_token_data};
+use crate::address::{CLI_NETWORK, citrea_ticker_from_contract, citrea_token_data, network_for_chain};
 use crate::rpc::TxnWithInfo;
 use std::collections::HashMap;
 use tracing::{debug, error, info};
@@ -103,6 +105,14 @@ impl Wallet {
         let mut bytes = [0u8; 32];
         OsRng.fill_bytes(&mut bytes);
         Element::from_be_bytes(bytes)
+    }
+
+    /// Citrea network this wallet operates on, derived from its bound
+    /// `chain_id`. Used when *constructing* notes so the WCBTC `note_kind`
+    /// matches the wallet's chain instead of a hardcoded default. Legacy
+    /// wallets that predate `chain_id` fall back to [`CLI_NETWORK`].
+    fn network(&self) -> CitreaNetwork {
+        self.chain_id.map_or(CLI_NETWORK, network_for_chain)
     }
 
     fn with_storage_path(mut self, storage_path: PathBuf) -> Self {
@@ -444,7 +454,7 @@ impl Wallet {
         let pk = self.gen_pk();
         let self_address = hash_merge([pk, Element::ZERO]);
 
-        let (utxo_kind, note_kind) = citrea_token_data(ticker);
+        let (utxo_kind, note_kind) = citrea_token_data(self.network(), ticker);
 
         let note = Note {
             utxo_kind,
@@ -480,29 +490,38 @@ impl Wallet {
         ticker: &str,
         htlc_secret_key: Element,
         preimage: [u8; 32],
+        lock: &TimeLock,
     ) -> Result<(Utxo, EscrowInputNote), WalletError> {
         let (inputs, change) = self.select_input_notes(ticker, amount)?;
-        let (utxo_kind, note_kind) = citrea_token_data(ticker);
+        let (utxo_kind, note_kind) = citrea_token_data(self.network(), ticker);
 
         let htlc_note = Note {
             utxo_kind,
             note_kind,
             address: htlc_claim_address(htlc_secret_key, preimage),
-            psi: htlc_refund_psi(htlc_secret_key, &pow_two_block_lock()),
+            // Bind the refund branch to the real timelock (anchored to the
+            // current Bitcoin tip); the refund spend must later present a
+            // PoW chain extending `lock.zero_block` by `lock.n_blocks`.
+            psi: htlc_refund_psi(htlc_secret_key, lock),
             value: Element::from(amount),
         };
 
         // EscrowInputNote default sets spend_type=0; pin it to the HTLC
         // branch (3) up-front and stash the witness data so the redeem
         // / refund CLI commands can spend it without re-deriving
-        // anything. The persisted JSON is what gets passed between
-        // alice (locker) and bob (redeemer) in a real two-party flow.
+        // anything. The lock (anchor + required work) is persisted via
+        // TimeProof serialization, but headers are filled in at refund time
+        // from real Bitcoin blocks. The persisted JSON is what gets passed
+        // between alice (locker) and bob (redeemer) in a real two-party flow.
         let escrow_input_note = EscrowInputNote {
             note: htlc_note.clone(),
             spend_type: 3,
             secret_key: htlc_secret_key,
             preimage,
-            ..EscrowInputNote::default()
+            time_proof: TimeProof {
+                lock: lock.clone(),
+                ..TimeProof::default()
+            },
         };
 
         Ok((
@@ -517,11 +536,37 @@ impl Wallet {
         ticker: &str,
         htlc_secret_key: Element,
         preimage: [u8; 32],
+        lock: &TimeLock,
     ) -> Result<(Self, Utxo, EscrowInputNote), WalletError> {
         let mut staged = self.clone();
         let (utxo, escrow_note) =
-            staged.escrow_lock(amount, ticker, htlc_secret_key, preimage)?;
+            staged.escrow_lock(amount, ticker, htlc_secret_key, preimage, lock)?;
         Ok((staged, utxo, escrow_note))
+    }
+
+    /// Commit funds into a pre-built HTLC escrow note. Unlike
+    /// `escrow_lock`, the output note's commitment fields (address, psi,
+    /// value, note_kind, utxo_kind) are dictated by an external party
+    /// -- the ln-service `/v0/offramp` response -- which is the redeemer
+    /// and bound the claim branch to its own key and the bolt11 payment
+    /// hash. This wallet is only the locker: it spends inputs to
+    /// materialise the note, keeps no preimage, and persists no
+    /// `EscrowInputNote`. The ticker is derived from the note's
+    /// `note_kind` so input selection stays on the same asset.
+    fn escrow_lock_to_note(&mut self, htlc_note: Note) -> Result<Utxo, WalletError> {
+        let ticker = citrea_ticker_from_contract(htlc_note.note_kind);
+        let amount = self.get_note_amount(&htlc_note)?;
+        let (inputs, change) = self.select_input_notes(&ticker, amount)?;
+        Ok(Utxo::new_send(inputs, [htlc_note, change]))
+    }
+
+    pub fn prepare_escrow_lock_to_note(
+        &self,
+        htlc_note: Note,
+    ) -> Result<(Self, Utxo), WalletError> {
+        let mut staged = self.clone();
+        let utxo = staged.escrow_lock_to_note(htlc_note)?;
+        Ok((staged, utxo))
     }
 
     fn escrow_redeem(
@@ -567,20 +612,22 @@ impl Wallet {
     fn escrow_refund(
         &mut self,
         htlc_input_note: &EscrowInputNote,
+        time_proof: TimeProof,
     ) -> Result<(Escrow, InputNote), WalletError> {
         let ticker = citrea_ticker_from_contract(htlc_input_note.note.note_kind);
         let amount = self.get_note_amount(&htlc_input_note.note)?;
 
-        // Refund branch: preimage is zeroed and the PoW witness for the
-        // configured timelock is attached. `secret_key` must match the
-        // one whose `key_hash` was baked into `psi` at lock time --
-        // for the test flow that's the same key used for claim.
+        // Refund branch: preimage is zeroed and the PoW witness extending
+        // the lock anchor is attached (`time_proof`, built from real
+        // Bitcoin headers by the caller). `secret_key` must match the one
+        // whose `key_hash` was baked into `psi` at lock time, and
+        // `time_proof.lock` must be the lock that `psi` committed to.
         let refund_input = EscrowInputNote {
             note: htlc_input_note.note.clone(),
             spend_type: 3,
             secret_key: htlc_input_note.secret_key,
             preimage: [0u8; 32],
-            time_proof: pow_two_block_proof(),
+            time_proof,
         };
 
         let received: InputNote = self.receive_note(amount, &ticker);
@@ -600,9 +647,10 @@ impl Wallet {
     pub fn prepare_escrow_refund(
         &self,
         htlc_input_note: &EscrowInputNote,
+        time_proof: TimeProof,
     ) -> Result<(Self, Escrow, InputNote), WalletError> {
         let mut staged = self.clone();
-        let (escrow, received) = staged.escrow_refund(htlc_input_note)?;
+        let (escrow, received) = staged.escrow_refund(htlc_input_note, time_proof)?;
         Ok((staged, escrow, received))
     }
 
@@ -651,7 +699,7 @@ impl Wallet {
         let pk = self.gen_pk();
         let psi = self.gen_pk();
         let address = hash_merge([pk, Element::ZERO]);
-        let (utxo_kind, note_kind) = citrea_token_data(ticker);
+        let (utxo_kind, note_kind) = citrea_token_data(self.network(), ticker);
 
         let note = Note {
             utxo_kind,
@@ -733,7 +781,7 @@ mod wallet_tests {
     }
 
     fn create_note_and_encode_address(amount: u64) -> String {
-        let (utxo_kind, note_kind) = citrea_token_data("WCBTC");
+        let (utxo_kind, note_kind) = citrea_token_data(CitreaNetwork::Testnet, "WCBTC");
 
         let note = Note {
             utxo_kind,
@@ -1374,7 +1422,7 @@ mod wallet_tests {
 
     /// InputNote with a real WCBTC contract so `citrea_ticker_from_contract` resolves.
     fn create_wcbtc_input_note_with_contract(amount: u64) -> InputNote {
-        let (utxo_kind, note_kind) = citrea_token_data("WCBTC");
+        let (utxo_kind, note_kind) = citrea_token_data(CitreaNetwork::Testnet, "WCBTC");
         let pk = Element::from(99999u64);
         let address = hash_merge([pk, Element::ZERO]);
         InputNote::new(
@@ -1411,7 +1459,7 @@ mod wallet_tests {
     /// so callers can compute its commitment for sync tests.
     fn add_pending_note(wallet: &mut Wallet, amount: u64) -> Note {
         let pk = Element::from(12345u64);
-        let (utxo_kind, note_kind) = citrea_token_data("WCBTC");
+        let (utxo_kind, note_kind) = citrea_token_data(CitreaNetwork::Testnet, "WCBTC");
         let address = hash_merge([pk, Element::ZERO]);
         let note = Note {
             utxo_kind,
@@ -1432,7 +1480,7 @@ mod wallet_tests {
     /// `import_note` can find and claim it by matching the address.
     fn make_importable_note(wallet: &mut Wallet, amount: u64) -> Note {
         let pk = Element::from(12345u64);
-        let (utxo_kind, note_kind) = citrea_token_data("WCBTC");
+        let (utxo_kind, note_kind) = citrea_token_data(CitreaNetwork::Testnet, "WCBTC");
         let note = Note {
             utxo_kind,
             note_kind,
@@ -1554,7 +1602,7 @@ mod wallet_tests {
     #[test]
     fn test_burn_note_not_in_avail_returns_error() {
         let mut wallet = Wallet::random(5115, Some("test".to_string()));
-        let (utxo_kind, note_kind) = citrea_token_data("WCBTC");
+        let (utxo_kind, note_kind) = citrea_token_data(CitreaNetwork::Testnet, "WCBTC");
         let pk = Element::from(12345u64);
         let input_note = InputNote::new(
             Note {
@@ -1671,7 +1719,7 @@ mod wallet_tests {
     #[test]
     fn test_import_note_unknown_address_returns_error() {
         let mut wallet = Wallet::random(5115, Some("test".to_string()));
-        let (utxo_kind, note_kind) = citrea_token_data("WCBTC");
+        let (utxo_kind, note_kind) = citrea_token_data(CitreaNetwork::Testnet, "WCBTC");
         // Address does not correspond to any pending note in the wallet.
         let note = Note {
             utxo_kind,
@@ -1691,7 +1739,7 @@ mod wallet_tests {
         let mut wallet = Wallet::random(5115, Some("test".to_string()));
         // Add an unrelated pending note for USDC.
         let pk_usdc = Element::from(55555u64);
-        let (kind_usdc, contract_usdc) = citrea_token_data("USDC");
+        let (kind_usdc, contract_usdc) = citrea_token_data(CitreaNetwork::Testnet, "USDC");
         let unrelated_note = InputNote::new(
             Note {
                 utxo_kind: kind_usdc,

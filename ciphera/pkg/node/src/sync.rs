@@ -407,10 +407,10 @@ impl SyncWorker {
             bool,
         >::new();
         for utxo in block.content.state.txns.iter() {
-            for e in &utxo.public_inputs.input_commitments {
+            for e in &utxo.public_inputs().input_commitments {
                 last_block_elements.insert(*e, false);
             }
-            for e in &utxo.public_inputs.output_commitments {
+            for e in &utxo.public_inputs().output_commitments {
                 last_block_elements.insert(*e, true);
             }
         }

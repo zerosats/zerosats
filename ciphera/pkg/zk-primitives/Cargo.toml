@@ -32,3 +32,6 @@ optional = true
 
 [features]
 ts-rs = ["dep:ts-rs", "element/ts-rs", "primitives/ts-rs"]
+
+[dev-dependencies]
+serde_json = { workspace = true }

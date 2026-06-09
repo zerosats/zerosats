@@ -26,7 +26,7 @@
 use element::Element;
 use hash::hash_merge;
 use sha2::{Digest, Sha256};
-use zk_primitives::{TimeLock, TimeProof, get_address_for_private_key};
+use zk_primitives::{TimeLock, get_address_for_private_key};
 
 /// HTLC `note.address` for the claim branch -- binds the redeemer's
 /// secret key into the SHA-256 commitment of the preimage.
@@ -49,24 +49,34 @@ pub fn htlc_refund_psi(locker_secret_key: Element, lock: &TimeLock) -> Element {
     hash_merge([key_hash, lock.commitment()])
 }
 
-/// 2-header PoW chain fixture used by tests + the CLI refund flow.
-/// Block 946920 anchor + the two real headers extending it. Mirrors
-/// `pow_two_block_proof()` in `pkg/barretenberg/src/circuits/tests.rs`.
-/// Production deployments will fetch live headers; this fixture lets
-/// the lock/refund round-trip be exercised against a stable PoW
-/// witness without a Bitcoin client.
+// ---------------------------------------------------------------------------
+// Test-only PoW fixtures.
+//
+// Production builds the timelock anchor and refund PoW witness from *real*
+// Bitcoin blocks via `crate::mempool` (mempool.space). These fixed headers
+// (block 946920 + 946921/946922) only exist so unit tests can exercise the
+// lock/refund round-trip without a Bitcoin client -- using them in
+// production makes the timelock a no-op (the two extending blocks already
+// exist), so they are gated behind `#[cfg(test)]`. Mirrors
+// `pow_two_block_proof()` in `pkg/barretenberg/src/circuits/tests.rs`.
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+use zk_primitives::TimeProof;
+
+#[cfg(test)]
+#[allow(dead_code)]
 #[must_use]
 pub fn pow_two_block_proof() -> TimeProof {
     TimeProof {
-        lock: TimeLock {
-            zero_block: anchor_zero_block(),
-            n_blocks: Element::new(2),
-        },
+        lock: pow_two_block_lock(),
         headers: [header_946921(), header_946922()],
     }
 }
 
 /// Matching [`TimeLock`] for [`pow_two_block_proof`].
+#[cfg(test)]
+#[allow(dead_code)]
 #[must_use]
 pub fn pow_two_block_lock() -> TimeLock {
     TimeLock {
@@ -75,6 +85,7 @@ pub fn pow_two_block_lock() -> TimeLock {
     }
 }
 
+#[cfg(test)]
 fn anchor_zero_block() -> [u8; 32] {
     [
         0xf8, 0xa1, 0x7c, 0xed, 0x1d, 0xac, 0x17, 0xba, 0x27, 0xba, 0x9d, 0xee, 0x7f, 0x63, 0x95,
@@ -83,6 +94,7 @@ fn anchor_zero_block() -> [u8; 32] {
     ]
 }
 
+#[cfg(test)]
 fn header_946921() -> [u8; 80] {
     [
         0x00, 0x40, 0x0b, 0x20, 0xf8, 0xa1, 0x7c, 0xed, 0x1d, 0xac, 0x17, 0xba, 0x27, 0xba, 0x9d,
@@ -94,6 +106,7 @@ fn header_946921() -> [u8; 80] {
     ]
 }
 
+#[cfg(test)]
 fn header_946922() -> [u8; 80] {
     [
         0x00, 0x00, 0x07, 0x20, 0xcf, 0x51, 0x90, 0x4c, 0xcc, 0x0c, 0xf4, 0x7b, 0x6a, 0xab, 0xf0,

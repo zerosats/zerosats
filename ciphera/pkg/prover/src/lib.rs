@@ -3,12 +3,10 @@
 
 mod constants;
 pub mod smirk_metadata;
-use crate::constants::{
-    MERKLE_TREE_DEPTH, MERKLE_TREE_PATH_DEPTH, UTXO_AGG_LEAVES, UTXO_AGG_NUMBER, UTXO_AGGREGATIONS,
-};
+use crate::constants::{MERKLE_TREE_DEPTH, MERKLE_TREE_PATH_DEPTH, UTXO_AGG_LEAVES};
 use barretenberg::Prove;
 use borsh::{BorshDeserialize, BorshSerialize};
-pub use constants::MAXIMUM_TXNS;
+pub use constants::{MAXIMUM_TXNS, UTXO_AGGREGATIONS, UTXO_AGG_NUMBER};
 use contracts::RollupContract;
 use element::Element;
 use ethereum_types::H256;
@@ -19,10 +17,11 @@ use smirk::{
 };
 use smirk_metadata::SmirkMetadata;
 use std::sync::Arc;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 use web3::ethabi;
 use zk_primitives::{
-    AggAgg, AggAggProof, AggUtxo, AggUtxoProof, MerklePath, UtxoProof,
+    AggAgg, AggAggProof, AggEscrow, AggEscrowProof, AggLeafSource, AggUtxo, AggUtxoProof,
+    EscrowProof, EscrowProofBundleWithMerkleProofs, LeafProof, MerklePath, UtxoProof,
     UtxoProofBundleWithMerkleProofs,
 };
 
@@ -83,16 +82,66 @@ pub enum Error {
 
     #[error("vec to array conversion failed, expected {expected}, got {actual}")]
     VecToArrayConversion { expected: usize, actual: usize },
+
+    #[error("{bucket} bucket exceeds capacity {capacity}: got {actual}")]
+    BucketOverflow {
+        bucket: &'static str,
+        capacity: usize,
+        actual: usize,
+    },
 }
 
 #[derive(Debug, Clone)]
 pub struct Transaction {
-    pub proof: UtxoProof,
+    /// Either a Utxo or Escrow leaf proof. `generate_aggregate_proof`
+    /// routes the two flavours into separate aggregator buckets
+    /// (`AggUtxo` vs `AggEscrow`) before combining them via
+    /// `AggAgg::new_mixed`.
+    pub proof: LeafProof,
+}
+
+fn vec_to_slots(
+    bucket: &'static str,
+    items: Vec<Transaction>,
+) -> Result<[Transaction; UTXO_AGG_NUMBER], Error> {
+    items.try_into().map_err(|v: Vec<_>| {
+        if v.len() > UTXO_AGG_NUMBER {
+            Error::BucketOverflow {
+                bucket,
+                capacity: UTXO_AGG_NUMBER,
+                actual: v.len(),
+            }
+        } else {
+            Error::VecToArrayConversion {
+                expected: UTXO_AGG_NUMBER,
+                actual: v.len(),
+            }
+        }
+    })
 }
 
 impl Transaction {
-    pub fn new(proof: UtxoProof) -> Self {
+    /// Wrap a leaf proof for the prover mempool.
+    pub fn new(proof: LeafProof) -> Self {
         Self { proof }
+    }
+
+    /// Convenience constructor for the legacy `UtxoProof`-only call
+    /// sites (the burn-substitutor, the CLI's `client.transaction`
+    /// path, the node mempool's existing receive paths). New code
+    /// should prefer `Transaction::new(LeafProof::Escrow(...))` when
+    /// pushing an escrow proof.
+    pub fn from_utxo(proof: UtxoProof) -> Self {
+        Self {
+            proof: LeafProof::Utxo(proof),
+        }
+    }
+
+    /// Convenience constructor for an escrow leaf proof.
+    pub fn from_escrow(proof: EscrowProof) -> Self {
+        Self {
+            proof: LeafProof::Escrow(proof),
+        }
     }
 }
 
@@ -148,9 +197,21 @@ impl Prover {
         height: u64,
         txns: [Option<Transaction>; MAXIMUM_TXNS],
     ) -> Result<AggAggProof> {
+        // `txns` is padded to `MAXIMUM_TXNS` with `None`; count only the
+        // real leaves and split by flavour so the log reflects the
+        // actual utxo / escrow workload rather than the padded length.
+        let (utxo_count, escrow_count) = txns.iter().flatten().fold(
+            (0usize, 0usize),
+            |(utxo, escrow), t| match t.proof.is_escrow() {
+                true => (utxo, escrow + 1),
+                false => (utxo + 1, escrow),
+            },
+        );
         info!(
-            "Bundling {} UTXO proof(s) and proving new root hash",
-            txns.len()
+            height,
+            utxo = utxo_count,
+            escrow = escrow_count,
+            "Bundling {utxo_count} utxo + {escrow_count} escrow leaf proof(s) and proving new root hash"
         );
 
         let proof = tokio::task::spawn_blocking({
@@ -246,47 +307,109 @@ impl Prover {
         txns: [Option<Transaction>; 6],
         current_block: u64,
     ) -> Result<AggAggProof, Error> {
-        let txns = txns
-            .into_iter()
-            .map(|t| match t {
-                Some(t) => Ok(t),
-                None => Ok(Transaction {
-                    proof: UtxoProof::default(),
-                }),
-            })
-            .collect::<Result<Vec<_>>>()?;
-        let txns = &mut txns.iter();
+        // Fan-out: route each leaf into the bucket whose aggregator accepts it.
+        // Pure-UTXO blocks may use both aggregator slots as UTXO buckets.
+        let mut utxo_bucket: Vec<Transaction> = Vec::with_capacity(UTXO_AGG_NUMBER * UTXO_AGGREGATIONS);
+        let mut escrow_bucket: Vec<Transaction> = Vec::with_capacity(UTXO_AGG_NUMBER);
 
-        let mut utxo_aggregations = Vec::new();
-        for _i in 0..UTXO_AGGREGATIONS {
-            // Take the first 3 txns (removing from the vec)
-            // Unwrap is safe because we know we have enough txns
-            #[allow(clippy::unwrap_used)]
-            let txns: [Transaction; UTXO_AGG_NUMBER] = txns
-                .take(3)
-                .cloned()
-                .collect::<Vec<_>>()
-                .try_into()
-                .unwrap();
-
-            let utxo_aggregate = self.aggregate_utxo(tree, txns.clone(), current_block)?;
-            utxo_aggregations.push(utxo_aggregate);
+        for slot in txns.into_iter() {
+            match slot {
+                Some(t) if t.proof.is_escrow() => escrow_bucket.push(t),
+                Some(t) => utxo_bucket.push(t),
+                None => {}
+            }
         }
 
-        let utxo_aggregations: [AggUtxoProof; UTXO_AGGREGATIONS] = utxo_aggregations
-            .try_into()
-            .map_err(|v: Vec<_>| Error::VecToArrayConversion {
-                expected: UTXO_AGGREGATIONS,
-                actual: v.len(),
-            })?;
+        let real_utxo = utxo_bucket.len();
+        let real_escrow = escrow_bucket.len();
+        info!(
+            block = current_block,
+            utxo = real_utxo,
+            escrow = real_escrow,
+            "Aggregating {real_utxo} utxo + {real_escrow} escrow leaf proof(s) into AggUtxo + AggEscrow buckets"
+        );
 
-        let agg_agg = AggAgg::new(utxo_aggregations);
+        if real_escrow == 0 {
+            while utxo_bucket.len() < UTXO_AGG_NUMBER * UTXO_AGGREGATIONS {
+                utxo_bucket.push(Transaction::new(LeafProof::Utxo(UtxoProof::default())));
+            }
+            let second_bucket = utxo_bucket.split_off(UTXO_AGG_NUMBER);
+            let utxo_slots_0 = vec_to_slots("utxo", utxo_bucket)?;
+            let utxo_slots_1 = vec_to_slots("utxo", second_bucket)?;
+
+            let agg_0 = self.aggregate_utxo(tree, utxo_slots_0, current_block)?;
+            let agg_1 = self.aggregate_utxo(tree, utxo_slots_1, current_block)?;
+            let proof = AggAgg::new([agg_0, agg_1])
+                .prove()
+                .map_err(|e| Error::BarretenbergProve(e.to_string()))?;
+            return Ok(proof);
+        }
+
+        if real_utxo > UTXO_AGG_NUMBER {
+            return Err(Error::BucketOverflow {
+                bucket: "utxo",
+                capacity: UTXO_AGG_NUMBER,
+                actual: real_utxo,
+            });
+        }
+        if real_escrow > UTXO_AGG_NUMBER {
+            return Err(Error::BucketOverflow {
+                bucket: "escrow",
+                capacity: UTXO_AGG_NUMBER,
+                actual: real_escrow,
+            });
+        }
+
+        while utxo_bucket.len() < UTXO_AGG_NUMBER {
+            utxo_bucket.push(Transaction::new(LeafProof::Utxo(UtxoProof::default())));
+        }
+        while escrow_bucket.len() < UTXO_AGG_NUMBER {
+            escrow_bucket.push(Transaction::new(LeafProof::Escrow(EscrowProof::default())));
+        }
+
+        let utxo_agg_proof = self.aggregate_utxo(tree, vec_to_slots("utxo", utxo_bucket)?, current_block)?;
+        let escrow_agg_proof =
+            self.aggregate_escrow(tree, vec_to_slots("escrow", escrow_bucket)?, current_block)?;
+
+        // Slot 0 must always carry the non-padding aggregator so that
+        // `AggAgg::old_root()` (which unconditionally reads proofs[0].old_root)
+        // returns the real pre-block tree root, and so the Noir agg_agg
+        // circuit's root-chaining assertion (proofs[0].new_root ==
+        // proofs[1].old_root) is satisfiable.
+        //
+        // When the UTXO bucket is all-padding (escrow-only block) the default
+        // AggUtxoProof has old_root = new_root = 0, which would cause both of
+        // those invariants to fail.  Swap the slots so the real aggregator
+        // (AggEscrow in that case) is always in slot 0.
+        let (slot0, src0, slot1, src1) = if utxo_agg_proof.public_inputs.is_padding() {
+            (
+                escrow_agg_proof.into_inner(),
+                AggLeafSource::AggEscrow,
+                utxo_agg_proof,
+                AggLeafSource::AggUtxo,
+            )
+        } else {
+            (
+                utxo_agg_proof,
+                AggLeafSource::AggUtxo,
+                escrow_agg_proof.into_inner(),
+                AggLeafSource::AggEscrow,
+            )
+        };
+        let agg_agg = AggAgg::new_mixed([slot0, slot1], [src0, src1]);
         let proof = agg_agg
             .prove()
             .map_err(|e| Error::BarretenbergProve(e.to_string()))?;
 
         Ok(proof)
     }
+
+    // Suppress legacy UTXO_AGGREGATIONS lint: the constant is still
+    // exported for downstream callers that quote it in scheduling /
+    // capacity math. Keeping the use site lets us share one
+    // assertion of the shape with the bucket loop above.
+    #[allow(dead_code)]
+    const _BUCKET_SHAPE_AGREES: () = assert!(UTXO_AGGREGATIONS == 2);
 
     #[tracing::instrument(err, skip_all)]
     fn aggregate_utxo(
@@ -296,8 +419,18 @@ impl Prover {
         current_block: u64,
     ) -> Result<AggUtxoProof, Error> {
         if utxos.iter().all(|utxo| utxo.proof.is_padding()) {
+            debug!(
+                block = current_block,
+                "UTXO bucket is all padding; emitting default AggUtxoProof"
+            );
             return Ok(AggUtxoProof::default());
         }
+
+        let real = utxos.iter().filter(|u| !u.proof.is_padding()).count();
+        debug!(
+            block = current_block,
+            real, "Proving AggUtxo over {real} real utxo leaf slot(s)"
+        );
 
         let (_, old_tree, new_tree, merkle_paths) =
             self.gen_merkle_paths(tree, &utxos, current_block)?;
@@ -311,15 +444,24 @@ impl Prover {
             let utxo = &utxos[i];
 
             let utxo_proof_bundle = match utxo.proof.is_padding() {
-                false => UtxoProofBundleWithMerkleProofs::new(
-                    utxo.proof.clone(),
-                    &[
-                        chunk[0].clone(),
-                        chunk[1].clone(),
-                        chunk[2].clone(),
-                        chunk[3].clone(),
-                    ],
-                ),
+                false => {
+                    // The fan-out in `generate_aggregate_proof` puts
+                    // only `LeafProof::Utxo` entries in this bucket, so
+                    // the `as_utxo()` unwrap is a real invariant -- if
+                    // it fails the caller routed something into the
+                    // wrong slot.
+                    #[allow(clippy::unwrap_used)]
+                    let utxo_proof = utxo.proof.as_utxo().cloned().unwrap();
+                    UtxoProofBundleWithMerkleProofs::new(
+                        utxo_proof,
+                        &[
+                            chunk[0].clone(),
+                            chunk[1].clone(),
+                            chunk[2].clone(),
+                            chunk[3].clone(),
+                        ],
+                    )
+                }
                 true => UtxoProofBundleWithMerkleProofs::default(),
             };
 
@@ -343,6 +485,73 @@ impl Prover {
         Ok(agg_utxo_proof)
     }
 
+    /// `aggregate_utxo`'s sibling for the escrow-circuit bucket. The
+    /// shape is identical (`AggEscrow` takes `[EscrowProofBundleWithMerkleProofs; 3]`)
+    /// and the Merkle-path bookkeeping is shared with `gen_merkle_paths`
+    /// because the tree doesn't care which leaf circuit produced a
+    /// commitment.
+    #[tracing::instrument(err, skip_all)]
+    fn aggregate_escrow(
+        &self,
+        tree: &mut MerkleTree<SimpleHashCache>,
+        txns: [Transaction; UTXO_AGG_NUMBER],
+        current_block: u64,
+    ) -> Result<AggEscrowProof, Error> {
+        if txns.iter().all(|t| t.proof.is_padding()) {
+            debug!(
+                block = current_block,
+                "Escrow bucket is all padding; emitting default AggEscrowProof"
+            );
+            return Ok(AggEscrowProof::default());
+        }
+
+        let real = txns.iter().filter(|t| !t.proof.is_padding()).count();
+        debug!(
+            block = current_block,
+            real, "Proving AggEscrow over {real} real escrow leaf slot(s)"
+        );
+
+        let (_, old_tree, new_tree, merkle_paths) =
+            self.gen_merkle_paths(tree, &txns, current_block)?;
+        let merkle_paths = merkle_paths.chunks(4).collect::<Vec<_>>();
+
+        let mut escrow_proof_bundles = Vec::new();
+        for (i, chunk) in merkle_paths.into_iter().enumerate() {
+            let t = &txns[i];
+            let bundle = match t.proof.is_padding() {
+                false => {
+                    #[allow(clippy::unwrap_used)]
+                    let escrow_proof = t.proof.as_escrow().cloned().unwrap();
+                    EscrowProofBundleWithMerkleProofs::new(
+                        escrow_proof,
+                        &[
+                            chunk[0].clone(),
+                            chunk[1].clone(),
+                            chunk[2].clone(),
+                            chunk[3].clone(),
+                        ],
+                    )
+                }
+                true => EscrowProofBundleWithMerkleProofs::default(),
+            };
+            escrow_proof_bundles.push(bundle);
+        }
+
+        let escrow_proof_bundles: [EscrowProofBundleWithMerkleProofs; UTXO_AGG_NUMBER] =
+            escrow_proof_bundles
+                .try_into()
+                .map_err(|v: Vec<_>| Error::VecToArrayConversion {
+                    expected: UTXO_AGG_NUMBER,
+                    actual: v.len(),
+                })?;
+
+        let agg_escrow = AggEscrow::new(escrow_proof_bundles, old_tree, new_tree);
+        let agg_escrow_proof = agg_escrow
+            .prove()
+            .map_err(|e| Error::BarretenbergProve(e.to_string()))?;
+        Ok(agg_escrow_proof)
+    }
+
     #[tracing::instrument(err, skip_all)]
     fn gen_merkle_paths(
         &self,
@@ -364,7 +573,7 @@ impl Prover {
 
             // Extract leaves to be inserted from proof
             for Transaction { proof } in txns {
-                for leaf in proof.public_inputs.input_commitments {
+                for leaf in proof.public_inputs().input_commitments {
                     if leaf.is_zero() {
                         merkle_paths.push(padding_path.clone());
                         continue;
@@ -374,7 +583,7 @@ impl Prover {
                     tree.remove(leaf)?;
                 }
 
-                for leaf in proof.public_inputs.output_commitments {
+                for leaf in proof.public_inputs().output_commitments {
                     if leaf.is_zero() {
                         merkle_paths.push(padding_path.clone());
                         continue;

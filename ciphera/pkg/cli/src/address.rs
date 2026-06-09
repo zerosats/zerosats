@@ -4,10 +4,30 @@ use rand::rngs::OsRng;
 use serde::{Deserialize, Serialize};
 use zk_primitives::{CitreaNetwork, Note, citrea_testnet_usdc_note_kind, citrea_wcbtc_note_kind};
 
-/// The CLI is currently hardcoded to Citrea testnet (see
-/// `client::client_tests::CHAIN_ID`). Centralise that assumption here so a
-/// future mainnet/devnet switch only needs to touch one constant.
-const CLI_NETWORK: CitreaNetwork = CitreaNetwork::Testnet;
+/// Compile-time default Citrea network for the encode/decode helpers and
+/// `From` conversions in this crate, which have no `--chain` argument in
+/// scope (they sit behind fixed trait signatures). This is the single
+/// source of truth: `note_url` and `main` re-import this constant rather
+/// than redeclaring their own, so the three modules can never drift out of
+/// sync again. It matches the CLI's default `--chain 5115` and the
+/// testnet-only USDC note kind (see `client::client_tests::CHAIN_ID`).
+///
+/// Call sites that *do* have a chain id available (e.g. the on-chain
+/// slow-burn flow) should derive the network from it via
+/// [`network_for_chain`] instead of reading this constant.
+pub const CLI_NETWORK: CitreaNetwork = CitreaNetwork::Testnet;
+
+/// Map the CLI's `--chain` argument to its Citrea network.
+///
+/// Unknown / devnet chain ids fall back to [`CLI_NETWORK`] (testnet),
+/// matching the CLI's historical default and the fact that USDC only has a
+/// testnet note kind today. Use this anywhere a chain id is in scope so the
+/// selected network stays consistent with the `--chain` flag instead of a
+/// hardcoded enum.
+#[must_use]
+pub fn network_for_chain(chain: u64) -> CitreaNetwork {
+    CitreaNetwork::try_from_chain_id(chain).unwrap_or(CLI_NETWORK)
+}
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct CipheraAddress {
@@ -24,12 +44,28 @@ pub fn random_element() -> Element {
     Element::from_be_bytes(bytes)
 }
 
-pub fn citrea_token_data(ticker: &str) -> (Element, Element) {
+/// Build the `(utxo_kind, note_kind)` pair for a token on a specific network.
+///
+/// `note_kind` is network-dependent for WCBTC (testnet and mainnet have
+/// distinct bridge contracts), so callers that mint or otherwise *construct*
+/// notes must pass the network derived from their `--chain` argument (see
+/// [`network_for_chain`]) rather than relying on [`CLI_NETWORK`].
+pub fn citrea_token_data(network: CitreaNetwork, ticker: &str) -> (Element, Element) {
     match ticker.to_uppercase().as_str() {
-        "WCBTC" => (Element::new(2), citrea_wcbtc_note_kind(CLI_NETWORK)),
+        "WCBTC" => (Element::new(2), citrea_wcbtc_note_kind(network)),
         "USDC" => (Element::new(2), citrea_testnet_usdc_note_kind()),
         _ => unreachable!("only WCBTC and USDC tokens are supported"),
     }
+}
+
+/// True when `note_kind` is the WCBTC note kind on any supported network.
+///
+/// A `note_kind` fully encodes its network, so reverse lookups (note → ticker)
+/// can resolve a token regardless of which `--chain` the wallet runs on by
+/// checking every known network. The ticker itself is network-independent.
+fn is_wcbtc_note_kind(note_kind: Element) -> bool {
+    note_kind == citrea_wcbtc_note_kind(CitreaNetwork::Testnet)
+        || note_kind == citrea_wcbtc_note_kind(CitreaNetwork::Mainnet)
 }
 
 pub fn citrea_ticker_from_code(currency: u8) -> String {
@@ -41,7 +77,7 @@ pub fn citrea_ticker_from_code(currency: u8) -> String {
 }
 
 pub fn citrea_currency_from_contract(note_kind: Element) -> u8 {
-    if note_kind == citrea_wcbtc_note_kind(CLI_NETWORK) {
+    if is_wcbtc_note_kind(note_kind) {
         return 1;
     }
     if note_kind == citrea_testnet_usdc_note_kind() {
@@ -51,7 +87,7 @@ pub fn citrea_currency_from_contract(note_kind: Element) -> u8 {
 }
 
 pub fn citrea_ticker_from_contract(note_kind: Element) -> String {
-    if note_kind == citrea_wcbtc_note_kind(CLI_NETWORK) {
+    if is_wcbtc_note_kind(note_kind) {
         return "WCBTC".to_string();
     }
     if note_kind == citrea_testnet_usdc_note_kind() {

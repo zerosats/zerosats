@@ -49,14 +49,14 @@ See [Noir docs](https://noir-lang.org/docs) for more information.
 ## Install specific bb version
 
 ```sh
-bbup -v 1.0.0-nightly.20250723
+bbup -v 3.0.0-nightly.20251030-2
 ```
 
 Confirm it:
 
 ```bash
 $ bb --version
-v1.0.0-nightly.20250723
+3.0.0-nightly.20251030-2
 ```
 
 ## Testing proof generation manually using CLI (non-recursive)

@@ -98,9 +98,8 @@ const NETWORK_PROFILES: Record<NetworkName, NetworkProfile> = {
     name: "main",
     chain: citreaMainChain,
     chainId: 4114,
-    // Operator must supply RPC_URL on mainnet — no public default to avoid
-    // accidentally routing prod traffic through an unintended endpoint.
-    defaultRpcUrl: "",
+    // Mainnet has a default RPC endpoint; operator can override via RPC_URL.
+    defaultRpcUrl: "https://rpc.mainnet.citrea.xyz",
     // Must be filled in before any mainnet deploy is attempted.
     wcbtcAddress: "0x3100000000000000000000000000000000000006",
   },

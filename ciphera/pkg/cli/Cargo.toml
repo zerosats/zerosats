@@ -9,11 +9,13 @@ tokio = { workspace = true, features = ["full"] }
 reqwest = { workspace = true, features = ["json"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
+chrono = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 color-eyre = { workspace = true }
 thiserror = { workspace = true }
 once_cell.workspace = true
+bitcoin-clock.workspace = true
 element.workspace = true
 rand.workspace = true
 primitives.workspace = true
@@ -30,6 +32,7 @@ secp256k1 = { workspace = true }
 ethereum-types = { workspace = true }
 bs58 = { workspace = true }
 sha2 = { workspace = true }
+lightning-invoice = { version = "0.34", features = ["std"] }
 
 
 [[bin]]
