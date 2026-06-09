@@ -49,6 +49,9 @@ impl CipheraURL {
     }
     #[must_use]
     pub fn encode_url(&self) -> String {
+        // Per protocol: secretKey must be non-zero and < BN254_FIELD_MODULUS
+        assert!(!self.private_key.is_zero(), "Invalid secretKey: must be non-zero");
+
         let mut bytes = Vec::new();
 
         bytes.push(self.currency);
@@ -74,6 +77,7 @@ pub fn decode_url(address: &str) -> CipheraURL {
     let mut rest = &url_bytes[..];
 
     let currency = rest[0];
+    assert!(currency == 1 || currency == 2, "Invalid currency code: must be 1 (WCBTC) or 2 (USDC), got {}", currency);
     rest = &rest[1..];
 
     let private_key_bytes: [u8; 32] = rest[..32]
@@ -81,17 +85,20 @@ pub fn decode_url(address: &str) -> CipheraURL {
         .expect("Not enough bytes for private_key");
 
     let private_key = Element::from_be_bytes(private_key_bytes);
+    // Per protocol: secretKey must be non-zero and < BN254_FIELD_MODULUS
+    // TODO: implement full field modulus normalization (BN254_FIELD_MODULUS = 21888242871839275222246405745257275088548364400416034343698204186575808495617)
+    assert!(!private_key.is_zero(), "Invalid secretKey: must be non-zero");
     rest = &rest[32..];
 
     let leading_zeros = rest[0] as usize;
+    assert!(leading_zeros <= 32, "Invalid leading_zeros: must be <= 32, got {}", leading_zeros);
     rest = &rest[1..];
 
     let value_len = 32 - leading_zeros;
-    let value_without_leading_zeros = &rest[..value_len];
-    //rest = &rest[value_len..];
+    assert!(rest.len() == value_len, "Invalid value length: expected {}, got {}", value_len, rest.len());
+    let value_without_leading_zeros = rest;
 
     let mut value_bytes = [0u8; 32];
-    value_bytes[leading_zeros..].copy_from_slice(value_without_leading_zeros);
     value_bytes[leading_zeros..].copy_from_slice(value_without_leading_zeros);
     let value = Element::from_be_bytes(value_bytes);
 
