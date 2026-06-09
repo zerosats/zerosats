@@ -9,73 +9,51 @@ A simple CLI wallet for Ciphera private payments network - enabling private, zer
 - 🌐 **Connect to Network** - Connects to Ciphera nodes directly
 - 💰 **Mint, Send, Receive** - Full wallet functionality
 
-## Quick Start
-
-Look into [Getting Started](../../GettingStarted.md) document.
-
 ### Installation
 
-#### Option 1: Download Pre-compiled Binary (Easiest)
-
-Download the latest release for your platform from [Releases](https://github.com/zerosats/ciphera-cli/releases):
-
-**macOS (Apple Silicon)**
-```bash
-curl -L https://github.com/zerosats/ciphera-cli/releases/latest/download/ciphera-cli-macos-arm64 -o ciphera-cli
-chmod +x ciphera-cli
-sudo mv ciphera-cli /usr/local/bin/
-```
-
-**macOS (Intel)**
-```bash
-curl -L https://github.com/zerosats/ciphera-cli/releases/latest/download/ciphera-cli-macos-amd64 -o ciphera-cli
-chmod +x ciphera-cli
-sudo mv ciphera-cli /usr/local/bin/
-```
-
-**Linux**
-```bash
-curl -L https://github.com/zerosats/ciphera-cli/releases/latest/download/ciphera-cli-linux-amd64 -o ciphera-cli
-chmod +x ciphera-cli
-sudo mv ciphera-cli /usr/local/bin/
-```
-
-#### Option 2: Install from Source (For Developers)
+#### Build from Source
 
 **Prerequisites:**
-- Rust 1.70+
+- Rust toolchain from `rust-toolchain.toml`
 - Git LFS
+- `jq` for parsing node metadata
 
 ```bash
-git clone https://github.com/zerosats/ciphera-cli
-cd ciphera-cli
-cargo build --release
+git clone https://github.com/zerosats/zerosats.git
+cd zerosats/ciphera
+git lfs pull
+cargo build -p cli --bin ciphera-cli --release
 sudo cp target/release/ciphera-cli /usr/local/bin/ciphera-cli
-```
-
-#### Option 3: Using Cargo
-
-```bash
-cargo install --git https://github.com/zerosats/ciphera-cli
 ```
 
 ### Basic Usage
 
 ```bash
-# Connect to the Ciphera network and sync your wallet
-ciphera-cli --name alice sync
+# Testnet defaults
+export CIPHERA_HOST=https://ciphera.satsbridge.com
+export CIPHERA_CHAIN=5115
+export CITREA_RPC=https://rpc.testnet.citrea.xyz
+export CIPHERA_ROLLUP=$(curl -sS "$CIPHERA_HOST/v0/network" | jq -r '.rollup_contract')
 
-# Mint tokens (bring tokens into the private network)
-ciphera-cli --name alice mint \
-  --amount 100000000000000 \
-  --secret YOUR_PRIVATE_KEY \
-  --geth-rpc https://rpc.testnet.citrea.xyz
+# Create and sync your wallet
+ciphera-cli --name alice --host "$CIPHERA_HOST" --chain "$CIPHERA_CHAIN" create
+ciphera-cli --name alice --host "$CIPHERA_HOST" --chain "$CIPHERA_CHAIN" sync
+
+# Mint tokens (requires a funded Citrea key with WCBTC and cBTC for gas)
+ciphera-cli --name alice \
+  --host "$CIPHERA_HOST" \
+  --chain "$CIPHERA_CHAIN" \
+  --rollup "$CIPHERA_ROLLUP" \
+  mint \
+  --amount-sat 1000 \
+  --secret YOUR_CITREA_PRIVATE_KEY \
+  --geth-rpc "$CITREA_RPC"
 
 # Send tokens (create a note for someone)
-ciphera-cli --name alice spend --amount 100000000000000
+ciphera-cli --name alice --host "$CIPHERA_HOST" --chain "$CIPHERA_CHAIN" spend --amount-sat 500
 
 # Receive tokens (claim a note someone sent you)
-ciphera-cli --name bob receive --note alice-note.json
+ciphera-cli --name bob --host "$CIPHERA_HOST" --chain "$CIPHERA_CHAIN" receive --note alice-note.json
 
 # Check your balance
 cat alice.json
@@ -83,19 +61,21 @@ cat alice.json
 
 ## Full Documentation
 
-See [Getting Started Guide](../../GettingStarted.md) for detailed instructions.
+This README is the current CLI quickstart. The older [Getting Started Guide](../../GettingStarted.md) is not maintained as the source of truth for the CLI.
 
 ## Network Details
 
-- **Ciphera Node**: `ciphera.satsbridge.com:8091`
+- **Ciphera Node**: `https://ciphera.satsbridge.com`
 - **Citrea Chain ID**: `5115`
 - **Citrea wcBTC Token**: `0x4370e27F7d91D9341bFf232d7Ee8bdfE3a9933a0`
-- **Rollup Contract**: `0x26c698fa720806f93d94432d430415e3d15d3539`
+- **Rollup Contract**: fetch from `https://ciphera.satsbridge.com/v0/network`
 - **Citrea RPC**: `https://rpc.testnet.citrea.xyz`
+
+For mainnet, use `--chain 4114`, a mainnet Ciphera node, `https://rpc.mainnet.citrea.xyz`, and the rollup returned by that node's `/v0/network` response.
 
 ## How It Works
 
-1. **Mint**: Bring tokens from Citrea testnet into the private Ciphera network
+1. **Mint**: Bring tokens from Citrea into the private Ciphera network
 2. **Send**: Create encrypted notes that can be sent to recipients
 3. **Receive**: Claim notes sent to you, adding them to your private balance
 4. **ZK Proofs**: All transactions use zero-knowledge proofs to maintain privacy

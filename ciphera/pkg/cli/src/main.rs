@@ -320,16 +320,16 @@ async fn handle_create(chain: u64, name: &str) -> Result<(), AppError> {
     println!("   Never share it with anyone.");
 
     println!("\n🚀 Next Steps:");
-    println!("   1. Connect to network:  ciphera-cli --name {name} sync");
+    println!("   1. Connect to network:  ciphera-cli --name {name} --chain {chain} sync");
     println!(
-        "   2. Mint tokens:         ciphera-cli --name {name} mint --amount <AMOUNT> --secret <YOUR_ETH_KEY> --geth-rpc <RPC_URL>"
+        "   2. Mint WCBTC:          ciphera-cli --name {name} --chain {chain} --rollup <ROLLUP_CONTRACT> mint --amount-sat <AMOUNT_SAT> --secret <YOUR_CITREA_KEY> --geth-rpc <RPC_URL>"
     );
     println!("   3. Check balance:       cat {wallet_file}");
 
     Ok(())
 }
 
-/// Handle the connect command
+/// Handle the sync command
 ///
 /// Connects to a Ciphera node and performs health checks
 async fn handle_sync(
