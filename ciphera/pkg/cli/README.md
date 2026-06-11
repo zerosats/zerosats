@@ -31,18 +31,18 @@ sudo cp target/release/ciphera-cli /usr/local/bin/ciphera-cli
 ```bash
 # Testnet defaults
 export CIPHERA_HOST=https://ciphera.satsbridge.com
-export CIPHERA_CHAIN=5115
+export CITREA_CHAIN=5115
 export CITREA_RPC=https://rpc.testnet.citrea.xyz
 export CIPHERA_ROLLUP=$(curl -sS "$CIPHERA_HOST/v0/network" | jq -r '.rollup_contract')
 
 # Create and sync your wallet
-ciphera-cli --name alice --host "$CIPHERA_HOST" --chain "$CIPHERA_CHAIN" create
-ciphera-cli --name alice --host "$CIPHERA_HOST" --chain "$CIPHERA_CHAIN" sync
+ciphera-cli --name alice --host "$CIPHERA_HOST" --chain "$CITREA_CHAIN" create
+ciphera-cli --name alice --host "$CIPHERA_HOST" --chain "$CITREA_CHAIN" sync
 
 # Mint tokens (requires a funded Citrea key with WCBTC and cBTC for gas)
 ciphera-cli --name alice \
   --host "$CIPHERA_HOST" \
-  --chain "$CIPHERA_CHAIN" \
+  --chain "$CITREA_CHAIN" \
   --rollup "$CIPHERA_ROLLUP" \
   mint \
   --amount-sat 1000 \
@@ -50,10 +50,10 @@ ciphera-cli --name alice \
   --geth-rpc "$CITREA_RPC"
 
 # Send tokens (create a note for someone)
-ciphera-cli --name alice --host "$CIPHERA_HOST" --chain "$CIPHERA_CHAIN" spend --amount-sat 500
+ciphera-cli --name alice --host "$CIPHERA_HOST" --chain "$CITREA_CHAIN" spend --amount-sat 500
 
 # Receive tokens (claim a note someone sent you)
-ciphera-cli --name bob --host "$CIPHERA_HOST" --chain "$CIPHERA_CHAIN" receive --note alice-note.json
+ciphera-cli --name bob --host "$CIPHERA_HOST" --chain "$CITREA_CHAIN" receive --note alice-note.json
 
 # Check your balance
 cat alice.json
