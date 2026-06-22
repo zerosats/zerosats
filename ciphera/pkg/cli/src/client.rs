@@ -5,9 +5,10 @@
 
 use crate::wallet::Wallet;
 use color_eyre::Result;
-use contracts::{ERC20Contract, SignedRollupContract};
+use contracts::{ERC20Contract, SignedRollupContract, util::convert_element_to_h256};
+use element::Element;
 use hash::hash_merge;
-use node_interface::{HeightResponse, TransactionResponse};
+use node_interface::{HeightResponse, NetworkResponse, TransactionResponse};
 use once_cell::sync::Lazy;
 use serde_json::json;
 use std::path::PathBuf;
@@ -19,11 +20,20 @@ use zk_primitives::{EscrowProof, LeafProof, Note, UtxoProof};
 
 use contracts::ConfirmationType;
 use ethereum_types::U256;
-use secp256k1::PublicKey;
-use web3::signing::{SecretKey, keccak256};
+use web3::signing::SecretKey;
 use web3::types::Address;
 
 use crate::rpc::{HealthResponse, ListTransactionsResponse, ListTxnsQuery};
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ApprovalStatus {
+    pub token_address: Address,
+    pub rollup_address: Address,
+    pub allowance_before: U256,
+    pub allowance_after: U256,
+    pub approved: bool,
+}
+
 /// Singleton HTTP client shared across all NodeClient instances
 /// Provides connection pooling and efficient resource reuse
 static HTTP_CLIENT: Lazy<reqwest::Client> = Lazy::new(|| {
@@ -193,6 +203,36 @@ impl NodeClient {
         NodeClientBuilder::new()
     }
 
+    pub async fn network_info(host: &str) -> Result<NetworkResponse> {
+        let host = host.trim_end_matches('/');
+        let url = if host.starts_with("http://") || host.starts_with("https://") {
+            format!("{host}/v0/network")
+        } else {
+            format!("http://{host}:8091/v0/network")
+        };
+
+        debug!("Fetching network info from: {}", url);
+
+        let response = HTTP_CLIENT
+            .get(&url)
+            .timeout(Duration::from_secs(60))
+            .send()
+            .await
+            .map_err(|e| color_eyre::eyre::eyre!("Failed to connect to node: {}", e))?;
+
+        if !response.status().is_success() {
+            return Err(color_eyre::eyre::eyre!(
+                "Node returned error status: {}",
+                response.status()
+            ));
+        }
+
+        response
+            .json::<NetworkResponse>()
+            .await
+            .map_err(|e| color_eyre::eyre::eyre!("Failed to parse network response: {}", e))
+    }
+
     /// Create a new NodeClient with default settings for localhost
     ///
     /// # Arguments
@@ -232,6 +272,61 @@ impl NodeClient {
 
     pub fn replace_wallet(&mut self, wallet: Wallet) {
         self.wallet = wallet;
+    }
+
+    async fn ensure_rollup_token_approval(
+        rollup: &SignedRollupContract,
+        erc20_contract: &ERC20Contract,
+    ) -> Result<ApprovalStatus> {
+        let token_address = erc20_contract.address();
+        let rollup_address = rollup.address();
+        let allowance_before = erc20_contract
+            .allowance(rollup.signer_address, rollup_address)
+            .await?;
+
+        let approved = allowance_before != U256::MAX;
+        if approved {
+            println!("\nApproving token {token_address:#x} for rollup {rollup_address:#x}\n");
+            let approve_txn = erc20_contract.approve_max(rollup_address).await?;
+            rollup
+                .client
+                .wait_for_confirm(
+                    approve_txn,
+                    Duration::from_secs(1),
+                    ConfirmationType::Latest,
+                )
+                .await?;
+        }
+
+        let allowance_after = erc20_contract
+            .allowance(rollup.signer_address, rollup_address)
+            .await?;
+
+        Ok(ApprovalStatus {
+            token_address,
+            rollup_address,
+            allowance_before,
+            allowance_after,
+            approved,
+        })
+    }
+
+    pub async fn approve_mint_token(
+        geth_rpc: &str,
+        chain_id: u64,
+        secret: &str,
+        rollup: &str,
+        note_kind: &Element,
+    ) -> Result<ApprovalStatus> {
+        let sk = SecretKey::from_str(secret)?;
+        let client = contracts::Client::new(geth_rpc, None);
+
+        let rollup = SignedRollupContract::load(client, &chain_id, rollup, sk).await?;
+        let token_address = rollup.token(convert_element_to_h256(note_kind)).await?;
+        let erc20_contract =
+            ERC20Contract::load(rollup.client.clone(), &format!("{token_address:#x}"), sk).await?;
+
+        Self::ensure_rollup_token_approval(&rollup, &erc20_contract).await
     }
 
     /// Check the health of the node
@@ -427,28 +522,7 @@ impl NodeClient {
         let erc20_contract = ERC20Contract::load(client.clone(), erc20_contract, sk).await?;
         let rollup = SignedRollupContract::load(client, &chain_id, rollup, sk).await?;
 
-        let secp = secp256k1::Secp256k1::new();
-        let secret_key = secp256k1::SecretKey::from_slice(&sk.secret_bytes()).unwrap();
-        let public_key = PublicKey::from_secret_key(&secp, &secret_key);
-        let serialized_public_key = public_key.serialize_uncompressed();
-        let address_bytes = &keccak256(&serialized_public_key[1..])[12..];
-        let admin = Address::from_slice(address_bytes);
-
-        if erc20_contract
-            .allowance(rollup.signer_address, admin)
-            .await?
-            != U256::MAX
-        {
-            let approve_txn = erc20_contract.approve_max(rollup.address()).await?;
-            rollup
-                .client
-                .wait_for_confirm(
-                    approve_txn,
-                    Duration::from_secs(1),
-                    ConfirmationType::Latest,
-                )
-                .await?;
-        }
+        Self::ensure_rollup_token_approval(&rollup, &erc20_contract).await?;
 
         Ok(())
     }

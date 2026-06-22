@@ -79,6 +79,17 @@ enum Commands {
         #[arg(short, long, default_value = "WCBTC")]
         ticker: String,
     },
+    /// Approve the node-advertised rollup to pull this wallet's backing ERC-20 for minting
+    ApproveMint {
+        #[arg(required = true, long, short)]
+        geth_rpc: String,
+
+        #[arg(required = true, long, short)]
+        secret: String,
+
+        #[arg(short, long, default_value = "WCBTC")]
+        ticker: String,
+    },
     Mint {
         #[arg(required = true, long, short)]
         geth_rpc: String,
@@ -406,6 +417,44 @@ async fn handle_address(name: &str, amount_wei: u64, ticker: &str) -> Result<()>
     println!("\nEncoded: {encoded}");
     let id = a.commitment();
     println!("\nCommitment: {id}");
+    Ok(())
+}
+
+async fn handle_approve(
+    geth_rpc: &str,
+    chain: u64,
+    host: &str,
+    secret: &str,
+    ticker: &str,
+) -> Result<()> {
+    let network = NodeClient::network_info(host).await?;
+    if network.chain_id != chain {
+        return Err(color_eyre::eyre::eyre!(
+            "node chain id {} does not match --chain {}",
+            network.chain_id,
+            chain
+        ));
+    }
+
+    let (_, note_kind) =
+        cli::address::citrea_token_data(cli::address::network_for_chain(chain), ticker);
+    let approval = NodeClient::approve_mint_token(
+        geth_rpc,
+        chain,
+        secret,
+        &network.rollup_contract,
+        &note_kind,
+    )
+    .await?;
+
+    if approval.approved {
+        println!("\nApproved {ticker} token for rollup minting");
+    } else {
+        println!("\n{ticker} token already approved for rollup minting");
+    }
+    println!("   Token:   {:#x}", approval.token_address);
+    println!("   Rollup:  {:#x}", approval.rollup_address);
+    println!("   Current allowance: {}", approval.allowance_after);
     Ok(())
 }
 
@@ -2068,6 +2117,21 @@ async fn main() -> Result<()> {
             let amount_wei = units::sats_to_wei(amount_sat);
             handle_address(&cli.name, amount_wei, &ticker_normalized).await?;
         }
+        Commands::ApproveMint {
+            geth_rpc,
+            secret,
+            ticker,
+        } => {
+            let ticker_normalized = ticker.to_uppercase();
+            handle_approve(
+                &geth_rpc,
+                cli.chain,
+                &cli.host,
+                &secret,
+                &ticker_normalized,
+            )
+            .await?;
+        }
         Commands::Spend { amount_sat, ticker } => {
             let ticker_normalized = ticker.to_uppercase();
             let amount_wei = units::sats_to_wei(amount_sat);
@@ -2258,4 +2322,58 @@ async fn main() -> Result<()> {
 
     println!("\n");
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_address_generation_command() {
+        let cli = Cli::try_parse_from([
+            "ciphera-cli",
+            "address",
+            "--amount-sat",
+            "10",
+            "--ticker",
+            "USDC",
+        ])
+        .unwrap();
+
+        match cli.command {
+            Commands::Address { amount_sat, ticker } => {
+                assert_eq!(amount_sat, 10);
+                assert_eq!(ticker, "USDC");
+            }
+            other => panic!("expected address command, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_approve_mint_command() {
+        let cli = Cli::try_parse_from([
+            "ciphera-cli",
+            "approve-mint",
+            "--geth-rpc",
+            "http://127.0.0.1:8545",
+            "--secret",
+            "secret",
+            "--ticker",
+            "USDC",
+        ])
+        .unwrap();
+
+        match cli.command {
+            Commands::ApproveMint {
+                geth_rpc,
+                secret,
+                ticker,
+            } => {
+                assert_eq!(geth_rpc, "http://127.0.0.1:8545");
+                assert_eq!(secret, "secret");
+                assert_eq!(ticker, "USDC");
+            }
+            other => panic!("expected approve-mint command, got {other:?}"),
+        }
+    }
 }

@@ -127,39 +127,42 @@ We are running a node on AWS. You'll need to connect to it before performing ope
 
 Minting brings tokens from Citrea into the private rollup. Your wallet we need to have wcBTC for minting into the contract and cBTC for gas. cBTC faucet is found [here](https://citrea.xyz/faucet). 
 
-#### Step 2a: Approve ERC20 Spending
+#### Step 2a: Approve Mint Spending
 
-First, approve the rollup contract to spend your wcBTC tokens:
+First, approve the node-advertised rollup contract to spend your wcBTC tokens for minting:
 
 ```bash
-cast send 0x8d0c9d1c17aE5e40ffF9bE350f57840E9E66Cd93 \
-  "approve(address,uint256)" \
-  0x1a0E789aa9aE8883C5e55B8E57EFC94F00943d53 \
-  100000000000000000000 \
-  --rpc-url https://rpc.testnet.citrea.xyz \
-  --private-key <YOUR_CITREA_PRIVATE_KEY>
+./target/release/ciphera-cli \
+  --host https://ciphera.satsbridge.com \
+  --chain 5115 \
+  approve-mint \
+  --secret <YOUR_CITREA_PRIVATE_KEY> \
+  --geth-rpc https://rpc.testnet.citrea.xyz \
+  --ticker WCBTC
 ```
 
-> **Note:** You need `cast` from [Foundry](https://book.getfoundry.sh/getting-started/installation)
+This command is idempotent. It only submits an approval transaction when the allowance is missing.
 
 #### Step 2b: Mint to Your Wallet
 
 ```bash
+CIPHERA_ROLLUP=$(curl -sS https://ciphera.satsbridge.com/v0/network | jq -r '.rollup_contract')
+
 ./target/release/ciphera-cli \
   --name alice \
-  --host 63.176.138.198 \
-  --port 8091 \
+  --host https://ciphera.satsbridge.com \
   --chain 5115 \
-  --token 0x8d0c9d1c17aE5e40ffF9bE350f57840E9E66Cd93 \
+  --rollup "$CIPHERA_ROLLUP" \
   mint \
-  --secret <YOUR_CITREA_SECRET_KEY> \
+  --secret <YOUR_CITREA_PRIVATE_KEY> \
   --geth-rpc https://rpc.testnet.citrea.xyz \
-  --amount 100000000000000
+  --amount-sat 1000 \
+  --ticker WCBTC
 ```
 
 **Parameters:**
 - `--secret`: Your wallet's private key (32-byte hex)
-- `--amount`: Token amount in wei (e.g., `100000000000000` = 0.0001 tokens with 18 decimals)
+- `--amount-sat`: Token amount in satoshis
 
 **Expected Output:**
 ```
