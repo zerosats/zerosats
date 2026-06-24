@@ -6,13 +6,16 @@ use std::fs;
 use std::num::ParseIntError;
 use std::path::{Path, PathBuf};
 use zk_primitives::{
-    CitreaNetwork, Escrow, EscrowInputNote, InputNote, Note, TimeLock, TimeProof, UtxoKind, Utxo,
+    CitreaNetwork, Escrow, EscrowInputNote, InputNote, Note, TimeLock, TimeProof, Utxo, UtxoKind,
 };
 
 use crate::escrow::{htlc_claim_address, htlc_refund_psi};
 
 use crate::CipheraAddress;
-use crate::address::{CLI_NETWORK, citrea_ticker_from_contract, citrea_token_data, network_for_chain};
+use crate::address::{
+    CLI_NETWORK, citrea_ticker_from_contract, citrea_token_data, network_for_chain,
+    normalize_citrea_ticker,
+};
 use crate::rpc::TxnWithInfo;
 use std::collections::HashMap;
 use tracing::{debug, error, info};
@@ -152,7 +155,9 @@ impl Wallet {
 
         if wallet_path.is_file() {
             let json_str = fs::read_to_string(&wallet_path)?;
-            Ok(serde_json::from_str::<Self>(&json_str)?.with_storage_path(wallet_path))
+            let mut wallet = serde_json::from_str::<Self>(&json_str)?;
+            wallet.normalize_asset_maps();
+            Ok(wallet.with_storage_path(wallet_path))
         } else {
             Err(WalletError::FileNotFound(wallet_path.display().to_string()))
         }
@@ -193,11 +198,29 @@ impl Wallet {
         (staged, value)
     }
 
+    fn canonical_asset_key(ticker: &str) -> String {
+        normalize_citrea_ticker(ticker)
+            .unwrap_or_else(|| ticker.trim())
+            .to_string()
+    }
+
+    fn normalize_note_map(map: &mut HashMap<String, Vec<InputNote>>) {
+        let old = std::mem::take(map);
+        for (ticker, notes) in old {
+            map.entry(Self::canonical_asset_key(&ticker))
+                .or_default()
+                .extend(notes);
+        }
+    }
+
+    fn normalize_asset_maps(&mut self) {
+        Self::normalize_note_map(&mut self.pending);
+        Self::normalize_note_map(&mut self.avail);
+    }
+
     fn push_to_avail(&mut self, ticker: &str, note: InputNote) -> Result<u64, WalletError> {
-        self.avail
-            .entry(ticker.to_string())
-            .or_default()
-            .push(note.clone());
+        let ticker = Self::canonical_asset_key(ticker);
+        self.avail.entry(ticker).or_default().push(note.clone());
         let note_amount = note
             .note
             .value
@@ -210,7 +233,9 @@ impl Wallet {
     }
 
     fn pull_from_avail(&mut self, ticker: &str, note: InputNote) -> Result<u64, WalletError> {
-        let opt_balance = self.avail.get_mut(ticker).and_then(|notes| {
+        self.normalize_asset_maps();
+        let ticker = Self::canonical_asset_key(ticker);
+        let opt_balance = self.avail.get_mut(&ticker).and_then(|notes| {
             let pos = notes.iter().position(|n| n.note == note.note)?;
             let removed_note = notes.remove(pos);
             println!("{removed_note:?}");
@@ -251,9 +276,11 @@ impl Wallet {
         ticker: &str,
         amount: u64,
     ) -> Result<([InputNote; 2], Note), WalletError> {
+        self.normalize_asset_maps();
+        let ticker = Self::canonical_asset_key(ticker);
         let asset_notes = self
             .avail
-            .get(ticker)
+            .get(&ticker)
             .filter(|n| !n.is_empty())
             .cloned()
             .ok_or_else(|| {
@@ -310,7 +337,7 @@ impl Wallet {
         };
 
         for note in &selected_notes {
-            self.pull_from_avail(ticker, note.clone())?;
+            self.pull_from_avail(&ticker, note.clone())?;
         }
 
         let change = if total_input == amount {
@@ -318,7 +345,7 @@ impl Wallet {
         } else {
             let change_amount = total_input - amount;
             let change_note = self.make_change_note(&selected_notes[0].note, change_amount);
-            self.push_to_avail(ticker, change_note.clone())?;
+            self.push_to_avail(&ticker, change_note.clone())?;
             change_note.note
         };
 
@@ -332,9 +359,11 @@ impl Wallet {
     }
 
     pub fn find_note(&mut self, amount: u64, ticker: &str) -> Result<InputNote, WalletError> {
+        self.normalize_asset_maps();
+        let ticker = Self::canonical_asset_key(ticker);
         let asset_notes = self
             .avail
-            .get_mut(ticker)
+            .get_mut(&ticker)
             .filter(|n| !n.is_empty())
             .ok_or_else(|| {
                 WalletError::LowBalance(format!(
@@ -402,9 +431,10 @@ impl Wallet {
     }
 
     fn mint(&mut self, amount: u64, ticker: &str) -> Result<Utxo, WalletError> {
-        let received_note: InputNote = self.receive_note(amount, ticker);
+        let ticker = Self::canonical_asset_key(ticker);
+        let received_note: InputNote = self.receive_note(amount, &ticker);
 
-        let b = self.push_to_avail(ticker, received_note.clone())?;
+        let b = self.push_to_avail(&ticker, received_note.clone())?;
         debug!(balance = b, "updated wallet balance");
 
         Ok(Utxo::new_mint([
@@ -655,6 +685,7 @@ impl Wallet {
     }
 
     fn import_note(&mut self, note: &Note) -> Result<(), WalletError> {
+        self.normalize_asset_maps();
         for ticker in self.pending.keys().cloned().collect::<Vec<_>>() {
             let asset_notes = self.pending.get(&ticker).unwrap();
             if let Some(pos) = asset_notes
@@ -696,10 +727,11 @@ impl Wallet {
     }
 
     fn get_address(&mut self, amount: u64, ticker: &str) -> CipheraAddress {
+        let ticker = Self::canonical_asset_key(ticker);
         let pk = self.gen_pk();
         let psi = self.gen_pk();
         let address = hash_merge([pk, Element::ZERO]);
-        let (utxo_kind, note_kind) = citrea_token_data(self.network(), ticker);
+        let (utxo_kind, note_kind) = citrea_token_data(self.network(), &ticker);
 
         let note = Note {
             utxo_kind,
@@ -709,7 +741,7 @@ impl Wallet {
             value: Element::new(amount),
         };
         self.pending
-            .insert(ticker.to_string(), vec![InputNote::new(note.clone(), pk)]);
+            .insert(ticker, vec![InputNote::new(note.clone(), pk)]);
 
         (&note).into()
     }
@@ -719,6 +751,7 @@ impl Wallet {
     }
 
     fn sync(&mut self, txns: &[TxnWithInfo]) -> Result<(), WalletError> {
+        self.normalize_asset_maps();
         for tx in txns {
             let id = tx.hash;
             let block = tx.block_height;
@@ -761,7 +794,8 @@ impl Wallet {
 #[cfg(test)]
 mod wallet_tests {
     use super::*;
-    use crate::address::decode_address;
+    use crate::address::{CITREA_USD_TICKER, decode_address};
+    use crate::escrow::{pow_two_block_lock, pow_two_block_proof};
     use element::Element;
     use tempdir::TempDir;
     use zk_primitives::InputNote;
@@ -849,6 +883,34 @@ mod wallet_tests {
             saved_wallet_json.get("chain_id"),
             Some(&serde_json::json!(5115))
         );
+    }
+
+    #[test]
+    fn test_load_normalizes_legacy_usdc_asset_key() {
+        let wallet_dir = TempDir::new("legacy-wallet-usdc").unwrap();
+        let wallet_path = Wallet::wallet_path_in(wallet_dir.path(), "legacy-usdc");
+
+        let mut wallet = Wallet::random(5115, Some("legacy-usdc".to_string()));
+        let (utxo_kind, note_kind) = citrea_token_data(CitreaNetwork::Testnet, "USDC");
+        let pk = Element::from(44u64);
+        wallet.avail.insert(
+            "USDC".to_string(),
+            vec![InputNote::new(
+                Note {
+                    utxo_kind,
+                    note_kind,
+                    address: hash_merge([pk, Element::ZERO]),
+                    psi: hash_merge([pk, pk]),
+                    value: Element::from(10u64),
+                },
+                pk,
+            )],
+        );
+        wallet.save_to(&wallet_path).unwrap();
+
+        let loaded_wallet = Wallet::load_from(wallet_dir.path(), "legacy-usdc").unwrap();
+        assert!(loaded_wallet.avail.contains_key(CITREA_USD_TICKER));
+        assert!(!loaded_wallet.avail.contains_key("USDC"));
     }
 
     #[test]
@@ -1549,11 +1611,91 @@ mod wallet_tests {
     }
 
     #[test]
-    fn test_mint_usdc_uses_correct_ticker() {
+    fn test_mint_cusd_uses_correct_ticker() {
+        let mut wallet = Wallet::random(5115, Some("test".to_string()));
+        wallet.mint(100, "CUSD").unwrap();
+        assert_eq!(wallet.avail[CITREA_USD_TICKER].len(), 1);
+        assert!(!wallet.avail.contains_key("WCBTC"));
+    }
+
+    #[test]
+    fn test_mint_legacy_usdc_alias_uses_cusd_ticker() {
         let mut wallet = Wallet::random(5115, Some("test".to_string()));
         wallet.mint(100, "USDC").unwrap();
-        assert_eq!(wallet.avail["USDC"].len(), 1);
-        assert!(!wallet.avail.contains_key("WCBTC"));
+        assert_eq!(wallet.avail[CITREA_USD_TICKER].len(), 1);
+        assert!(!wallet.avail.contains_key("USDC"));
+    }
+
+    #[test]
+    fn test_cusd_escrow_lock_uses_cusd_note_kind() {
+        let mut wallet = Wallet::random(5115, Some("test".to_string()));
+        wallet.mint(1_000, "CUSD").unwrap();
+        let lock = pow_two_block_lock();
+        let preimage = [7u8; 32];
+        let htlc_secret_key = Element::from(123u64);
+
+        let (utxo, htlc_input_note) = wallet
+            .escrow_lock(400, "CUSD", htlc_secret_key, preimage, &lock)
+            .unwrap();
+        let (_, expected_note_kind) = citrea_token_data(CitreaNetwork::Testnet, "CUSD");
+
+        assert_eq!(htlc_input_note.note.note_kind, expected_note_kind);
+        assert_eq!(htlc_input_note.spend_type, 3);
+        assert_eq!(utxo.output_notes[0].note_kind, expected_note_kind);
+        assert_eq!(wallet.avail[CITREA_USD_TICKER].len(), 1);
+    }
+
+    #[test]
+    fn test_cusd_escrow_redeem_adds_cusd_note() {
+        let wallet = Wallet::random(5115, Some("test".to_string()));
+        let (_, expected_note_kind) = citrea_token_data(CitreaNetwork::Testnet, "CUSD");
+        let htlc_input_note = EscrowInputNote {
+            note: Note {
+                utxo_kind: Element::new(2),
+                note_kind: expected_note_kind,
+                address: Element::from(1u64),
+                psi: Element::from(2u64),
+                value: Element::from(400u64),
+            },
+            spend_type: 3,
+            secret_key: Element::from(123u64),
+            preimage: [7u8; 32],
+            ..EscrowInputNote::default()
+        };
+
+        let (prepared_wallet, escrow, received) =
+            wallet.prepare_escrow_redeem(&htlc_input_note).unwrap();
+
+        assert_eq!(received.note.note_kind, expected_note_kind);
+        assert_eq!(escrow.output_notes[0].note_kind, expected_note_kind);
+        assert_eq!(prepared_wallet.avail[CITREA_USD_TICKER].len(), 1);
+    }
+
+    #[test]
+    fn test_cusd_escrow_refund_adds_cusd_note() {
+        let wallet = Wallet::random(5115, Some("test".to_string()));
+        let (_, expected_note_kind) = citrea_token_data(CitreaNetwork::Testnet, "CUSD");
+        let htlc_input_note = EscrowInputNote {
+            note: Note {
+                utxo_kind: Element::new(2),
+                note_kind: expected_note_kind,
+                address: Element::from(1u64),
+                psi: Element::from(2u64),
+                value: Element::from(400u64),
+            },
+            spend_type: 3,
+            secret_key: Element::from(123u64),
+            preimage: [0u8; 32],
+            ..EscrowInputNote::default()
+        };
+
+        let (prepared_wallet, escrow, received) = wallet
+            .prepare_escrow_refund(&htlc_input_note, pow_two_block_proof())
+            .unwrap();
+
+        assert_eq!(received.note.note_kind, expected_note_kind);
+        assert_eq!(escrow.output_notes[0].note_kind, expected_note_kind);
+        assert_eq!(prepared_wallet.avail[CITREA_USD_TICKER].len(), 1);
     }
 
     // =====================================================================
@@ -1737,18 +1879,18 @@ mod wallet_tests {
     #[test]
     fn test_import_note_does_not_remove_other_pending_notes() {
         let mut wallet = Wallet::random(5115, Some("test".to_string()));
-        // Add an unrelated pending note for USDC.
-        let pk_usdc = Element::from(55555u64);
-        let (kind_usdc, contract_usdc) = citrea_token_data(CitreaNetwork::Testnet, "USDC");
+        // Add an unrelated pending note for Citrea USD, using the legacy alias.
+        let pk_usd = Element::from(55555u64);
+        let (kind_usd, contract_usd) = citrea_token_data(CitreaNetwork::Testnet, "USDC");
         let unrelated_note = InputNote::new(
             Note {
-                utxo_kind: kind_usdc,
-                note_kind: contract_usdc,
-                address: hash_merge([pk_usdc, Element::ZERO]),
-                psi: hash_merge([pk_usdc, pk_usdc]),
+                utxo_kind: kind_usd,
+                note_kind: contract_usd,
+                address: hash_merge([pk_usd, Element::ZERO]),
+                psi: hash_merge([pk_usd, pk_usd]),
                 value: Element::from(500u64),
             },
-            pk_usdc,
+            pk_usd,
         );
         wallet
             .pending
@@ -1759,8 +1901,8 @@ mod wallet_tests {
 
         wallet.import_note(&note).unwrap();
 
-        // The USDC pending note must not be touched.
-        assert_eq!(wallet.pending["USDC"].len(), 1);
+        // The Citrea USD pending note must not be touched.
+        assert_eq!(wallet.pending[CITREA_USD_TICKER].len(), 1);
     }
 
     // =====================================================================
