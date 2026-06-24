@@ -59,9 +59,11 @@ ciphera-cli --name bob --host "$CIPHERA_HOST" --chain "$CITREA_CHAIN" receive --
 cat alice.json
 ```
 
-`WCBTC` is the default token for wallet commands. Pass `--ticker CUSD` to use
-Citrea USD; `CITREAUSD`, `CITREA_USD`, `USD`, and the legacy `USDC` spelling
-are accepted as aliases.
+`WCBTC` is the default token for wallet commands and uses `--amount-sat`.
+Pass `--token CUSD --amount-cent <CENTS>` to use Citrea USD. `--ticker`
+remains accepted as a compatibility alias for `--token`; `CITREAUSD`,
+`CITREA_USD`, `USD`, and the legacy `USDC` spelling are accepted as token
+aliases.
 
 ## Full Documentation
 
