@@ -2,8 +2,9 @@ use clap::{Parser, Subcommand};
 
 use cli::NodeClient;
 use cli::Wallet;
-use cli::address::citrea_ticker_from_contract;
-use cli::address::decode_address;
+use cli::address::{
+    citrea_ticker_from_contract, decode_address, normalize_citrea_ticker, supported_citrea_tokens,
+};
 use cli::note_url::{CipheraURL, decode_url};
 use cli::units;
 
@@ -13,17 +14,14 @@ use web3::types::{H160, H256, U256};
 
 use barretenberg::{Prove, Verify};
 use contracts::util::{convert_element_to_h256, convert_h160_to_element};
+use element::Element;
 use hash::hash_merge;
 use rand::{RngCore, rngs::OsRng};
 use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::Path;
 use std::str::FromStr;
-use element::Element;
-use zk_primitives::{
-    InputNote, Note, citrea_testnet_usdc_note_kind, citrea_wcbtc_note_kind,
-    get_address_for_private_key,
-};
+use zk_primitives::{InputNote, Note, get_address_for_private_key};
 
 #[derive(Parser, Debug)]
 #[command(name = "ciphera-cli")]
@@ -285,6 +283,8 @@ pub enum AppError {
     WalletError(#[from] cli::wallet::WalletError),
     #[error("Cant parse address: {0}")]
     InvalidAddress(String),
+    #[error("Unsupported token '{0}'. Supported tokens: WCBTC, CUSD")]
+    InvalidTicker(String),
     #[error("File not found: {0}")]
     FileNotFound(String),
     #[error("Not enough balance")]
@@ -295,6 +295,10 @@ pub enum AppError {
     ConversionError(),
     #[error("Wallet load error: {0}")]
     WalletLoadError(#[from] color_eyre::Report),
+}
+
+fn parse_cli_ticker(ticker: &str) -> Result<&'static str, AppError> {
+    normalize_citrea_ticker(ticker).ok_or_else(|| AppError::InvalidTicker(ticker.to_string()))
 }
 
 async fn handle_create(chain: u64, name: &str) -> Result<(), AppError> {
@@ -1383,7 +1387,7 @@ fn parse_timelock_hash(value: &serde_json::Value, field: &str) -> Result<[u8; 32
 /// Verify escrow note values against the Bolt11 invoice and wallet configuration.
 /// Prevents the service from:
 /// - Switching amounts (user requests 100k sats, service returns 50k)
-/// - Switching tokens/chains (user expects WCBTC on Citrea, service returns something else)
+/// - Switching tokens/chains (service must return a supported Citrea token)
 /// - Using wrong refund address (funds wouldn't be recoverable)
 /// - Mismatching payment hash (wouldn't settle the correct invoice)
 async fn verify_escrow_note_values(
@@ -1427,19 +1431,20 @@ async fn verify_escrow_note_values(
         ));
     }
 
-    // Verify token kind matches expected chain
-    let (_, expected_note_kind) = cli::address::citrea_token_data(
-        cli::address::network_for_chain(chain),
-        "WCBTC",
-    );
-    if escrow_note.note_kind != expected_note_kind {
-        return Err(color_eyre::eyre::eyre!(
-            "note kind mismatch: expected {} but service returned {}; \
-             service may be trying to return tokens from a different chain",
-            expected_note_kind,
-            escrow_note.note_kind
-        ));
-    }
+    // Verify token kind is one of the supported Citrea assets for this chain.
+    let network = cli::address::network_for_chain(chain);
+    let token = supported_citrea_tokens(network)
+        .into_iter()
+        .find(|(_, note_kind)| *note_kind == escrow_note.note_kind)
+        .map(|(ticker, _)| ticker)
+        .ok_or_else(|| {
+            color_eyre::eyre::eyre!(
+                "unsupported note kind {} for chain {}; supported tokens: WCBTC, CUSD",
+                escrow_note.note_kind,
+                chain
+            )
+        })?;
+    debug!(token, "verified escrow token kind");
 
     // Verify note commitment (psi) encodes the refund address and timelock.
     // For the HTLC refund branch: psi = Poseidon(key_hash, timelock.commitment())
@@ -1842,16 +1847,10 @@ async fn handle_release_slow_burn(
     // kind we brute-force against matches the chain we're actually talking
     // to, instead of a hardcoded enum.
     let network = cli::address::network_for_chain(chain);
-    let candidate_kinds: Vec<(&str, H256)> = vec![
-        (
-            "WCBTC",
-            convert_element_to_h256(&citrea_wcbtc_note_kind(network)),
-        ),
-        (
-            "USDC",
-            convert_element_to_h256(&citrea_testnet_usdc_note_kind()),
-        ),
-    ];
+    let candidate_kinds: Vec<(&str, H256)> = supported_citrea_tokens(network)
+        .into_iter()
+        .map(|(ticker, note_kind)| (ticker, convert_element_to_h256(&note_kind)))
+        .collect();
 
     let mut matched: Option<(&str, H256)> = None;
     for (ticker, kind) in &candidate_kinds {
@@ -1870,7 +1869,7 @@ async fn handle_release_slow_burn(
     }
     let (ticker, note_kind) = matched.ok_or_else(|| {
         color_eyre::eyre::eyre!(
-            "could not match any known note_kind (WCBTC/USDC) against event key {:#x}; \
+            "could not match any known note_kind (WCBTC/CUSD) against event key {:#x}; \
              contract may be using an unsupported token",
             event.key
         )
@@ -1896,21 +1895,14 @@ async fn handle_rollup(geth_rpc: &str, chain: u64, rollup: &str, blocks: u64) ->
 
     let rh = rollup.root_hash().await?;
     let b = rollup.block_height().await?;
-    let kind_wcbtc = H256::from_slice(
-        &hex::decode("000200000000000013fb4370e27F7d91D9341bFf232d7Ee8bdfE3a9933a00000").unwrap(),
-    );
-
-    let kind_usdc = H256::from_slice(
-        &hex::decode("000200000000000013fb52f74a8f9bdd29f77a5efd7f6cb44dcf6906a4b60000").unwrap(),
-    );
-
-    let token_wbtc = rollup.token(kind_wcbtc).await?;
-    let token_usdc = rollup.token(kind_usdc).await?;
+    let tokens = supported_citrea_tokens(cli::address::network_for_chain(chain));
 
     println!("\nRollup State Info\n");
     println!("\tChain                :{chain} ");
-    println!("\tToken kind WBTC      :{token_wbtc:#x} ");
-    println!("\tToken kind USDC      :{token_usdc:#x} ");
+    for (ticker, note_kind) in tokens {
+        let token = rollup.token(convert_element_to_h256(&note_kind)).await?;
+        println!("\tToken kind {ticker:<9}:{token:#x} ");
+    }
     println!("\tBlock                :{b} ");
     println!("\tRoot hash            :{rh:#x} ");
 
@@ -2064,19 +2056,19 @@ async fn main() -> Result<()> {
             handle_sync(cli.chain, &cli.name, &cli.host).await?;
         }
         Commands::Address { amount_sat, ticker } => {
-            let ticker_normalized = ticker.to_uppercase();
+            let ticker_normalized = parse_cli_ticker(&ticker)?;
             let amount_wei = units::sats_to_wei(amount_sat);
-            handle_address(&cli.name, amount_wei, &ticker_normalized).await?;
+            handle_address(&cli.name, amount_wei, ticker_normalized).await?;
         }
         Commands::Spend { amount_sat, ticker } => {
-            let ticker_normalized = ticker.to_uppercase();
+            let ticker_normalized = parse_cli_ticker(&ticker)?;
             let amount_wei = units::sats_to_wei(amount_sat);
             handle_note_spend(
                 cli.chain,
                 &cli.name,
                 &cli.host,
                 amount_wei,
-                &ticker_normalized,
+                ticker_normalized,
             )
             .await?;
         }
@@ -2107,14 +2099,14 @@ async fn main() -> Result<()> {
             ticker,
             preimage,
         } => {
-            let ticker_normalized = ticker.to_uppercase();
+            let ticker_normalized = parse_cli_ticker(&ticker)?;
             let amount_wei = units::sats_to_wei(amount_sat);
             handle_escrow_lock(
                 cli.chain,
                 &cli.name,
                 &cli.host,
                 amount_wei,
-                &ticker_normalized,
+                ticker_normalized,
                 &preimage,
                 &cli.btc_explorer,
             )
@@ -2149,7 +2141,7 @@ async fn main() -> Result<()> {
             ticker,
             only_snark,
         } => {
-            let ticker_normalized = ticker.to_uppercase();
+            let ticker_normalized = parse_cli_ticker(&ticker)?;
             let amount_wei = units::sats_to_wei(amount_sat);
             handle_mint(
                 &cli.name,
@@ -2159,7 +2151,7 @@ async fn main() -> Result<()> {
                 &cli.rollup,
                 &secret,
                 amount_wei,
-                &ticker_normalized,
+                ticker_normalized,
                 only_snark,
             )
             .await?;
@@ -2169,7 +2161,7 @@ async fn main() -> Result<()> {
             amount_sat,
             ticker,
         } => {
-            let ticker_normalized = ticker.to_uppercase();
+            let ticker_normalized = parse_cli_ticker(&ticker)?;
             let amount_wei = units::sats_to_wei(amount_sat);
             handle_burn(
                 &cli.name,
@@ -2177,7 +2169,7 @@ async fn main() -> Result<()> {
                 cli.chain,
                 &address,
                 amount_wei,
-                &ticker_normalized,
+                ticker_normalized,
                 true,
             )
             .await?;
