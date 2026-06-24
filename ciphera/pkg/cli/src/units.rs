@@ -17,6 +17,12 @@ pub const SATS_PER_BTC: u64 = 100_000_000;
 /// Derived from: 1 BTC = 10^8 sats = 10^18 wei  →  1 sat = 10^10 wei.
 pub const WEI_PER_SAT: u64 = 10_000_000_000;
 
+/// Number of CUSD base units in one cent.
+///
+/// CUSD has 6 decimals, so 1 CUSD = 1,000,000 base units and
+/// 1 cent = 0.01 CUSD = 10,000 base units.
+pub const CUSD_UNITS_PER_CENT: u64 = 10_000;
+
 /// Convert a satoshi amount to its wei equivalent.
 ///
 /// # Panics
@@ -24,6 +30,16 @@ pub const WEI_PER_SAT: u64 = 10_000_000_000;
 pub fn sats_to_wei(sats: u64) -> u64 {
     sats.checked_mul(WEI_PER_SAT)
         .expect("sats_to_wei: overflow converting sats to wei")
+}
+
+/// Convert a CUSD cent amount to its 6-decimal base unit equivalent.
+///
+/// # Panics
+/// Panics in debug mode if the multiplication overflows `u64`.
+pub fn cusd_cents_to_units(cents: u64) -> u64 {
+    cents
+        .checked_mul(CUSD_UNITS_PER_CENT)
+        .expect("cusd_cents_to_units: overflow converting cents to CUSD units")
 }
 
 /// Convert a wei amount to the nearest whole satoshi, truncating any sub-satoshi remainder.
@@ -53,6 +69,16 @@ mod tests {
     #[test]
     fn test_sats_to_wei_one_sat() {
         assert_eq!(sats_to_wei(1), WEI_PER_SAT);
+    }
+
+    #[test]
+    fn test_cusd_cents_to_units_one_cent() {
+        assert_eq!(cusd_cents_to_units(1), CUSD_UNITS_PER_CENT);
+    }
+
+    #[test]
+    fn test_cusd_cents_to_units_one_cusd() {
+        assert_eq!(cusd_cents_to_units(100), 1_000_000);
     }
 
     #[test]
