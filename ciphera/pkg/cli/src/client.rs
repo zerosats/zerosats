@@ -115,14 +115,14 @@ impl NodeClientBuilder {
     /// standard 443 (via reqwest's URL parser) without a CLI flag.
     pub fn build(self, chain_id: u64, create_wallet: bool) -> Result<NodeClient> {
         let base_url = {
-            let (proto, bare_host, had_scheme) = if let Some(h) = self.host.strip_prefix("https://")
-            {
-                ("https", h, true)
-            } else if let Some(h) = self.host.strip_prefix("http://") {
-                ("http", h, true)
-            } else {
-                ("http", self.host.as_str(), false)
-            };
+            let (proto, bare_host, had_scheme) =
+                if let Some(h) = self.host.strip_prefix("https://") {
+                    ("https", h, true)
+                } else if let Some(h) = self.host.strip_prefix("http://") {
+                    ("http", h, true)
+                } else {
+                    ("http", self.host.as_str(), false)
+                };
 
             let authority = bare_host.split('/').next().unwrap_or(bare_host);
             let has_embedded_port = authority.contains(':');
@@ -393,9 +393,7 @@ impl NodeClient {
 
         println!("Note hash {:#x}, mint hash {:#x}", utxo.hash(), mint_hash);
 
-        let tx = rollup
-            .mint(&mint_hash, &note.value, &note.note_kind)
-            .await?;
+        let tx = rollup.mint(&mint_hash, &note.value, &note.note_kind).await?;
 
         println!("\nSubmitted MINT tx {tx:#x}\n");
 

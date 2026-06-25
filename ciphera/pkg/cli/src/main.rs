@@ -1,4 +1,4 @@
-use clap::{Args, Parser, Subcommand};
+use clap::{Parser, Subcommand};
 
 use cli::NodeClient;
 use cli::Wallet;
@@ -64,66 +64,18 @@ struct Cli {
     btc_explorer: String,
 }
 
-#[derive(Args, Debug)]
-struct TokenAmountArgs {
-    /// Amount in satoshis. Valid only with --token WCBTC.
-    #[arg(short = 'a', long)]
-    amount_sat: Option<u64>,
-
-    /// Amount in cents. Valid only with --token CUSD.
-    #[arg(long)]
-    amount_cent: Option<u64>,
-
-    #[arg(short = 't', long = "token", alias = "ticker", default_value = "WCBTC")]
-    ticker: String,
-}
-
-impl TokenAmountArgs {
-    fn to_base_units(&self) -> Result<(&'static str, u64), AppError> {
-        let ticker = parse_cli_ticker(&self.ticker)?;
-        let expected_arg = match ticker {
-            cli::address::WCBTC_TICKER => "--amount-sat",
-            cli::address::CITREA_USD_TICKER => "--amount-cent",
-            _ => unreachable!("parse_cli_ticker only returns supported tokens"),
-        };
-
-        match (ticker, self.amount_sat, self.amount_cent) {
-            (cli::address::WCBTC_TICKER, Some(amount_sat), None) => {
-                Ok((ticker, units::sats_to_wei(amount_sat)))
-            }
-            (cli::address::CITREA_USD_TICKER, None, Some(amount_cent)) => {
-                Ok((ticker, units::cusd_cents_to_units(amount_cent)))
-            }
-            (_, None, None) => Err(AppError::MissingAmountArgument {
-                token: ticker.to_string(),
-                expected_arg,
-            }),
-            (_, Some(_), Some(_)) => Err(AppError::ConflictingAmountArguments),
-            (cli::address::WCBTC_TICKER, None, Some(_)) => Err(AppError::InvalidAmountArgument {
-                token: ticker.to_string(),
-                amount_arg: "--amount-cent",
-                expected_arg,
-            }),
-            (cli::address::CITREA_USD_TICKER, Some(_), None) => {
-                Err(AppError::InvalidAmountArgument {
-                    token: ticker.to_string(),
-                    amount_arg: "--amount-sat",
-                    expected_arg,
-                })
-            }
-            _ => unreachable!("all supported token amount combinations are handled"),
-        }
-    }
-}
-
 #[derive(Subcommand, Debug)]
 enum Commands {
     Create {},
     /// Connect to a Ciphera node and check its health
     Sync {},
     Address {
-        #[command(flatten)]
-        amount: TokenAmountArgs,
+        /// Amount in satoshis
+        #[arg(required = true, short, long)]
+        amount_sat: u64,
+
+        #[arg(short, long, default_value = "WCBTC")]
+        ticker: String,
     },
     Mint {
         #[arg(required = true, long, short)]
@@ -132,8 +84,12 @@ enum Commands {
         #[arg(required = true, long, short)]
         secret: String,
 
-        #[command(flatten)]
-        amount: TokenAmountArgs,
+        /// Amount in satoshis
+        #[arg(required = true, short, long)]
+        amount_sat: u64,
+
+        #[arg(short, long, default_value = "WCBTC")]
+        ticker: String,
 
         #[arg(required = false, long, short, action=clap::ArgAction::SetTrue)]
         only_snark: bool,
@@ -142,12 +98,20 @@ enum Commands {
         #[arg(required = true, long)]
         address: String,
 
-        #[command(flatten)]
-        amount: TokenAmountArgs,
+        /// Amount in satoshis
+        #[arg(required = true, short, long)]
+        amount_sat: u64,
+
+        #[arg(short, long, default_value = "WCBTC")]
+        ticker: String,
     },
     Spend {
-        #[command(flatten)]
-        amount: TokenAmountArgs,
+        /// Amount in satoshis
+        #[arg(required = true, short, long)]
+        amount_sat: u64,
+
+        #[arg(short, long, default_value = "WCBTC")]
+        ticker: String,
     },
     SpendTo {
         #[arg(required = true, long)]
@@ -212,8 +176,12 @@ enum Commands {
     /// `<name>-htlc.json` so it can be picked up by `escrow-redeem` /
     /// `escrow-refund`.
     EscrowLock {
-        #[command(flatten)]
-        amount: TokenAmountArgs,
+        /// Amount to lock, in satoshis.
+        #[arg(required = true, short, long)]
+        amount_sat: u64,
+
+        #[arg(short, long, default_value = "WCBTC")]
+        ticker: String,
 
         /// 32-byte preimage that unlocks the claim path, given as
         /// 64-hex (optionally prefixed with 0x). The redeemer needs
@@ -317,19 +285,6 @@ pub enum AppError {
     InvalidAddress(String),
     #[error("Unsupported token '{0}'. Supported tokens: WCBTC, CUSD")]
     InvalidTicker(String),
-    #[error("Missing amount for --token={token}; use {expected_arg}")]
-    MissingAmountArgument {
-        token: String,
-        expected_arg: &'static str,
-    },
-    #[error("Use only one amount option: --amount-sat or --amount-cent")]
-    ConflictingAmountArguments,
-    #[error("{amount_arg} is invalid with --token={token}; use {expected_arg}")]
-    InvalidAmountArgument {
-        token: String,
-        amount_arg: &'static str,
-        expected_arg: &'static str,
-    },
     #[error("File not found: {0}")]
     FileNotFound(String),
     #[error("Not enough balance")]
@@ -2100,12 +2055,14 @@ async fn main() -> Result<()> {
         Commands::Sync {} => {
             handle_sync(cli.chain, &cli.name, &cli.host).await?;
         }
-        Commands::Address { amount } => {
-            let (ticker_normalized, amount_wei) = amount.to_base_units()?;
+        Commands::Address { amount_sat, ticker } => {
+            let ticker_normalized = parse_cli_ticker(&ticker)?;
+            let amount_wei = units::sats_to_wei(amount_sat);
             handle_address(&cli.name, amount_wei, ticker_normalized).await?;
         }
-        Commands::Spend { amount } => {
-            let (ticker_normalized, amount_wei) = amount.to_base_units()?;
+        Commands::Spend { amount_sat, ticker } => {
+            let ticker_normalized = parse_cli_ticker(&ticker)?;
+            let amount_wei = units::sats_to_wei(amount_sat);
             handle_note_spend(
                 cli.chain,
                 &cli.name,
@@ -2137,8 +2094,13 @@ async fn main() -> Result<()> {
         Commands::Import { note } => {
             handle_import(&cli.name, &note).await?;
         }
-        Commands::EscrowLock { amount, preimage } => {
-            let (ticker_normalized, amount_wei) = amount.to_base_units()?;
+        Commands::EscrowLock {
+            amount_sat,
+            ticker,
+            preimage,
+        } => {
+            let ticker_normalized = parse_cli_ticker(&ticker)?;
+            let amount_wei = units::sats_to_wei(amount_sat);
             handle_escrow_lock(
                 cli.chain,
                 &cli.name,
@@ -2175,10 +2137,12 @@ async fn main() -> Result<()> {
         Commands::Mint {
             geth_rpc,
             secret,
-            amount,
+            amount_sat,
+            ticker,
             only_snark,
         } => {
-            let (ticker_normalized, amount_wei) = amount.to_base_units()?;
+            let ticker_normalized = parse_cli_ticker(&ticker)?;
+            let amount_wei = units::sats_to_wei(amount_sat);
             handle_mint(
                 &cli.name,
                 &cli.host,
@@ -2192,8 +2156,13 @@ async fn main() -> Result<()> {
             )
             .await?;
         }
-        Commands::Burn { address, amount } => {
-            let (ticker_normalized, amount_wei) = amount.to_base_units()?;
+        Commands::Burn {
+            address,
+            amount_sat,
+            ticker,
+        } => {
+            let ticker_normalized = parse_cli_ticker(&ticker)?;
+            let amount_wei = units::sats_to_wei(amount_sat);
             handle_burn(
                 &cli.name,
                 &cli.host,
@@ -2281,101 +2250,4 @@ async fn main() -> Result<()> {
 
     println!("\n");
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn token_amount(
-        ticker: &str,
-        amount_sat: Option<u64>,
-        amount_cent: Option<u64>,
-    ) -> TokenAmountArgs {
-        TokenAmountArgs {
-            amount_sat,
-            amount_cent,
-            ticker: ticker.to_string(),
-        }
-    }
-
-    #[test]
-    fn wcbtc_amount_sat_converts_to_wei() {
-        let (ticker, amount) = token_amount("WCBTC", Some(2), None)
-            .to_base_units()
-            .unwrap();
-
-        assert_eq!(ticker, "WCBTC");
-        assert_eq!(amount, 20_000_000_000);
-    }
-
-    #[test]
-    fn cusd_amount_cent_converts_to_6_decimal_units() {
-        let (ticker, amount) = token_amount("CUSD", None, Some(123))
-            .to_base_units()
-            .unwrap();
-
-        assert_eq!(ticker, "CUSD");
-        assert_eq!(amount, 1_230_000);
-    }
-
-    #[test]
-    fn cusd_rejects_amount_sat() {
-        let err = token_amount("CUSD", Some(1), None)
-            .to_base_units()
-            .unwrap_err();
-
-        assert_eq!(
-            err.to_string(),
-            "--amount-sat is invalid with --token=CUSD; use --amount-cent"
-        );
-    }
-
-    #[test]
-    fn wcbtc_rejects_amount_cent() {
-        let err = token_amount("WCBTC", None, Some(1))
-            .to_base_units()
-            .unwrap_err();
-
-        assert_eq!(
-            err.to_string(),
-            "--amount-cent is invalid with --token=WCBTC; use --amount-sat"
-        );
-    }
-
-    #[test]
-    fn token_flag_parses_cusd_cent_amount() {
-        let cli = Cli::try_parse_from([
-            "ciphera-cli",
-            "spend",
-            "--token",
-            "CUSD",
-            "--amount-cent",
-            "5",
-        ])
-        .unwrap();
-
-        let Commands::Spend { amount } = cli.command else {
-            panic!("expected spend command");
-        };
-        assert_eq!(amount.to_base_units().unwrap(), ("CUSD", 50_000));
-    }
-
-    #[test]
-    fn ticker_alias_still_parses() {
-        let cli = Cli::try_parse_from([
-            "ciphera-cli",
-            "address",
-            "--ticker",
-            "CUSD",
-            "--amount-cent",
-            "5",
-        ])
-        .unwrap();
-
-        let Commands::Address { amount } = cli.command else {
-            panic!("expected address command");
-        };
-        assert_eq!(amount.to_base_units().unwrap(), ("CUSD", 50_000));
-    }
 }

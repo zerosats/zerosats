@@ -48,10 +48,7 @@ impl CipheraURL {
     #[must_use]
     pub fn encode_url(&self) -> String {
         // Per protocol: secretKey must be non-zero and < BN254_FIELD_MODULUS
-        assert!(
-            !self.private_key.is_zero(),
-            "Invalid secretKey: must be non-zero"
-        );
+        assert!(!self.private_key.is_zero(), "Invalid secretKey: must be non-zero");
 
         let mut bytes = Vec::new();
 
@@ -92,27 +89,15 @@ pub fn decode_url(address: &str) -> CipheraURL {
     let private_key = Element::from_be_bytes(private_key_bytes);
     // Per protocol: secretKey must be non-zero and < BN254_FIELD_MODULUS
     // TODO: implement full field modulus normalization (BN254_FIELD_MODULUS = 21888242871839275222246405745257275088548364400416034343698204186575808495617)
-    assert!(
-        !private_key.is_zero(),
-        "Invalid secretKey: must be non-zero"
-    );
+    assert!(!private_key.is_zero(), "Invalid secretKey: must be non-zero");
     rest = &rest[32..];
 
     let leading_zeros = rest[0] as usize;
-    assert!(
-        leading_zeros <= 32,
-        "Invalid leading_zeros: must be <= 32, got {}",
-        leading_zeros
-    );
+    assert!(leading_zeros <= 32, "Invalid leading_zeros: must be <= 32, got {}", leading_zeros);
     rest = &rest[1..];
 
     let value_len = 32 - leading_zeros;
-    assert!(
-        rest.len() == value_len,
-        "Invalid value length: expected {}, got {}",
-        value_len,
-        rest.len()
-    );
+    assert!(rest.len() == value_len, "Invalid value length: expected {}, got {}", value_len, rest.len());
     let value_without_leading_zeros = rest;
 
     let mut value_bytes = [0u8; 32];
