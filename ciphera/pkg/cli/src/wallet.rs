@@ -200,8 +200,8 @@ impl Wallet {
 
     fn canonical_asset_key(ticker: &str) -> String {
         normalize_citrea_ticker(ticker)
-            .unwrap_or_else(|| ticker.trim())
-            .to_string()
+            .map(ToString::to_string)
+            .unwrap_or_else(|| ticker.trim().to_string())
     }
 
     fn normalize_note_map(map: &mut HashMap<String, Vec<InputNote>>) {
