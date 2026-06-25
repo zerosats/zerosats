@@ -23,10 +23,9 @@ pub const CLI_NETWORK: CitreaNetwork = CitreaNetwork::Testnet;
 /// Map the CLI's `--chain` argument to its Citrea network.
 ///
 /// Unknown / devnet chain ids fall back to [`CLI_NETWORK`] (testnet),
-/// matching the CLI's historical default and the fact that Citrea USD only
-/// has a testnet note kind today. Use this anywhere a chain id is in scope so the
-/// selected network stays consistent with the `--chain` flag instead of a
-/// hardcoded enum.
+/// matching the CLI's default (`--chain 5115`). Use this anywhere a chain id
+/// is in scope so the selected network stays consistent with the `--chain`
+/// flag instead of a hardcoded enum.
 #[must_use]
 pub fn network_for_chain(chain: u64) -> CitreaNetwork {
     CitreaNetwork::try_from_chain_id(chain).unwrap_or(CLI_NETWORK)
