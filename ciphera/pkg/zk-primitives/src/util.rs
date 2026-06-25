@@ -186,6 +186,16 @@ impl CitreaNetwork {
         H160::from_slice(&hex::decode(hex).expect("static hex"))
     }
 
+    /// Canonical citrea-USD (ctUSD) ERC20 address for this network.
+    #[must_use]
+    pub fn ctusd_address(self) -> H160 {
+        let hex = match self {
+            Self::Testnet => "52f74a8f9BdD29F77A5EFD7f6cb44DCF6906A4B6",
+            Self::Mainnet => "8D82c4E3c936C7B5724A382a9c5a4E6Eb7aB6d5D",
+        };
+        H160::from_slice(&hex::decode(hex).expect("static hex"))
+    }
+
     /// Recover a network from its EVM chain id, if known. Returns `None`
     /// for any unrecognised chain (including devnet).
     #[must_use]
@@ -207,6 +217,13 @@ impl CitreaNetwork {
 #[must_use]
 pub fn citrea_wcbtc_note_kind(network: CitreaNetwork) -> Element {
     generate_note_kind_bridge_evm(network.chain_id(), network.wcbtc_address())
+}
+
+/// Generates a note kind element for Citrea USD on the chosen Citrea network.
+/// 0x000200000000000013fb52f74a8f9BdD29F77A5EFD7f6cb44DCF6906A4B60000
+#[must_use]
+pub fn citrea_ctusd_note_kind(network: CitreaNetwork) -> Element {
+    generate_note_kind_bridge_evm(network.chain_id(), network.ctusd_address())
 }
 
 /// Generates a note kind element for USDC on Citrea testnet.
@@ -407,6 +424,32 @@ mod tests {
         assert_eq!(&result_bytes[2..10], &4114u64.to_be_bytes());
         let expected_address_bytes =
             hex::decode("3100000000000000000000000000000000000006").unwrap();
+        assert_eq!(&result_bytes[10..30], &expected_address_bytes[..]);
+        assert_eq!(&result_bytes[30..32], &[0u8; 2]);
+    }
+
+    #[test]
+    fn test_citrea_testnet_ctusdc_note_kind() {
+        let result = citrea_ctusd_note_kind(CitreaNetwork::Testnet);
+        let result_bytes = result.to_be_bytes();
+
+        assert_eq!(&result_bytes[0..2], &(2u16).to_be_bytes());
+        assert_eq!(&result_bytes[2..10], &5115u64.to_be_bytes());
+        let expected_address_bytes =
+            hex::decode("52f74a8f9BdD29F77A5EFD7f6cb44DCF6906A4B6").unwrap();
+        assert_eq!(&result_bytes[10..30], &expected_address_bytes[..]);
+        assert_eq!(&result_bytes[30..32], &[0u8; 2]);
+    }
+
+    #[test]
+    fn test_citrea_mainnet_ctusdc_note_kind() {
+        let result = citrea_ctusd_note_kind(CitreaNetwork::Mainnet);
+        let result_bytes = result.to_be_bytes();
+
+        assert_eq!(&result_bytes[0..2], &(2u16).to_be_bytes());
+        assert_eq!(&result_bytes[2..10], &4114u64.to_be_bytes());
+        let expected_address_bytes =
+            hex::decode("8D82c4E3c936C7B5724A382a9c5a4E6Eb7aB6d5D").unwrap();
         assert_eq!(&result_bytes[10..30], &expected_address_bytes[..]);
         assert_eq!(&result_bytes[30..32], &[0u8; 2]);
     }
