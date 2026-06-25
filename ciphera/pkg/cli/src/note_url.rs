@@ -176,7 +176,7 @@ mod tests {
             secret_key: Element::new(101),
             note: Note {
                 utxo_kind: Element::new(2),
-                note_kind: citrea_ctusd_note_kind(CitreaNetwork::Testnet),
+                note_kind: citrea_ctusd_note_kind(CLI_NETWORK),
                 address: hash_merge([Element::new(101), Element::ZERO]),
                 psi: Element::ZERO,
                 value: Element::MAX,
