@@ -1,8 +1,8 @@
-use crate::address::{CLI_NETWORK, CitreaToken, citrea_currency_from_contract};
+use crate::address::{CLI_NETWORK, citrea_currency_from_contract};
 use element::Element;
 use hash::hash_merge;
 use serde::{Deserialize, Serialize};
-use zk_primitives::{InputNote, Note};
+use zk_primitives::{InputNote, Note, citrea_testnet_usdc_note_kind, citrea_wcbtc_note_kind};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct CipheraURL {
@@ -13,9 +13,11 @@ pub struct CipheraURL {
 
 impl From<&CipheraURL> for InputNote {
     fn from(value: &CipheraURL) -> Self {
-        let contract = CitreaToken::from_currency_code(value.currency)
-            .unwrap_or_else(|| unreachable!("currency code must be 1 or 2"))
-            .note_kind(CLI_NETWORK);
+        let contract = match value.currency {
+            1 => citrea_wcbtc_note_kind(CLI_NETWORK),
+            2 => citrea_testnet_usdc_note_kind(),
+            _ => unreachable!("currency code must be 1 or 2"),
+        };
         InputNote {
             secret_key: value.private_key,
             note: Note {
@@ -75,11 +77,7 @@ pub fn decode_url(address: &str) -> CipheraURL {
     let mut rest = &url_bytes[..];
 
     let currency = rest[0];
-    assert!(
-        currency == 1 || currency == 2,
-        "Invalid currency code: must be 1 (WCBTC) or 2 (CUSD), got {}",
-        currency
-    );
+    assert!(currency == 1 || currency == 2, "Invalid currency code: must be 1 (WCBTC) or 2 (USDC), got {}", currency);
     rest = &rest[1..];
 
     let private_key_bytes: [u8; 32] = rest[..32]
@@ -115,7 +113,7 @@ pub fn decode_url(address: &str) -> CipheraURL {
 mod tests {
     use super::*;
     use hash::hash_merge;
-    use zk_primitives::{Note, citrea_testnet_usdc_note_kind, citrea_wcbtc_note_kind};
+    use zk_primitives::Note;
 
     #[test]
     fn test_roundtrip_from_wcbtc_note() {
@@ -156,7 +154,7 @@ mod tests {
     }
 
     #[test]
-    fn test_roundtrip_from_cusd_note() {
+    fn test_roundtrip_from_usdc_note() {
         let input_note = InputNote {
             secret_key: Element::new(101),
             note: Note {

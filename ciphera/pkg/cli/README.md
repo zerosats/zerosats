@@ -59,10 +59,6 @@ ciphera-cli --name bob --host "$CIPHERA_HOST" --chain "$CITREA_CHAIN" receive --
 cat alice.json
 ```
 
-`WCBTC` is the default token for wallet commands. Pass `--ticker CUSD` to use
-Citrea USD; `CITREAUSD`, `CITREA_USD`, `USD`, and the legacy `USDC` spelling
-are accepted as aliases.
-
 ## Full Documentation
 
 This README is the current CLI quickstart. The older [Getting Started Guide](../../GettingStarted.md) is not maintained as the source of truth for the CLI.
@@ -72,7 +68,6 @@ This README is the current CLI quickstart. The older [Getting Started Guide](../
 - **Ciphera Node**: `https://ciphera.satsbridge.com`
 - **Citrea Chain ID**: `5115`
 - **Citrea wcBTC Token**: `0x4370e27F7d91D9341bFf232d7Ee8bdfE3a9933a0`
-- **Citrea USD Token**: pending rollup registration, CLI ticker `CUSD`
 - **Rollup Contract**: fetch from `https://ciphera.satsbridge.com/v0/network`
 - **Citrea RPC**: `https://rpc.testnet.citrea.xyz`
 
