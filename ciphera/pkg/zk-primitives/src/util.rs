@@ -442,7 +442,7 @@ mod tests {
     }
 
     #[test]
-    fn test_citrea_mainnet_ctusd_note_kind() {
+    fn test_citrea_mainnet_ctusdc_note_kind() {
         let result = citrea_ctusd_note_kind(CitreaNetwork::Mainnet);
         let result_bytes = result.to_be_bytes();
 
