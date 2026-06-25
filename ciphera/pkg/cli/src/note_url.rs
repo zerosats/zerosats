@@ -130,7 +130,7 @@ pub fn decode_url(address: &str) -> CipheraURL {
 mod tests {
     use super::*;
     use hash::hash_merge;
-    use zk_primitives::{Note, citrea_wcbtc_note_kind};
+    use zk_primitives::{Note, citrea_ctusd_note_kind, citrea_wcbtc_note_kind};
 
     #[test]
     fn test_roundtrip_from_wcbtc_note() {
