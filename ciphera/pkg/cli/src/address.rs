@@ -18,7 +18,7 @@ pub const CITREA_USD_TICKER: &str = "CUSD";
 /// Call sites that *do* have a chain id available (e.g. the on-chain
 /// slow-burn flow) should derive the network from it via
 /// [`network_for_chain`] instead of reading this constant.
-pub const CLI_NETWORK: CitreaNetwork = CitreaNetwork::Testnet;
+pub const CLI_NETWORK: CitreaNetwork = CitreaNetwork::Mainnet;
 
 /// Map the CLI's `--chain` argument to its Citrea network.
 ///
