@@ -2,7 +2,7 @@ use element::Element;
 use rand::RngCore;
 use rand::rngs::OsRng;
 use serde::{Deserialize, Serialize};
-use zk_primitives::{CitreaNetwork, Note, citrea_wcbtc_note_kind, citrea_ctusd_note_kind};
+use zk_primitives::{CitreaNetwork, Note, citrea_testnet_usdc_note_kind, citrea_wcbtc_note_kind};
 
 pub const WCBTC_TICKER: &str = "WCBTC";
 pub const CITREA_USD_TICKER: &str = "CUSD";
@@ -18,7 +18,7 @@ pub const CITREA_USD_TICKER: &str = "CUSD";
 /// Call sites that *do* have a chain id available (e.g. the on-chain
 /// slow-burn flow) should derive the network from it via
 /// [`network_for_chain`] instead of reading this constant.
-pub const CLI_NETWORK: CitreaNetwork = CitreaNetwork::Mainnet;
+pub const CLI_NETWORK: CitreaNetwork = CitreaNetwork::Testnet;
 
 /// Map the CLI's `--chain` argument to its Citrea network.
 ///
@@ -63,7 +63,7 @@ impl CitreaToken {
             // existing Citrea testnet USD fixture address. Keep this behind
             // the token registry so replacing the address is one local change
             // when the canonical token is registered on the rollup.
-            Self::CitreaUsd => citrea_ctusd_note_kind(network),
+            Self::CitreaUsd => citrea_testnet_usdc_note_kind(),
         }
     }
 
@@ -140,16 +140,18 @@ fn is_wcbtc_note_kind(note_kind: Element) -> bool {
         || note_kind == citrea_wcbtc_note_kind(CitreaNetwork::Mainnet)
 }
 
-fn is_cusd_note_kind(note_kind: Element) -> bool {
-    note_kind == citrea_ctusd_note_kind(CitreaNetwork::Testnet)
-        || note_kind == citrea_ctusd_note_kind(CitreaNetwork::Mainnet)
+pub fn citrea_ticker_from_code(currency: u8) -> String {
+    CitreaToken::from_currency_code(currency)
+        .unwrap_or_else(|| unreachable!("only WCBTC and CUSD tokens are supported"))
+        .ticker()
+        .to_string()
 }
 
 pub fn citrea_currency_from_contract(note_kind: Element) -> u8 {
     if is_wcbtc_note_kind(note_kind) {
         return CitreaToken::WrappedCitreaBtc.currency_code();
     }
-    if is_cusd_note_kind(note_kind) {
+    if note_kind == citrea_testnet_usdc_note_kind() {
         return CitreaToken::CitreaUsd.currency_code();
     }
     unreachable!("only WCBTC and CUSD tokens are supported")
@@ -159,7 +161,7 @@ pub fn citrea_ticker_from_contract(note_kind: Element) -> String {
     if is_wcbtc_note_kind(note_kind) {
         return WCBTC_TICKER.to_string();
     }
-    if is_cusd_note_kind(note_kind) {
+    if note_kind == citrea_testnet_usdc_note_kind() {
         return CITREA_USD_TICKER.to_string();
     }
     unreachable!("only WCBTC and CUSD tokens are supported")
@@ -328,7 +330,7 @@ mod tests {
     fn test_roundtrip_from_cusd_note() {
         let note = Note {
             utxo_kind: Element::new(2),
-            note_kind: citrea_ctusd_note_kind(CitreaNetwork::Testnet),
+            note_kind: citrea_testnet_usdc_note_kind(),
             address: hash_merge([Element::new(101), Element::ZERO]),
             psi: Element::ZERO,
             value: Element::new(1),
@@ -359,5 +361,14 @@ mod tests {
         for ticker in ["CUSD", "citreausd", "Citrea_USD", "USDC", "usd"] {
             assert_eq!(normalize_citrea_ticker(ticker), Some(CITREA_USD_TICKER));
         }
+    }
+
+    #[test]
+    fn test_citrea_usd_contract_resolves_to_cusd() {
+        assert_eq!(
+            citrea_ticker_from_contract(citrea_testnet_usdc_note_kind()),
+            CITREA_USD_TICKER
+        );
+        assert_eq!(citrea_ticker_from_code(2), CITREA_USD_TICKER);
     }
 }

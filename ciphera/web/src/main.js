@@ -613,17 +613,14 @@ class CipheraApp {
 
             this.terminal.log('TRANSACTION', 'success');
             this.terminal.separator('─');
-            this.terminal.log(`ID: ${tx.hash || hash}`, 'default');
+            this.terminal.log(`Hash: ${tx.hash || hash}`, 'default');
+            this.terminal.log(`Height: ${tx.height || 'pending'}`, 'default');
+            if (tx.block_hash) {
+                this.terminal.log(`Block: ${tx.block_hash}`, 'default');
+            }
             if (tx.timestamp) {
                 const date = new Date(tx.timestamp).toLocaleString();
-                this.terminal.log(`Date: ${date}`, 'default');
-            }
-            if (tx.height !== undefined) {
-                this.terminal.log(`Block: ${tx.height}`, 'default');
-            } else if (tx.block_hash) {
-                this.terminal.log(`Block: ${tx.block_hash}`, 'default');
-            } else {
-                this.terminal.log(`Block: pending`, 'default');
+                this.terminal.log(`Time: ${date}`, 'default');
             }
             if (tx.inputs !== undefined) {
                 this.terminal.log(`Inputs: ${tx.inputs}`, 'default');
@@ -1117,7 +1114,7 @@ class CipheraApp {
         // Complete!
         this.completeStatus(true, `MINT COMPLETE: +${answers.amount} wcBTC`);
 
-        // Show transaction IDs with date and block for Ciphera TX
+        // Show transaction IDs
         if (citreaTxHash) {
             this.terminal.log(`Citrea Approve TX: ${citreaTxHash}`, 'dim');
         }
@@ -1125,27 +1122,7 @@ class CipheraApp {
             this.terminal.log(`Citrea Mint TX:    ${citreaMintTxHash}`, 'dim');
         }
         if (cipheraTxHash) {
-            try {
-                const url = `${this.getNodeBaseUrl()}/transactions/${cipheraTxHash}`;
-                const response = await fetch(url);
-                if (response.ok) {
-                    const tx = await response.json();
-                    this.terminal.log(`ID: ${this.padTxHash(cipheraTxHash)}`, 'dim');
-                    if (tx.timestamp) {
-                        const date = new Date(tx.timestamp).toLocaleString();
-                        this.terminal.log(`Date: ${date}`, 'dim');
-                    }
-                    if (tx.height !== undefined) {
-                        this.terminal.log(`Block: ${tx.height}`, 'dim');
-                    } else if (tx.block_hash) {
-                        this.terminal.log(`Block: ${tx.block_hash}`, 'dim');
-                    }
-                } else {
-                    this.terminal.log(`ID: ${this.padTxHash(cipheraTxHash)}`, 'dim');
-                }
-            } catch (e) {
-                this.terminal.log(`ID: ${this.padTxHash(cipheraTxHash)}`, 'dim');
-            }
+            this.terminal.log(`Ciphera TX:        ${this.padTxHash(cipheraTxHash)}`, 'dim');
         }
     }
 
@@ -1300,31 +1277,11 @@ class CipheraApp {
         // Complete!
         const received = this.state.balance - oldBalance;
         const formattedReceived = this.formatBalance(received > 0 ? received : this.state.balance);
-        this.completeStatus(true, `TRANSFER RECEIVED: +${formattedReceived} wcBTC`);
+        this.completeStatus(true, `RECEIVED: +${formattedReceived} wcBTC`);
 
-        // Show transaction details with date and block
+        // Show transaction ID
         if (cipheraTxHash) {
-            try {
-                const url = `${this.getNodeBaseUrl()}/transactions/${cipheraTxHash}`;
-                const response = await fetch(url);
-                if (response.ok) {
-                    const tx = await response.json();
-                    this.terminal.log(`ID: ${this.padTxHash(cipheraTxHash)}`, 'dim');
-                    if (tx.timestamp) {
-                        const date = new Date(tx.timestamp).toLocaleString();
-                        this.terminal.log(`Date: ${date}`, 'dim');
-                    }
-                    if (tx.height !== undefined) {
-                        this.terminal.log(`Block: ${tx.height}`, 'dim');
-                    } else if (tx.block_hash) {
-                        this.terminal.log(`Block: ${tx.block_hash}`, 'dim');
-                    }
-                } else {
-                    this.terminal.log(`ID: ${this.padTxHash(cipheraTxHash)}`, 'dim');
-                }
-            } catch (e) {
-                this.terminal.log(`ID: ${this.padTxHash(cipheraTxHash)}`, 'dim');
-            }
+            this.terminal.log(`Ciphera TX: ${this.padTxHash(cipheraTxHash)}`, 'dim');
         }
     }
 
