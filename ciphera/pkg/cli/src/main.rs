@@ -1476,20 +1476,19 @@ async fn verify_escrow_note_values(
         ));
     }
 
-    // Verify token kind is one of the supported Citrea assets for this chain.
-    let network = cli::address::network_for_chain(chain);
-    let token = supported_citrea_tokens(network)
-        .into_iter()
-        .find(|(_, note_kind)| *note_kind == escrow_note.note_kind)
-        .map(|(ticker, _)| ticker)
-        .ok_or_else(|| {
-            color_eyre::eyre::eyre!(
-                "unsupported note kind {} for chain {}; supported tokens: WCBTC, CUSD",
-                escrow_note.note_kind,
-                chain
-            )
-        })?;
-    debug!(token, "verified escrow token kind");
+    // Verify token kind matches expected chain (LN offramp is WCBTC-denominated).
+    let (_, expected_note_kind) = cli::address::citrea_token_data(
+        cli::address::network_for_chain(chain),
+        cli::address::WCBTC_TICKER,
+    );
+    if escrow_note.note_kind != expected_note_kind {
+        return Err(color_eyre::eyre::eyre!(
+            "note kind mismatch: expected {} but service returned {}; \
+             service may be trying to return an unexpected token or chain",
+            expected_note_kind,
+            escrow_note.note_kind
+        ));
+    }
 
     // Verify note commitment (psi) encodes the refund address and timelock.
     // For the HTLC refund branch: psi = Poseidon(key_hash, timelock.commitment())
