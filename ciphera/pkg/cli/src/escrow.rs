@@ -25,18 +25,40 @@
 
 use element::Element;
 use hash::hash_merge;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use zk_primitives::{TimeLock, get_address_for_private_key};
+use zk_primitives::{Note, TimeLock, get_address_for_private_key};
+
+/// Secret-free HTLC note descriptor that can be sent to the redeemer.
+///
+/// The flat note fields are the committed escrow output. `timelock`
+/// preserves the refund anchor so either side can reconstruct the HTLC
+/// spend data later without carrying the refund secret or the preimage.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct EscrowNoteDescriptor {
+    #[serde(flatten)]
+    pub note: Note,
+    pub timelock: TimeLock,
+}
 
 /// HTLC `note.address` for the claim branch -- binds the redeemer's
 /// secret key into the SHA-256 commitment of the preimage.
 #[must_use]
 pub fn htlc_claim_address(redeemer_secret_key: Element, preimage: [u8; 32]) -> Element {
-    let sha: [u8; 32] = Sha256::digest(preimage).into();
-    let elem = Element::from_be_bytes(sha);
+    let payment_hash: [u8; 32] = Sha256::digest(preimage).into();
+    let redeemer_address = get_address_for_private_key(redeemer_secret_key);
+    htlc_claim_address_from_hash(redeemer_address, payment_hash)
+}
+
+/// HTLC `note.address` for the claim branch when only the payment hash
+/// is known. This is the two-party lock-time form: the locker binds the
+/// claim branch to the redeemer's Ciphera address without learning the
+/// preimage.
+#[must_use]
+pub fn htlc_claim_address_from_hash(redeemer_address: Element, payment_hash: [u8; 32]) -> Element {
+    let elem = Element::from_be_bytes(payment_hash);
     let (high, low) = elem.decompose_be();
-    let key_hash = get_address_for_private_key(redeemer_secret_key);
-    hash_merge([key_hash, high, low])
+    hash_merge([redeemer_address, high, low])
 }
 
 /// HTLC `note.psi` for the refund branch -- binds the locker's secret
@@ -47,6 +69,24 @@ pub fn htlc_claim_address(redeemer_secret_key: Element, preimage: [u8; 32]) -> E
 pub fn htlc_refund_psi(locker_secret_key: Element, lock: &TimeLock) -> Element {
     let key_hash = get_address_for_private_key(locker_secret_key);
     hash_merge([key_hash, lock.commitment()])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn claim_address_from_hash_matches_preimage_form() {
+        let redeemer_secret_key = Element::from(123u64);
+        let redeemer_address = get_address_for_private_key(redeemer_secret_key);
+        let preimage = [7u8; 32];
+        let payment_hash: [u8; 32] = Sha256::digest(preimage).into();
+
+        assert_eq!(
+            htlc_claim_address_from_hash(redeemer_address, payment_hash),
+            htlc_claim_address(redeemer_secret_key, preimage)
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------

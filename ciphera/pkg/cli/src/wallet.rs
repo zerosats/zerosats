@@ -630,6 +630,30 @@ impl Wallet {
         Ok((escrow, received))
     }
 
+    fn candidate_secret_keys(&self) -> Vec<Element> {
+        let mut keys = vec![self.pk];
+        keys.extend(
+            self.pending
+                .values()
+                .chain(self.avail.values())
+                .flat_map(|notes| notes.iter().map(|note| note.secret_key)),
+        );
+        keys.sort_unstable();
+        keys.dedup();
+        keys.into_iter().filter(|key| !key.is_zero()).collect()
+    }
+
+    fn htlc_claim_secret_key(
+        &self,
+        htlc_note: &Note,
+        preimage: [u8; 32],
+    ) -> Result<Element, WalletError> {
+        self.candidate_secret_keys()
+            .into_iter()
+            .find(|secret_key| htlc_claim_address(*secret_key, preimage) == htlc_note.address)
+            .ok_or(WalletError::NoKey)
+    }
+
     pub fn prepare_escrow_redeem(
         &self,
         htlc_input_note: &EscrowInputNote,
@@ -637,6 +661,22 @@ impl Wallet {
         let mut staged = self.clone();
         let (escrow, received) = staged.escrow_redeem(htlc_input_note)?;
         Ok((staged, escrow, received))
+    }
+
+    pub fn prepare_escrow_redeem_note(
+        &self,
+        htlc_note: &Note,
+        preimage: [u8; 32],
+    ) -> Result<(Self, Escrow, InputNote), WalletError> {
+        let secret_key = self.htlc_claim_secret_key(htlc_note, preimage)?;
+        let htlc_input_note = EscrowInputNote {
+            note: htlc_note.clone(),
+            spend_type: 3,
+            secret_key,
+            preimage,
+            ..EscrowInputNote::default()
+        };
+        self.prepare_escrow_redeem(&htlc_input_note)
     }
 
     fn escrow_refund(
@@ -1668,6 +1708,45 @@ mod wallet_tests {
 
         assert_eq!(received.note.note_kind, expected_note_kind);
         assert_eq!(escrow.output_notes[0].note_kind, expected_note_kind);
+        assert_eq!(prepared_wallet.avail[CITREA_USD_TICKER].len(), 1);
+    }
+
+    #[test]
+    fn test_escrow_redeem_note_finds_redeemer_key_from_wallet() {
+        let mut wallet = Wallet::random(5115, Some("test".to_string()));
+        let (_, expected_note_kind) = citrea_token_data(CitreaNetwork::Testnet, "CUSD");
+        let redeemer_secret_key = Element::from(123u64);
+        let preimage = [9u8; 32];
+
+        wallet.pending.insert(
+            CITREA_USD_TICKER.to_string(),
+            vec![InputNote::new(
+                Note {
+                    utxo_kind: Element::new(2),
+                    note_kind: expected_note_kind,
+                    address: hash_merge([redeemer_secret_key, Element::ZERO]),
+                    psi: Element::ZERO,
+                    value: Element::from(400u64),
+                },
+                redeemer_secret_key,
+            )],
+        );
+
+        let htlc_note = Note {
+            utxo_kind: Element::new(2),
+            note_kind: expected_note_kind,
+            address: htlc_claim_address(redeemer_secret_key, preimage),
+            psi: Element::from(2u64),
+            value: Element::from(400u64),
+        };
+
+        let (prepared_wallet, escrow, received) = wallet
+            .prepare_escrow_redeem_note(&htlc_note, preimage)
+            .unwrap();
+
+        assert_eq!(escrow.input_notes[0].secret_key, redeemer_secret_key);
+        assert_eq!(escrow.input_notes[0].preimage, preimage);
+        assert_eq!(received.note.note_kind, expected_note_kind);
         assert_eq!(prepared_wallet.avail[CITREA_USD_TICKER].len(), 1);
     }
 
