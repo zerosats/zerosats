@@ -240,7 +240,10 @@ impl CipheraAddress {
 
 #[must_use]
 pub fn decode_address(address: &str) -> CipheraAddress {
-    try_decode_address(address).expect("Failed to decode Ciphera address")
+    match try_decode_address(address) {
+        Ok(a) => a,
+        Err(e) => panic!("Failed to decode Ciphera address: {e}"),
+    }
 }
 
 pub fn try_decode_address(address: &str) -> Result<CipheraAddress, String> {
