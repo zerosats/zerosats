@@ -307,7 +307,6 @@ pub fn try_decode_address(address: &str) -> Result<CipheraAddress, String> {
 
     let mut value_bytes = [0u8; 32];
     value_bytes[leading_zeros..].copy_from_slice(value_without_leading_zeros);
-    value_bytes[leading_zeros..].copy_from_slice(value_without_leading_zeros);
     let value = Element::from_be_bytes(value_bytes);
 
     Ok(CipheraAddress {
