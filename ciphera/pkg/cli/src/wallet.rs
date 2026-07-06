@@ -124,9 +124,11 @@ impl Wallet {
 
     /// Citrea network this wallet operates on, derived from its bound
     /// `chain_id`. Used when *constructing* notes so the WCBTC `note_kind`
-    /// matches the wallet's chain instead of a hardcoded default. Legacy
-    /// wallets that predate `chain_id` fall back to [`CLI_NETWORK`].
-    fn network(&self) -> CitreaNetwork {
+    /// matches the wallet's chain instead of a hardcoded default, and as the
+    /// single source of truth for the CLI's per-command network (only wallet
+    /// creation takes an explicit `--chain`). Legacy wallets that predate
+    /// `chain_id` fall back to [`CLI_NETWORK`].
+    pub fn network(&self) -> CitreaNetwork {
         self.chain_id.map_or(CLI_NETWORK, network_for_chain)
     }
 

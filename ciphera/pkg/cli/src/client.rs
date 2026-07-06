@@ -100,7 +100,7 @@ impl NodeClientBuilder {
         self
     }
 
-    /// Build the NodeClient
+    /// Resolve the `/v0` base URL from `host`/`port`.
     ///
     /// TLS is inferred from the scheme prefix of `host`:
     /// - `"https://…"` → HTTPS
@@ -113,59 +113,57 @@ impl NodeClientBuilder {
     /// preserves the legacy local-dev default of `http://127.0.0.1:8091`
     /// while letting `https://ciphera.satsbridge.com` resolve to the
     /// standard 443 (via reqwest's URL parser) without a CLI flag.
-    pub fn build(self, chain_id: u64, create_wallet: bool) -> Result<NodeClient> {
-        let base_url = {
-            let (proto, bare_host, had_scheme) = if let Some(h) = self.host.strip_prefix("https://")
-            {
-                ("https", h, true)
-            } else if let Some(h) = self.host.strip_prefix("http://") {
-                ("http", h, true)
-            } else {
-                ("http", self.host.as_str(), false)
-            };
-
-            let authority = bare_host.split('/').next().unwrap_or(bare_host);
-            let has_embedded_port = authority.contains(':');
-
-            if has_embedded_port {
-                format!("{proto}://{bare_host}/v0")
-            } else if had_scheme {
-                // Trust the scheme's default port (443 / 80). reqwest
-                // handles this; appending a port would invalidate it
-                // for hosts like `https://ciphera.satsbridge.com`.
-                format!("{proto}://{bare_host}/v0")
-            } else {
-                // Bare host (no scheme): append the legacy 8091 default
-                // for the local-dev workflow.
-                format!("http://{bare_host}:{}/v0", self.port)
-            }
-        };
-
-        debug!("Building NodeClient for: {}", base_url);
-
-        let wallet = if create_wallet {
-            Wallet::create_in(&self.wallet_dir, chain_id, &self.name)?
+    fn resolve_base_url(&self) -> String {
+        let (proto, bare_host, had_scheme) = if let Some(h) = self.host.strip_prefix("https://") {
+            ("https", h, true)
+        } else if let Some(h) = self.host.strip_prefix("http://") {
+            ("http", h, true)
         } else {
-            let loaded_wallet = Wallet::load_from(&self.wallet_dir, &self.name)?;
-            // Legacy wallet files may omit chain_id entirely. In that case we
-            // defer chain binding until the wallet is explicitly synced.
-            if let Some(loaded_chain_id) = loaded_wallet.chain_id {
-                if loaded_chain_id != chain_id {
-                    return Err(color_eyre::eyre::eyre!(
-                        "ChainId in loaded file is different to provided {}",
-                        chain_id
-                    ));
-                }
-            }
-            loaded_wallet
+            ("http", self.host.as_str(), false)
         };
 
-        Ok(NodeClient {
+        let authority = bare_host.split('/').next().unwrap_or(bare_host);
+        let has_embedded_port = authority.contains(':');
+
+        if has_embedded_port {
+            format!("{proto}://{bare_host}/v0")
+        } else if had_scheme {
+            // Trust the scheme's default port (443 / 80). reqwest
+            // handles this; appending a port would invalidate it
+            // for hosts like `https://ciphera.satsbridge.com`.
+            format!("{proto}://{bare_host}/v0")
+        } else {
+            // Bare host (no scheme): append the legacy 8091 default
+            // for the local-dev workflow.
+            format!("http://{bare_host}:{}/v0", self.port)
+        }
+    }
+
+    fn finish(self, wallet: Wallet) -> NodeClient {
+        let base_url = self.resolve_base_url();
+        debug!("Building NodeClient for: {}", base_url);
+        NodeClient {
             base_url,
             timeout: self.timeout,
             http_client: Arc::new(HTTP_CLIENT.clone()),
             wallet,
-        })
+        }
+    }
+
+    /// Create a fresh wallet bound to `chain_id` and build the client.
+    /// `chain_id` is only supplied at wallet creation -- every other
+    /// command loads the chain from the wallet via [`build_load`](Self::build_load).
+    pub fn build_create(self, chain_id: u64) -> Result<NodeClient> {
+        let wallet = Wallet::create_in(&self.wallet_dir, chain_id, &self.name)?;
+        Ok(self.finish(wallet))
+    }
+
+    /// Load an existing wallet and build the client. The wallet file is the
+    /// authoritative source of the chain / network (see [`Wallet::network`]),
+    /// so no `--chain` is required or validated here.
+    pub fn build_load(self) -> Result<NodeClient> {
+        let wallet = Wallet::load_from(&self.wallet_dir, &self.name)?;
+        Ok(self.finish(wallet))
     }
 }
 
@@ -213,7 +211,7 @@ impl NodeClient {
             .host(host)
             .port(port)
             .timeout_secs(timeout_secs)
-            .build(5115, true)
+            .build_create(5115)
     }
 
     /// Get the base URL of the node
@@ -511,7 +509,7 @@ mod client_tests {
         let client = NodeClientBuilder::new()
             .name(name)
             .host("https://node.example.com")
-            .build(CHAIN_ID, true)
+            .build_create(CHAIN_ID)
             .expect("build should succeed");
 
         let _ = std::fs::remove_file(&file);
@@ -542,7 +540,7 @@ mod client_tests {
         let client = NodeClientBuilder::new()
             .name(name)
             .host("http://node.example.com")
-            .build(CHAIN_ID, true)
+            .build_create(CHAIN_ID)
             .expect("build should succeed");
 
         let _ = std::fs::remove_file(&file);
@@ -570,7 +568,7 @@ mod client_tests {
             .name(name)
             .host("node.example.com")
             .port(8091)
-            .build(CHAIN_ID, true)
+            .build_create(CHAIN_ID)
             .expect("build should succeed");
 
         let _ = std::fs::remove_file(&file);
@@ -595,7 +593,7 @@ mod client_tests {
             .name(name)
             .host("host")
             .port(1234)
-            .build(CHAIN_ID, true)
+            .build_create(CHAIN_ID)
             .expect("build");
 
         let _ = std::fs::remove_file(&file);
@@ -618,7 +616,7 @@ mod client_tests {
         let file = format!("{name}.json");
         let _ = std::fs::remove_file(&file);
 
-        let result = NodeClientBuilder::new().name(name).build(CHAIN_ID, true);
+        let result = NodeClientBuilder::new().name(name).build_create(CHAIN_ID);
 
         let _ = std::fs::remove_file(&file);
 
@@ -636,9 +634,9 @@ mod client_tests {
         let file = format!("{name}.json");
 
         // Pre-create the wallet.
-        let _ = NodeClientBuilder::new().name(name).build(CHAIN_ID, true);
+        let _ = NodeClientBuilder::new().name(name).build_create(CHAIN_ID);
 
-        let result = NodeClientBuilder::new().name(name).build(CHAIN_ID, true);
+        let result = NodeClientBuilder::new().name(name).build_create(CHAIN_ID);
 
         let _ = std::fs::remove_file(&file);
 
@@ -660,10 +658,10 @@ mod client_tests {
         // Create the wallet first.
         NodeClientBuilder::new()
             .name(name)
-            .build(CHAIN_ID, true)
+            .build_create(CHAIN_ID)
             .expect("pre-create wallet");
 
-        let result = NodeClientBuilder::new().name(name).build(CHAIN_ID, false);
+        let result = NodeClientBuilder::new().name(name).build_load();
 
         let _ = std::fs::remove_file(&file);
 
@@ -681,7 +679,7 @@ mod client_tests {
         let file = format!("{name}.json");
         let _ = std::fs::remove_file(&file);
 
-        let result = NodeClientBuilder::new().name(name).build(CHAIN_ID, false);
+        let result = NodeClientBuilder::new().name(name).build_load();
 
         let err = result.expect_err("create_wallet=false must fail when wallet file absent");
         let msg = format!("{err}");
@@ -691,30 +689,30 @@ mod client_tests {
         );
     }
 
-    /// create_wallet=false fails when wallet's chain_id differs from provided.
+    /// build_load() is chain-agnostic: the wallet file is authoritative, so
+    /// loading preserves the wallet's own chain_id with no `--chain` to match
+    /// against. (Only `build_create` takes a chain id.)
     #[test]
-    fn test_build_load_wallet_rejects_wrong_chain_id() {
-        let name = "chain-id-mismatch-test-wallet";
+    fn test_build_load_wallet_preserves_wallet_chain_id() {
+        let name = "chain-id-preserve-test-wallet";
         let file = format!("{name}.json");
         let _ = std::fs::remove_file(&file);
 
-        // Create wallet with chain_id=5115.
+        // Create wallet bound to chain_id=5115.
         NodeClientBuilder::new()
             .name(name)
-            .build(CHAIN_ID, true)
+            .build_create(CHAIN_ID)
             .expect("pre-create wallet");
 
-        // Load with a different chain_id.
-        let result = NodeClientBuilder::new().name(name).build(9999, false);
+        // Load it back; the loaded wallet keeps its bound chain_id.
+        let client = NodeClientBuilder::new()
+            .name(name)
+            .build_load()
+            .expect("build_load should succeed for an existing wallet");
 
         let _ = std::fs::remove_file(&file);
 
-        let err = result.expect_err("loading wallet with wrong chain_id must fail");
-        let msg = format!("{err}");
-        assert!(
-            msg.contains("ChainId") || msg.contains("chain") || msg.contains("different"),
-            "error should mention chain_id mismatch; got: {msg}"
-        );
+        assert_eq!(client.get_wallet().chain_id, Some(CHAIN_ID));
     }
 
     /// create_wallet=false accepts legacy wallet files that predate chain_id.
@@ -736,7 +734,7 @@ mod client_tests {
         let client = NodeClientBuilder::new()
             .name(name)
             .wallet_dir(wallet_dir.path())
-            .build(CHAIN_ID, false)
+            .build_load()
             .expect("legacy wallet without chain_id must still load");
 
         assert_eq!(client.get_wallet().chain_id, None);
@@ -758,7 +756,7 @@ mod client_tests {
         let file = format!("{name}.json");
         std::fs::write(&file, b"{bad json}").unwrap();
 
-        let result = NodeClientBuilder::new().name(name).build(CHAIN_ID, false); // load, not create
+        let result = NodeClientBuilder::new().name(name).build_load(); // load, not create
 
         let _ = std::fs::remove_file(&file);
 

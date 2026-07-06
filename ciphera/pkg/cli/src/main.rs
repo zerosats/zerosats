@@ -48,9 +48,6 @@ struct Cli {
     #[arg(global = true, long, default_value = "https://ciphera.satsbridge.com")]
     host: String,
 
-    #[arg(global = true, short, long, default_value = "5115")] // Citrea testnet default
-    chain: u64,
-
     #[arg(
         global = true,
         long,
@@ -120,7 +117,13 @@ impl TokenAmountArgs {
 
 #[derive(Subcommand, Debug)]
 enum Commands {
-    Create {},
+    /// Create a new wallet bound to a chain. `--chain` is only accepted
+    /// here: every other command reads the chain from the wallet file.
+    Create {
+        /// Chain id the new wallet is bound to (Citrea testnet by default).
+        #[arg(short, long, default_value = "5115")]
+        chain: u64,
+    },
     /// Connect to a Ciphera node and check its health
     Sync {},
     Address {
@@ -170,6 +173,11 @@ enum Commands {
         #[arg(required = true, long, short)]
         geth_rpc: String,
 
+        /// Chain id of the rollup contract. This command has no wallet to
+        /// read it from, so it stays an explicit flag.
+        #[arg(short, long, default_value = "5115")]
+        chain: u64,
+
         /// Number of past blocks to scan for events (mints + slow burns).
         /// Paginated in 1000-block chunks under the hood.
         #[arg(long, short, default_value = "1000")]
@@ -179,6 +187,11 @@ enum Commands {
     Mints {
         #[arg(required = true, long, short)]
         geth_rpc: String,
+
+        /// Chain id of the rollup contract. This command has no wallet to
+        /// read it from, so it stays an explicit flag.
+        #[arg(short, long, default_value = "5115")]
+        chain: u64,
 
         /// Number of past blocks to scan for MintAdded events.
         /// Paginated in 1000-block chunks under the hood.
@@ -191,6 +204,11 @@ enum Commands {
     ReleaseSlowBurn {
         #[arg(required = true, long, short)]
         geth_rpc: String,
+
+        /// Chain id of the rollup contract. This command has no wallet to
+        /// read it from, so it stays an explicit flag.
+        #[arg(short, long, default_value = "5115")]
+        chain: u64,
 
         /// Private key used to send the releaseSlowBurn transaction.
         #[arg(required = true, long, short)]
@@ -377,9 +395,10 @@ async fn handle_create(chain: u64, name: &str) -> Result<(), AppError> {
     println!("   Never share it with anyone.");
 
     println!("\n🚀 Next Steps:");
-    println!("   1. Connect to network:  ciphera-cli --name {name} --chain {chain} sync");
+    println!("   (the wallet is bound to chain {chain}; other commands read it from the wallet file)");
+    println!("   1. Connect to network:  ciphera-cli --name {name} sync");
     println!(
-        "   2. Mint WCBTC:          ciphera-cli --name {name} --chain {chain} --rollup <ROLLUP_CONTRACT> mint --amount-sat <AMOUNT_SAT> --secret <YOUR_CITREA_KEY> --geth-rpc <RPC_URL>"
+        "   2. Mint WCBTC:          ciphera-cli --name {name} --rollup <ROLLUP_CONTRACT> mint --amount-sat <AMOUNT_SAT> --secret <YOUR_CITREA_KEY> --geth-rpc <RPC_URL>"
     );
     println!("   3. Check balance:       cat {wallet_file}");
 
@@ -389,11 +408,7 @@ async fn handle_create(chain: u64, name: &str) -> Result<(), AppError> {
 /// Handle the sync command
 ///
 /// Connects to a Ciphera node and performs health checks
-async fn handle_sync(
-    chain: u64,
-    name: &str,
-    host: &str,
-) -> Result<()> {
+async fn handle_sync(name: &str, host: &str) -> Result<()> {
     debug!(
         "Connecting wallet {} to Ciphera node at {}",
         name, host
@@ -403,7 +418,7 @@ async fn handle_sync(
     let mut client = NodeClient::builder()
         .name(name)
         .host(host)
-        .build(chain, false)?;
+        .build_load()?;
 
     // Check health
     match client.check_health().await {
@@ -434,8 +449,7 @@ async fn handle_sync(
     match client.list_transactions(&Default::default()).await {
         Ok(list) => {
             println!("   Obtained transactions list size: {}", list.txns.len());
-            let (mut synced_wallet, _) = client.get_wallet().prepare_sync(&list.txns)?;
-            synced_wallet.chain_id = Some(chain);
+            let (synced_wallet, _) = client.get_wallet().prepare_sync(&list.txns)?;
             synced_wallet.save()?;
             client.replace_wallet(synced_wallet);
         }
@@ -467,7 +481,6 @@ async fn handle_address(name: &str, amount_wei: u64, ticker: &str) -> Result<()>
 }
 
 async fn handle_note_spend(
-    chain: u64,
     name: &str,
     host: &str,
     amount_wei: u64,
@@ -477,7 +490,7 @@ async fn handle_note_spend(
     let mut client = NodeClient::builder()
         .name(name)
         .host(host)
-        .build(chain, false)?;
+        .build_load()?;
 
     // Prepare transfer. A case, when wallet already has exactly matching note, will be ignored
     let (wallet_with_transfer_note, transfer_note) =
@@ -517,12 +530,7 @@ async fn handle_note_spend(
     }
 }
 
-async fn handle_spend_to(
-    chain: u64,
-    name: &str,
-    host: &str,
-    address: &str,
-) -> Result<()> {
+async fn handle_spend_to(name: &str, host: &str, address: &str) -> Result<()> {
     debug!(
         "Connecting wallet {} to Ciphera node at {}",
         name, host
@@ -532,7 +540,7 @@ async fn handle_spend_to(
     let mut client = NodeClient::builder()
         .name(name)
         .host(host)
-        .build(chain, false)?;
+        .build_load()?;
 
     // Spend to UX leverages a variant of NoteURL encoding for providing an "address" with address
     // and amount needed for UTXO construction
@@ -572,7 +580,6 @@ async fn handle_spend_to(
 async fn handle_receive(
     name: &str,
     host: &str,
-    chain: u64,
     notefile: Option<String>,
     notelink: Option<String>,
 ) -> Result<()> {
@@ -585,7 +592,7 @@ async fn handle_receive(
     let mut client = NodeClient::builder()
         .name(name)
         .host(host)
-        .build(chain, false)?;
+        .build_load()?;
 
     // Check health
     match client.check_health().await {
@@ -693,7 +700,6 @@ fn parse_redeemer_address(s: &str) -> Result<Element, AppError> {
 
 #[allow(clippy::too_many_arguments)]
 async fn handle_escrow_lock(
-    chain: u64,
     name: &str,
     host: &str,
     amount_wei: u64,
@@ -705,7 +711,7 @@ async fn handle_escrow_lock(
     let mut client = NodeClient::builder()
         .name(name)
         .host(host)
-        .build(chain, false)?;
+        .build_load()?;
 
     let redeemer_address = parse_redeemer_address(redeemer)?;
     let payment_hash = parse_payment_hash_hex(payment_hash_hex)?;
@@ -728,8 +734,7 @@ async fn handle_escrow_lock(
     let refund_secret_key = client.get_wallet().gen_pk();
     let htlc_note = Note {
         utxo_kind: Element::new(2),
-        note_kind: cli::address::citrea_token_data(cli::address::network_for_chain(chain), ticker)
-            .1,
+        note_kind: cli::address::citrea_token_data(client.get_wallet().network(), ticker).1,
         address: htlc_claim_address_from_hash(redeemer_address, payment_hash),
         psi: htlc_refund_psi(refund_secret_key, &lock),
         value: Element::from(amount_wei),
@@ -795,7 +800,6 @@ async fn handle_escrow_lock(
 }
 
 async fn handle_escrow_redeem_or_refund(
-    chain: u64,
     name: &str,
     host: &str,
     note_path: &str,
@@ -806,7 +810,7 @@ async fn handle_escrow_redeem_or_refund(
     let mut client = NodeClient::builder()
         .name(name)
         .host(host)
-        .build(chain, false)?;
+        .build_load()?;
 
     let json_str = fs::read_to_string(note_path).map_err(|e| {
         AppError::IoError(std::io::Error::new(e.kind(), format!("{note_path}: {e}")))
@@ -913,7 +917,6 @@ async fn handle_import(name: &str, notefile: &str) -> Result<()> {
 async fn handle_atomiq_depo(
     name: &str,
     host: &str,
-    chain: u64,
     amount_sat: u64,
     onramp_uri: &str,
 ) -> Result<()> {
@@ -928,7 +931,7 @@ async fn handle_atomiq_depo(
     let mut client = NodeClient::builder()
         .name(name)
         .host(host)
-        .build(chain, false)?;
+        .build_load()?;
 
     // 4. Init swap: GET /onramp/{amount}/{payment_hash}
     let http = reqwest::Client::new();
@@ -1121,10 +1124,17 @@ fn preimage_field(preimage: [u8; 32]) -> Element {
 async fn handle_depo_ln(
     name: &str,
     host: &str,
-    chain: u64,
     amount_sat: u64,
     ln_service_uri: &str,
 ) -> Result<()> {
+    // Load the wallet up front: it's the source of the chain/network used to
+    // reconstruct the deposit note below, and failing fast beats waiting on a
+    // Lightning payment only to discover the wallet is missing.
+    let mut client = NodeClient::builder()
+        .name(name)
+        .host(host)
+        .build_load()?;
+
     let http = reqwest::Client::new();
 
     // Step 1 — GET /v0/onramp?amount_sat=N -> { payment_hash, bolt11 }.
@@ -1250,7 +1260,7 @@ async fn handle_depo_ln(
         // Older ln-service returns only a commitment; derive the note from
         // the preimage and this wallet's chain note kind.
         let (utxo_kind, note_kind) =
-            cli::address::citrea_token_data(cli::address::network_for_chain(chain), "WCBTC");
+            cli::address::citrea_token_data(client.get_wallet().network(), "WCBTC");
         Note {
             utxo_kind,
             note_kind,
@@ -1270,14 +1280,15 @@ async fn handle_depo_ln(
     }
 
     // Cross-check the reconstructed note against the commitment the service
-    // reported -- catches a note_kind / amount mismatch (e.g. wrong --chain)
-    // before persisting a note that isn't actually on chain.
+    // reported -- catches a note_kind / amount mismatch (e.g. the wallet is
+    // bound to a different chain than the service) before persisting a note
+    // that isn't actually on chain.
     let expected = Element::from_str(&note_commitment_hex)
         .map_err(|e| color_eyre::eyre::eyre!("invalid note_commitment from service: {e}"))?;
     if note.commitment() != expected {
         return Err(color_eyre::eyre::eyre!(
             "reconstructed note commitment {} != service commitment {}; \
-             note_kind/amount disagree (check --chain matches the service)",
+             note_kind/amount disagree (does the wallet's chain match the service?)",
             note.commitment(),
             expected
         ));
@@ -1286,10 +1297,6 @@ async fn handle_depo_ln(
     let amount_wei = note.value.to_u64_array()[0];
     let input_note = InputNote::new(note, unlock_key);
 
-    let mut client = NodeClient::builder()
-        .name(name)
-        .host(host)
-        .build(chain, false)?;
     let (prepared_wallet, ()) = client.get_wallet().prepare_add_to_avail(input_note)?;
     prepared_wallet.save()?;
     client.replace_wallet(prepared_wallet);
@@ -1305,7 +1312,6 @@ async fn handle_depo_ln(
 async fn handle_atomiq_withdraw(
     name: &str,
     host: &str,
-    chain: u64,
     invoice: &str,
     substitutor: &str,
     address: &str,
@@ -1314,7 +1320,7 @@ async fn handle_atomiq_withdraw(
     /*    let client = NodeClient::builder()
             .name(name)
             .host(host)
-            .build(chain, false)?;
+            .build_load()?;
 
         let b = client.get_wallet().balance;
         TODO: balance check before everything even starts
@@ -1394,7 +1400,6 @@ async fn handle_atomiq_withdraw(
     handle_burn(
         name,
         host,
-        chain,
         address, // refund address
         input_amount_wei_u64,
         "WCBTC",
@@ -1512,7 +1517,7 @@ async fn verify_escrow_note_values(
     service_payment_hash: &str,
     escrow_note: &Note,
     expected_refund_address: &Element,
-    chain: u64,
+    network: zk_primitives::CitreaNetwork,
     timelock: &zk_primitives::TimeLock,
 ) -> Result<()> {
     // Parse the Bolt11 invoice to extract amount and payment hash
@@ -1549,10 +1554,8 @@ async fn verify_escrow_note_values(
     }
 
     // Verify token kind matches expected chain (LN offramp is WCBTC-denominated).
-    let (_, expected_note_kind) = cli::address::citrea_token_data(
-        cli::address::network_for_chain(chain),
-        cli::address::WCBTC_TICKER,
-    );
+    let (_, expected_note_kind) =
+        cli::address::citrea_token_data(network, cli::address::WCBTC_TICKER);
     if escrow_note.note_kind != expected_note_kind {
         return Err(color_eyre::eyre::eyre!(
             "note kind mismatch: expected {} but service returned {}; \
@@ -1611,7 +1614,6 @@ async fn verify_timelock_matches_tip(
 async fn handle_withdraw_ln(
     name: &str,
     host: &str,
-    chain: u64,
     invoice: &str,
     ln_service_uri: &str,
     btc_explorer: &str,
@@ -1619,7 +1621,7 @@ async fn handle_withdraw_ln(
     let mut client = NodeClient::builder()
         .name(name)
         .host(host)
-        .build(chain, false)?;
+        .build_load()?;
 
     // Refund key is the wallet's own: the escrow's refund branch binds
     // `psi` to `get_address_for_private_key(refund_secret_key)`, so only
@@ -1707,7 +1709,7 @@ async fn handle_withdraw_ln(
         &payment_hash,
         &htlc_note,
         &refund_address,
-        chain,
+        client.get_wallet().network(),
         &timelock,
     ).await?;
     println!("✅ Escrow note values verified");
@@ -1783,7 +1785,6 @@ async fn handle_mint(
     name: &str,
     host: &str,
     geth_rpc: &str,
-    chain: u64,
     rollup: &str,
     secret: &str,
     amount_wei: u64,
@@ -1794,16 +1795,18 @@ async fn handle_mint(
     let mut client = NodeClient::builder()
         .name(name)
         .host(host)
-        .build(chain, false)?;
+        .build_load()?;
 
     let (prepared_wallet, utxo) = client.get_wallet().prepare_mint(amount_wei, ticker)?;
     let snark = utxo.prove().unwrap();
 
     if !only_snark {
+        // The EVM mint targets the rollup on the wallet's bound chain.
+        let chain_id = client.get_wallet().network().chain_id();
         client
             .admin_mint(
                 geth_rpc,
-                chain,
+                chain_id,
                 secret,
                 rollup,
                 &utxo.output_notes[0],
@@ -1836,7 +1839,6 @@ async fn handle_mint(
 async fn handle_burn(
     name: &str,
     host: &str,
-    chain: u64,
     address: &str,
     amount_wei: u64,
     ticker: &str,
@@ -1846,7 +1848,7 @@ async fn handle_burn(
     let mut client = NodeClient::builder()
         .name(name)
         .host(host)
-        .build(chain, false)?;
+        .build_load()?;
 
     // Prepare burn
     let (wallet_with_burner_key, burner_note) =
@@ -2165,11 +2167,11 @@ async fn main() -> Result<()> {
 
     // Execute command
     match cli.command {
-        Commands::Create {} => {
-            handle_create(cli.chain, &cli.name).await?;
+        Commands::Create { chain } => {
+            handle_create(chain, &cli.name).await?;
         }
         Commands::Sync {} => {
-            handle_sync(cli.chain, &cli.name, &cli.host).await?;
+            handle_sync(&cli.name, &cli.host).await?;
         }
         Commands::Address { amount } => {
             let (ticker_normalized, amount_wei) = amount.to_base_units()?;
@@ -2177,33 +2179,13 @@ async fn main() -> Result<()> {
         }
         Commands::Spend { amount } => {
             let (ticker_normalized, amount_wei) = amount.to_base_units()?;
-            handle_note_spend(
-                cli.chain,
-                &cli.name,
-                &cli.host,
-                amount_wei,
-                ticker_normalized,
-            )
-            .await?;
+            handle_note_spend(&cli.name, &cli.host, amount_wei, ticker_normalized).await?;
         }
         Commands::SpendTo { address } => {
-            handle_spend_to(
-                cli.chain,
-                &cli.name,
-                &cli.host,
-                &address,
-            )
-            .await?;
+            handle_spend_to(&cli.name, &cli.host, &address).await?;
         }
         Commands::Receive { note, link } => {
-            handle_receive(
-                &cli.name,
-                &cli.host,
-                cli.chain,
-                note,
-                link,
-            )
-            .await?;
+            handle_receive(&cli.name, &cli.host, note, link).await?;
         }
         Commands::Import { note } => {
             handle_import(&cli.name, &note).await?;
@@ -2215,7 +2197,6 @@ async fn main() -> Result<()> {
         } => {
             let (ticker_normalized, amount_wei) = amount.to_base_units()?;
             handle_escrow_lock(
-                cli.chain,
                 &cli.name,
                 &cli.host,
                 amount_wei,
@@ -2228,7 +2209,6 @@ async fn main() -> Result<()> {
         }
         Commands::EscrowRedeem { note, preimage } => {
             handle_escrow_redeem_or_refund(
-                cli.chain,
                 &cli.name,
                 &cli.host,
                 &note,
@@ -2240,7 +2220,6 @@ async fn main() -> Result<()> {
         }
         Commands::EscrowRefund { note } => {
             handle_escrow_redeem_or_refund(
-                cli.chain,
                 &cli.name,
                 &cli.host,
                 &note,
@@ -2261,7 +2240,6 @@ async fn main() -> Result<()> {
                 &cli.name,
                 &cli.host,
                 &geth_rpc,
-                cli.chain,
                 &cli.rollup,
                 &secret,
                 amount_wei,
@@ -2275,7 +2253,6 @@ async fn main() -> Result<()> {
             handle_burn(
                 &cli.name,
                 &cli.host,
-                cli.chain,
                 &address,
                 amount_wei,
                 ticker_normalized,
@@ -2283,46 +2260,40 @@ async fn main() -> Result<()> {
             )
             .await?;
         }
-        Commands::Contract { geth_rpc, blocks } => {
-            handle_rollup(&geth_rpc, cli.chain, &cli.rollup, blocks).await?;
+        Commands::Contract {
+            geth_rpc,
+            chain,
+            blocks,
+        } => {
+            handle_rollup(&geth_rpc, chain, &cli.rollup, blocks).await?;
         }
-        Commands::Mints { geth_rpc, blocks } => {
-            handle_mints(&geth_rpc, cli.chain, &cli.rollup, blocks).await?;
+        Commands::Mints {
+            geth_rpc,
+            chain,
+            blocks,
+        } => {
+            handle_mints(&geth_rpc, chain, &cli.rollup, blocks).await?;
         }
         Commands::ReleaseSlowBurn {
             geth_rpc,
+            chain,
             secret,
             key,
             blocks,
         } => {
-            handle_release_slow_burn(&geth_rpc, cli.chain, &cli.rollup, &secret, &key, blocks)
-                .await?;
+            handle_release_slow_burn(&geth_rpc, chain, &cli.rollup, &secret, &key, blocks).await?;
         }
         Commands::AtomiqDepo {
             amount_sat,
             onramp_uri,
         } => {
-            handle_atomiq_depo(
-                &cli.name,
-                &cli.host,
-                cli.chain,
-                amount_sat,
-                &onramp_uri,
-            )
-            .await?;
+            handle_atomiq_depo(&cli.name, &cli.host, amount_sat, &onramp_uri).await?;
         }
         Commands::DepoLn {
             amount_sat,
             ln_service_uri,
         } => {
-            handle_depo_ln(
-                &cli.name,
-                &cli.host,
-                cli.chain,
-                amount_sat,
-                &ln_service_uri,
-            )
-            .await?;
+            handle_depo_ln(&cli.name, &cli.host, amount_sat, &ln_service_uri).await?;
         }
         Commands::AtomiqWithdraw {
             invoice,
@@ -2333,7 +2304,6 @@ async fn main() -> Result<()> {
             handle_atomiq_withdraw(
                 &cli.name,
                 &cli.host,
-                cli.chain,
                 &invoice,
                 &substitutor,
                 &address,
@@ -2348,7 +2318,6 @@ async fn main() -> Result<()> {
             handle_withdraw_ln(
                 &cli.name,
                 &cli.host,
-                cli.chain,
                 &invoice,
                 &ln_service_uri,
                 &cli.btc_explorer,

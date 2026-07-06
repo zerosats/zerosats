@@ -38,13 +38,17 @@ fn temp_wallet_dir() -> TempDir {
 fn build_client_in(wallet_dir: &Path, name: &str) -> cli::NodeClient {
     let wallet_path = Wallet::wallet_path_in(wallet_dir, name);
     let create = !wallet_path.exists();
-    NodeClient::builder()
+    let builder = NodeClient::builder()
         .name(name)
         .host(NODE_HOST)
         .port(NODE_PORT)
-        .wallet_dir(wallet_dir)
-        .build(CHAIN_ID, create)
-        .unwrap_or_else(|e| panic!("NodeClient::build failed for '{name}': {e}"))
+        .wallet_dir(wallet_dir);
+    let built = if create {
+        builder.build_create(CHAIN_ID)
+    } else {
+        builder.build_load()
+    };
+    built.unwrap_or_else(|e| panic!("NodeClient::build failed for '{name}': {e}"))
 }
 
 fn build_client(name: &str) -> (TempDir, cli::NodeClient) {
@@ -210,14 +214,14 @@ fn test_build_create_fails_when_wallet_exists() {
     NodeClient::builder()
         .name(name)
         .wallet_dir(wallet_dir.path())
-        .build(CHAIN_ID, true)
+        .build_create(CHAIN_ID)
         .expect("first create should succeed");
 
     // Second creation on the same name must fail.
     let result = NodeClient::builder()
         .name(name)
         .wallet_dir(wallet_dir.path())
-        .build(CHAIN_ID, true);
+        .build_create(CHAIN_ID);
 
     let err = result.expect_err("create_wallet=true must fail when wallet already exists");
     let msg = format!("{err}");
@@ -236,13 +240,13 @@ fn test_build_load_succeeds_when_wallet_exists() {
     NodeClient::builder()
         .name(name)
         .wallet_dir(wallet_dir.path())
-        .build(CHAIN_ID, true)
+        .build_create(CHAIN_ID)
         .expect("pre-create");
 
     let result = NodeClient::builder()
         .name(name)
         .wallet_dir(wallet_dir.path())
-        .build(CHAIN_ID, false);
+        .build_load();
 
     assert!(
         result.is_ok(),
@@ -260,7 +264,7 @@ fn test_build_load_fails_when_wallet_absent() {
     let result = NodeClient::builder()
         .name(name)
         .wallet_dir(wallet_dir.path())
-        .build(CHAIN_ID, false);
+        .build_load();
 
     let err = result.expect_err("create_wallet=false must fail when file is absent");
     let msg = format!("{err}");
@@ -270,29 +274,26 @@ fn test_build_load_fails_when_wallet_absent() {
     );
 }
 
-/// Loading a wallet with a mismatched chain_id must fail with a clear message.
+/// build_load is chain-agnostic: the wallet file is authoritative, so a
+/// loaded wallet keeps its own bound chain_id (no `--chain` to match).
 #[test]
-fn test_build_load_rejects_wrong_chain_id() {
-    let name = "build-chain-mismatch-test";
+fn test_build_load_preserves_wallet_chain_id() {
+    let name = "build-chain-preserve-test";
     let wallet_dir = temp_wallet_dir();
 
     NodeClient::builder()
         .name(name)
         .wallet_dir(wallet_dir.path())
-        .build(CHAIN_ID, true)
+        .build_create(CHAIN_ID)
         .expect("pre-create with CHAIN_ID=5115");
 
-    let result = NodeClient::builder()
+    let client = NodeClient::builder()
         .name(name)
         .wallet_dir(wallet_dir.path())
-        .build(9999, false); // different chain_id
+        .build_load()
+        .expect("build_load should succeed for an existing wallet");
 
-    let err = result.expect_err("mismatched chain_id must be rejected");
-    let msg = format!("{err}");
-    assert!(
-        msg.contains("ChainId") || msg.contains("chain") || msg.contains("different"),
-        "error should mention chain_id mismatch; got: {msg}"
-    );
+    assert_eq!(client.get_wallet().chain_id, Some(CHAIN_ID));
 }
 
 // =====================================================================
@@ -314,7 +315,7 @@ fn test_build_propagates_serialization_error_on_bad_json() {
     let result = NodeClient::builder()
         .name(name)
         .wallet_dir(wallet_dir.path())
-        .build(CHAIN_ID, false); // load, not create
+        .build_load(); // load, not create
 
     let err = result.expect_err("build must fail with malformed wallet file");
     let msg = format!("{err}");
