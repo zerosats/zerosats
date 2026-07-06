@@ -67,6 +67,16 @@ pub struct Wallet {
     pub pk: Element,
     pub pending: HashMap<String, Vec<InputNote>>,
     pub avail: HashMap<String, Vec<InputNote>>,
+    /// Append-only keystore of every receive secret key ever handed out by
+    /// [`get_address`](Self::get_address). `pending` only holds the *most
+    /// recent* address per ticker (each `get_address` replaces the list) and
+    /// is drained as notes are spent, so an HTLC escrow locked to an earlier
+    /// receive address would otherwise lose its claim key. This list is never
+    /// truncated, guaranteeing [`candidate_secret_keys`](Self::candidate_secret_keys)
+    /// can always recover it. `#[serde(default)]` keeps wallets saved by older
+    /// CLI versions loadable.
+    #[serde(default)]
+    pub receive_keys: Vec<Element>,
     pub name: Option<String>,
     pub balance: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -82,6 +92,7 @@ impl Wallet {
             pk,
             pending: HashMap::new(),
             avail: HashMap::new(),
+            receive_keys: Vec::new(),
             name,
             balance: 0,
             chain_id: Some(chain_id),
@@ -97,6 +108,7 @@ impl Wallet {
             pk: Element::from_be_bytes(bytes),
             pending: HashMap::new(),
             avail: HashMap::new(),
+            receive_keys: Vec::new(),
             name,
             balance: 0,
             chain_id: Some(chain_id),
@@ -632,6 +644,9 @@ impl Wallet {
 
     fn candidate_secret_keys(&self) -> Vec<Element> {
         let mut keys = vec![self.pk];
+        // Durable receive keys first: these survive `get_address` overwrites
+        // and note spends, so a stale redeemer address can still be claimed.
+        keys.extend(self.receive_keys.iter().copied());
         keys.extend(
             self.pending
                 .values()
@@ -780,10 +795,23 @@ impl Wallet {
             psi,
             value: Element::new(amount),
         };
+        // Persist the receive key durably *before* overwriting `pending`.
+        // Without this, calling `address` again for the same ticker (or
+        // spending the note) drops the key an HTLC escrow may be locked to,
+        // leaving redeemable funds unreachable until the locker's refund.
+        self.remember_receive_key(pk);
         self.pending
             .insert(ticker, vec![InputNote::new(note.clone(), pk)]);
 
         (&note).into()
+    }
+
+    /// Record a receive secret key in the append-only [`receive_keys`](Self::receive_keys)
+    /// keystore, ignoring zero keys and duplicates.
+    fn remember_receive_key(&mut self, secret_key: Element) {
+        if !secret_key.is_zero() && !self.receive_keys.contains(&secret_key) {
+            self.receive_keys.push(secret_key);
+        }
     }
 
     pub fn prepare_get_address(&self, amount: u64, ticker: &str) -> (Self, CipheraAddress) {
@@ -1748,6 +1776,51 @@ mod wallet_tests {
         assert_eq!(escrow.input_notes[0].preimage, preimage);
         assert_eq!(received.note.note_kind, expected_note_kind);
         assert_eq!(prepared_wallet.avail[CITREA_USD_TICKER].len(), 1);
+    }
+
+    #[test]
+    fn test_escrow_redeem_survives_second_get_address() {
+        // Regression: generating a second receive address for the same
+        // ticker overwrites `pending[ticker]`, dropping the first key from
+        // the note map. Redeem must still recover it from the durable
+        // `receive_keys` keystore instead of failing with `NoKey`.
+        let mut wallet = Wallet::random(5115, Some("test".to_string()));
+        let (_, expected_note_kind) = citrea_token_data(CitreaNetwork::Testnet, "CUSD");
+        let preimage = [9u8; 32];
+
+        // Redeemer hands out a receive address; capture the key it binds.
+        let _first = wallet.get_address(400, CITREA_USD_TICKER);
+        let redeemer_secret_key = wallet.receive_keys[0];
+
+        // A second `address` call for the same ticker replaces the pending
+        // list, evicting the first key from `pending` entirely.
+        let _second = wallet.get_address(500, CITREA_USD_TICKER);
+        assert_eq!(wallet.pending[CITREA_USD_TICKER].len(), 1);
+        assert_ne!(
+            wallet.pending[CITREA_USD_TICKER][0].secret_key,
+            redeemer_secret_key,
+            "second get_address should have evicted the first key from pending",
+        );
+        assert!(
+            wallet.receive_keys.contains(&redeemer_secret_key),
+            "durable keystore must retain the evicted key",
+        );
+
+        // The escrow was locked to the *first* receive address.
+        let htlc_note = Note {
+            utxo_kind: Element::new(2),
+            note_kind: expected_note_kind,
+            address: htlc_claim_address(redeemer_secret_key, preimage),
+            psi: Element::from(2u64),
+            value: Element::from(400u64),
+        };
+
+        let (_prepared_wallet, escrow, _received) = wallet
+            .prepare_escrow_redeem_note(&htlc_note, preimage)
+            .expect("redeem must recover the key from the durable keystore");
+
+        assert_eq!(escrow.input_notes[0].secret_key, redeemer_secret_key);
+        assert_eq!(escrow.input_notes[0].preimage, preimage);
     }
 
     #[test]
