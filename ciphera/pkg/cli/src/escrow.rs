@@ -27,7 +27,25 @@ use element::Element;
 use hash::hash_merge;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use thiserror::Error;
 use zk_primitives::{Note, TimeLock, get_address_for_private_key};
+
+/// A supplied preimage does not hash to the descriptor's committed payment
+/// hash — i.e. the redeemer mistyped `--preimage`.
+///
+/// Distinct from a lost claim key so the caller can tell a
+/// recoverable-in-seconds typo from genuinely stuck funds. The claim address
+/// [`htlc_claim_address`] is a one-way hash, so without this check both cases
+/// fail identically in the key search with `WalletError::NoKey`.
+#[derive(Clone, Debug, Error)]
+#[error(
+    "preimage does not match the escrow payment hash \
+     (got SHA-256(preimage)=0x{got}, expected 0x{expected}); check --preimage"
+)]
+pub struct PreimageMismatch {
+    pub expected: String,
+    pub got: String,
+}
 
 /// Secret-free HTLC note descriptor that can be sent to the redeemer.
 ///
@@ -39,6 +57,38 @@ pub struct EscrowNoteDescriptor {
     #[serde(flatten)]
     pub note: Note,
     pub timelock: TimeLock,
+    /// SHA-256 payment hash the claim branch is bound to, committed by the
+    /// locker at lock time. Carried here so the redeemer can verify a supplied
+    /// preimage *before* the key search (see [`Self::check_preimage`]).
+    /// `Option` + `serde(default)` keeps descriptors written by older CLI
+    /// versions loadable: they decode to `None` and preimage verification is
+    /// skipped.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub payment_hash: Option<[u8; 32]>,
+}
+
+impl EscrowNoteDescriptor {
+    /// Verify `SHA-256(preimage)` matches the committed [`Self::payment_hash`].
+    ///
+    /// Returns a distinct [`PreimageMismatch`] on a wrong preimage so the
+    /// redeemer can distinguish a mistyped `--preimage` (recoverable in
+    /// seconds) from a lost claim key (funds stuck until the refund timelock).
+    /// Legacy descriptors that carry no payment hash pass unconditionally —
+    /// there is nothing to check against.
+    pub fn check_preimage(&self, preimage: [u8; 32]) -> Result<(), PreimageMismatch> {
+        let Some(expected) = self.payment_hash else {
+            return Ok(());
+        };
+        let got: [u8; 32] = Sha256::digest(preimage).into();
+        if got == expected {
+            Ok(())
+        } else {
+            Err(PreimageMismatch {
+                expected: hex::encode(expected),
+                got: hex::encode(got),
+            })
+        }
+    }
 }
 
 /// HTLC `note.address` for the claim branch -- binds the redeemer's
@@ -86,6 +136,74 @@ mod tests {
             htlc_claim_address_from_hash(redeemer_address, payment_hash),
             htlc_claim_address(redeemer_secret_key, preimage)
         );
+    }
+
+    fn descriptor_with_payment_hash(payment_hash: Option<[u8; 32]>) -> EscrowNoteDescriptor {
+        EscrowNoteDescriptor {
+            note: Note {
+                utxo_kind: Element::new(2),
+                note_kind: Element::new(2),
+                address: Element::new(1),
+                psi: Element::ZERO,
+                value: Element::new(1),
+            },
+            timelock: TimeLock {
+                zero_block: [0u8; 32],
+                n_blocks: Element::new(2),
+            },
+            payment_hash,
+        }
+    }
+
+    #[test]
+    fn check_preimage_accepts_correct_preimage() {
+        let preimage = [7u8; 32];
+        let payment_hash: [u8; 32] = Sha256::digest(preimage).into();
+        let descriptor = descriptor_with_payment_hash(Some(payment_hash));
+
+        assert!(descriptor.check_preimage(preimage).is_ok());
+    }
+
+    #[test]
+    fn check_preimage_rejects_wrong_preimage() {
+        let preimage = [7u8; 32];
+        let payment_hash: [u8; 32] = Sha256::digest(preimage).into();
+        let descriptor = descriptor_with_payment_hash(Some(payment_hash));
+
+        // A mistyped preimage must surface a distinct, actionable error rather
+        // than the generic NoKey the key search would produce.
+        let err = descriptor
+            .check_preimage([9u8; 32])
+            .expect_err("a preimage that hashes differently must be rejected");
+        assert!(
+            err.to_string().contains("preimage"),
+            "error should name the preimage; got: {err}"
+        );
+    }
+
+    #[test]
+    fn check_preimage_skips_legacy_descriptor_without_hash() {
+        // Descriptors written by older CLI versions decode payment_hash as
+        // None; there is nothing to verify against, so any preimage passes.
+        let descriptor = descriptor_with_payment_hash(None);
+        assert!(descriptor.check_preimage([9u8; 32]).is_ok());
+    }
+
+    #[test]
+    fn descriptor_without_payment_hash_field_decodes_as_none() {
+        // Backward compat: JSON produced by a pre-payment_hash CLI has no
+        // "payment_hash" key. It must still deserialize, with payment_hash =
+        // None, and then skip preimage verification.
+        let descriptor = descriptor_with_payment_hash(Some([1u8; 32]));
+        let mut value = serde_json::to_value(&descriptor).unwrap();
+        value
+            .as_object_mut()
+            .expect("descriptor serializes to a JSON object")
+            .remove("payment_hash");
+
+        let decoded: EscrowNoteDescriptor = serde_json::from_value(value).unwrap();
+        assert!(decoded.payment_hash.is_none());
+        assert!(decoded.check_preimage([9u8; 32]).is_ok());
     }
 }
 

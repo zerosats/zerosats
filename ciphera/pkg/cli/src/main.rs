@@ -758,6 +758,7 @@ async fn handle_escrow_lock(
             let descriptor = EscrowNoteDescriptor {
                 note: htlc_note.clone(),
                 timelock: lock.clone(),
+                payment_hash: Some(payment_hash),
             };
             let descriptor_path = format!("{name}-htlc-note.json");
             let descriptor_json = serde_json::to_string_pretty(&descriptor)?;
@@ -849,6 +850,12 @@ async fn handle_escrow_redeem_or_refund(
         })?)?;
         let descriptor: EscrowNoteDescriptor = serde_json::from_str(&json_str)?;
         let ticker = cli::address::citrea_ticker_from_contract(descriptor.note.note_kind);
+        // Verify the preimage against the committed payment hash *before* the
+        // key search. A mistyped --preimage changes the claim address, so the
+        // search would otherwise fail with the same NoKey error as a genuinely
+        // lost claim key — leaving the redeemer unable to tell a seconds-to-fix
+        // typo from stuck funds.
+        descriptor.check_preimage(preimage)?;
         let (prepared_wallet, escrow, received) = client
             .get_wallet()
             .prepare_escrow_redeem_note(&descriptor.note, preimage)?;
