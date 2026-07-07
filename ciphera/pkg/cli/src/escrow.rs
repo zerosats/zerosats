@@ -50,9 +50,10 @@ pub struct PreimageMismatch {
 
 /// Secret-free HTLC note descriptor that can be sent to the redeemer.
 ///
-/// The flat note fields are the committed escrow output. `timelock`
-/// preserves the refund anchor so either side can reconstruct the HTLC
-/// spend data later without carrying the refund secret or the preimage.
+/// The flat note fields are the committed escrow output. `timelock` records
+/// the locker's refund anchor and window; `escrow-redeem` surfaces it so the
+/// redeemer sees when the locker could reclaim the funds. The refund side
+/// spends from its own separate witness file, not this descriptor.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct EscrowNoteDescriptor {
     #[serde(flatten)]

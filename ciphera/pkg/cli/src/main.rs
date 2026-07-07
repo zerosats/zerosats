@@ -856,6 +856,18 @@ async fn handle_escrow_redeem_or_refund(
         })?)?;
         let descriptor: EscrowNoteDescriptor = from_tagged_json(&json_str, REDEEM_DESCRIPTOR_TYPE)?;
         let ticker = cli::address::citrea_ticker_from_contract(descriptor.note.note_kind);
+
+        // Surface the locker's refund timelock the descriptor carries: once
+        // `n_blocks` Bitcoin blocks are mined on top of the anchor, the locker
+        // can reclaim these funds via escrow-refund and this redeem loses the
+        // race. Printing it here is the only consumer of the field — without it
+        // the descriptor would carry data nothing reads back.
+        let timelock = &descriptor.timelock;
+        println!("\n⏳ Refund window — the locker can reclaim these funds:");
+        println!("   after {} blocks on top of Bitcoin anchor", timelock.n_blocks);
+        println!("   anchor block: {}", hex::encode(timelock.zero_block));
+        println!("   redeem before then to claim ahead of the refund.");
+
         // Verify the preimage against the committed payment hash *before* the
         // key search. A mistyped --preimage changes the claim address, so the
         // search would otherwise fail with the same NoKey error as a genuinely
