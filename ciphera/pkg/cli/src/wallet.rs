@@ -696,6 +696,33 @@ impl Wallet {
         self.prepare_escrow_redeem(&htlc_input_note)
     }
 
+    /// Assemble the HTLC **refund** witness.
+    ///
+    /// `spend_type = 3` with an all-zero preimage selects the timelocked
+    /// refund branch (a non-zero preimage would instead select the hash/claim
+    /// branch). `time_proof` carries the lock anchor the refund must extend —
+    /// just the lock when persisting the witness at lock time, plus the real
+    /// PoW headers once the refund is actually spent.
+    ///
+    /// Single home for the "spend_type 3 + zero preimage = refund" protocol
+    /// convention, shared by the escrow-lock / ln-withdraw persist paths and
+    /// the refund-spend path in [`escrow_refund`](Self::escrow_refund) so the
+    /// three can't drift.
+    #[must_use]
+    pub fn refund_witness(
+        note: Note,
+        refund_secret_key: Element,
+        time_proof: TimeProof,
+    ) -> EscrowInputNote {
+        EscrowInputNote {
+            note,
+            spend_type: 3,
+            secret_key: refund_secret_key,
+            preimage: [0u8; 32],
+            time_proof,
+        }
+    }
+
     fn escrow_refund(
         &mut self,
         htlc_input_note: &EscrowInputNote,
@@ -704,18 +731,16 @@ impl Wallet {
         let ticker = citrea_ticker_from_contract(htlc_input_note.note.note_kind);
         let amount = self.get_note_amount(&htlc_input_note.note)?;
 
-        // Refund branch: preimage is zeroed and the PoW witness extending
-        // the lock anchor is attached (`time_proof`, built from real
-        // Bitcoin headers by the caller). `secret_key` must match the one
-        // whose `key_hash` was baked into `psi` at lock time, and
-        // `time_proof.lock` must be the lock that `psi` committed to.
-        let refund_input = EscrowInputNote {
-            note: htlc_input_note.note.clone(),
-            spend_type: 3,
-            secret_key: htlc_input_note.secret_key,
-            preimage: [0u8; 32],
+        // Refund branch: the PoW witness extending the lock anchor is attached
+        // (`time_proof`, built from real Bitcoin headers by the caller).
+        // `secret_key` must match the one whose `key_hash` was baked into `psi`
+        // at lock time, and `time_proof.lock` must be the lock that `psi`
+        // committed to.
+        let refund_input = Self::refund_witness(
+            htlc_input_note.note.clone(),
+            htlc_input_note.secret_key,
             time_proof,
-        };
+        );
 
         let received: InputNote = self.receive_note(amount, &ticker);
         let b = self.push_to_avail(&ticker, received.clone())?;

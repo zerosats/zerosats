@@ -769,16 +769,14 @@ async fn handle_escrow_lock(
             let descriptor_json = to_tagged_json(REDEEM_DESCRIPTOR_TYPE, &descriptor)?;
             std::fs::write(&descriptor_path, descriptor_json)?;
 
-            let refund_input_note = zk_primitives::EscrowInputNote {
-                note: htlc_note.clone(),
-                spend_type: 3,
-                secret_key: refund_secret_key,
-                preimage: [0u8; 32],
-                time_proof: zk_primitives::TimeProof {
+            let refund_input_note = Wallet::refund_witness(
+                htlc_note.clone(),
+                refund_secret_key,
+                zk_primitives::TimeProof {
                     lock: lock.clone(),
                     ..Default::default()
                 },
-            };
+            );
             let refund_path = format!("{name}-htlc-refund.json");
             let refund_json = to_tagged_json(REFUND_WITNESS_TYPE, &refund_input_note)?;
             std::fs::write(&refund_path, refund_json)?;
@@ -1771,16 +1769,14 @@ async fn handle_withdraw_ln(
             // The timelock is persisted via TimeProof serialization (only the lock,
             // not the headers which are filled in at refund time from real blocks).
             // Refund branch only: no preimage (zeroed).
-            let refund_input_note = zk_primitives::EscrowInputNote {
-                note: htlc_note.clone(),
-                spend_type: 3,
-                secret_key: refund_secret_key,
-                preimage: [0u8; 32],
-                time_proof: zk_primitives::TimeProof {
+            let refund_input_note = Wallet::refund_witness(
+                htlc_note.clone(),
+                refund_secret_key,
+                zk_primitives::TimeProof {
                     lock: timelock.clone(),
                     ..Default::default()
                 },
-            };
+            );
             let note_path = format!("{name}-htlc.json");
             let json_str = to_tagged_json(REFUND_WITNESS_TYPE, &refund_input_note)?;
             std::fs::write(&note_path, json_str)?;
