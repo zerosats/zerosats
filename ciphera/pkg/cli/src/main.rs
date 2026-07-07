@@ -735,9 +735,11 @@ async fn handle_escrow_lock(
     // The claim branch is bound to the maker/redeemer address and the
     // payment hash. The refund branch is bound to a fresh locker-owned key.
     let refund_secret_key = client.get_wallet().gen_pk();
+    let (utxo_kind, note_kind) =
+        cli::address::citrea_token_data(client.get_wallet().network(), ticker);
     let htlc_note = Note {
-        utxo_kind: Element::new(2),
-        note_kind: cli::address::citrea_token_data(client.get_wallet().network(), ticker).1,
+        utxo_kind,
+        note_kind,
         address: htlc_claim_address_from_hash(redeemer_address, payment_hash),
         psi: htlc_refund_psi(refund_secret_key, &lock),
         value: Element::from(amount_wei),
