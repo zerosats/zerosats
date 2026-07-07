@@ -260,6 +260,15 @@ pub fn try_decode_address(address: &str) -> Result<CipheraAddress, String> {
     let currency = rest[1];
     rest = &rest[2..];
 
+    // Reject unknown currency bytes here so callers get a clean error instead
+    // of hitting `unreachable!("currency code must be 1 or 2")` inside
+    // `Note::from(&CipheraAddress)` when `.address()`/`.commitment()` is called.
+    if CitreaToken::from_currency_code(currency).is_none() {
+        return Err(format!(
+            "unsupported currency code {currency}; expected 1 (WCBTC) or 2 (CUSD)"
+        ));
+    }
+
     if rest.len() < 32 {
         return Err("not enough bytes for public_key".to_string());
     }
@@ -382,6 +391,27 @@ mod tests {
         assert_eq!(decoded_note.value, note.value);
         assert_eq!(decoded_note.address, note.address);
         assert_eq!(decoded_note.psi, note.psi);
+    }
+
+    #[test]
+    fn test_try_decode_address_rejects_unknown_currency() {
+        // A structurally valid address whose currency byte is neither 1 (WCBTC)
+        // nor 2 (CUSD) must surface a clean Err, not panic in Note::from.
+        let addr = CipheraAddress {
+            version: 0,
+            currency: 3,
+            public_key: hash_merge([Element::new(101), Element::ZERO]),
+            psi: Some(Element::ZERO),
+            value: Element::new(1),
+        };
+        let encoded = addr.encode_address();
+
+        let err = try_decode_address(&encoded)
+            .expect_err("unknown currency byte must be rejected, not decoded");
+        assert!(
+            err.contains("currency"),
+            "error should mention the currency code; got: {err}"
+        );
     }
 
     #[test]
