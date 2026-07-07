@@ -6,7 +6,10 @@ use cli::address::{
     citrea_ticker_from_contract, decode_address, normalize_citrea_ticker, supported_citrea_tokens,
     try_decode_address,
 };
-use cli::escrow::{EscrowNoteDescriptor, htlc_claim_address_from_hash, htlc_refund_psi};
+use cli::escrow::{
+    EscrowNoteDescriptor, REDEEM_DESCRIPTOR_TYPE, REFUND_WITNESS_TYPE, from_tagged_json,
+    htlc_claim_address_from_hash, htlc_refund_psi, to_tagged_json,
+};
 use cli::note_url::{CipheraURL, decode_url};
 use cli::units;
 
@@ -761,7 +764,7 @@ async fn handle_escrow_lock(
                 payment_hash: Some(payment_hash),
             };
             let descriptor_path = format!("{name}-htlc-note.json");
-            let descriptor_json = serde_json::to_string_pretty(&descriptor)?;
+            let descriptor_json = to_tagged_json(REDEEM_DESCRIPTOR_TYPE, &descriptor)?;
             std::fs::write(&descriptor_path, descriptor_json)?;
 
             let refund_input_note = zk_primitives::EscrowInputNote {
@@ -775,7 +778,7 @@ async fn handle_escrow_lock(
                 },
             };
             let refund_path = format!("{name}-htlc-refund.json");
-            let refund_json = serde_json::to_string_pretty(&refund_input_note)?;
+            let refund_json = to_tagged_json(REFUND_WITNESS_TYPE, &refund_input_note)?;
             std::fs::write(&refund_path, refund_json)?;
 
             println!("\nSaved escrow descriptor to {descriptor_path}");
@@ -820,7 +823,8 @@ async fn handle_escrow_redeem_or_refund(
     let label = if refund { "Refund" } else { "Redeem" };
 
     let (ticker, prepared_wallet, escrow, _received) = if refund {
-        let htlc_input_note: zk_primitives::EscrowInputNote = serde_json::from_str(&json_str)?;
+        let htlc_input_note: zk_primitives::EscrowInputNote =
+            from_tagged_json(&json_str, REFUND_WITNESS_TYPE)?;
         let ticker = cli::address::citrea_ticker_from_contract(htlc_input_note.note.note_kind);
 
         // Build the refund PoW witness from real Bitcoin headers extending
@@ -848,7 +852,7 @@ async fn handle_escrow_redeem_or_refund(
         let preimage = parse_preimage_hex(preimage_hex.ok_or_else(|| {
             AppError::InvalidAddress("escrow-redeem requires --preimage".to_string())
         })?)?;
-        let descriptor: EscrowNoteDescriptor = serde_json::from_str(&json_str)?;
+        let descriptor: EscrowNoteDescriptor = from_tagged_json(&json_str, REDEEM_DESCRIPTOR_TYPE)?;
         let ticker = cli::address::citrea_ticker_from_contract(descriptor.note.note_kind);
         // Verify the preimage against the committed payment hash *before* the
         // key search. A mistyped --preimage changes the claim address, so the
@@ -1764,7 +1768,7 @@ async fn handle_withdraw_ln(
                 },
             };
             let note_path = format!("{name}-htlc.json");
-            let json_str = serde_json::to_string_pretty(&refund_input_note)?;
+            let json_str = to_tagged_json(REFUND_WITNESS_TYPE, &refund_input_note)?;
             std::fs::write(&note_path, json_str)?;
             println!("\nSaved refund EscrowInputNote to {note_path}");
             println!("  refund secret_key: {refund_secret_key}");

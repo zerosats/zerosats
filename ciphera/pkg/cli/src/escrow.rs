@@ -25,6 +25,7 @@
 
 use element::Element;
 use hash::hash_merge;
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
@@ -89,6 +90,74 @@ impl EscrowNoteDescriptor {
             })
         }
     }
+}
+
+/// `type` tag written into the `*-htlc-note.json` descriptor that
+/// `escrow-redeem` consumes.
+pub const REDEEM_DESCRIPTOR_TYPE: &str = "ciphera-htlc-redeem-descriptor";
+
+/// `type` tag written into the `*-htlc-refund.json` witness that
+/// `escrow-refund` consumes.
+pub const REFUND_WITNESS_TYPE: &str = "ciphera-htlc-refund-witness";
+
+/// Error reading a tagged escrow file (see [`from_tagged_json`]).
+#[derive(Debug, Error)]
+pub enum EscrowFileError {
+    #[error("failed to parse escrow file as JSON: {0}")]
+    Json(#[from] serde_json::Error),
+
+    /// The file carries a `type` tag, but for the *other* escrow command.
+    /// This is the common two-party mistake (redeem given the refund file, or
+    /// vice versa); name both files so the fix is obvious.
+    #[error(
+        "wrong escrow file: expected a {expected} but this file is a {found}; \
+         escrow-redeem takes the *-htlc-note.json descriptor and escrow-refund \
+         takes the *-htlc-refund.json witness"
+    )]
+    WrongType { expected: String, found: String },
+}
+
+/// Serialize `value` to pretty JSON with a top-level `"type": file_type` tag.
+///
+/// The tag lets [`from_tagged_json`] reject a file passed to the wrong escrow
+/// command with a clear error instead of an opaque serde "missing field". The
+/// tag is a sibling of the payload fields, so the payload type ([`Note`],
+/// [`EscrowNoteDescriptor`], `EscrowInputNote`) needs no CLI-specific field.
+pub fn to_tagged_json<T: Serialize>(
+    file_type: &str,
+    value: &T,
+) -> Result<String, serde_json::Error> {
+    let mut json = serde_json::to_value(value)?;
+    if let serde_json::Value::Object(map) = &mut json {
+        map.insert(
+            "type".to_string(),
+            serde_json::Value::String(file_type.to_string()),
+        );
+    }
+    serde_json::to_string_pretty(&json)
+}
+
+/// Deserialize a tagged escrow file, requiring its `"type"` tag to equal
+/// `expected_type`.
+///
+/// A tag for a different command yields a clear [`EscrowFileError::WrongType`].
+/// A file with *no* tag (written by a CLI predating tagging) is accepted and
+/// deserialized as before — lenient for backward compatibility, since an
+/// untagged file cannot be misattributed to the wrong command.
+pub fn from_tagged_json<T: DeserializeOwned>(
+    json: &str,
+    expected_type: &str,
+) -> Result<T, EscrowFileError> {
+    let value: serde_json::Value = serde_json::from_str(json)?;
+    if let Some(found) = value.get("type").and_then(serde_json::Value::as_str) {
+        if found != expected_type {
+            return Err(EscrowFileError::WrongType {
+                expected: expected_type.to_string(),
+                found: found.to_string(),
+            });
+        }
+    }
+    Ok(serde_json::from_value(value)?)
 }
 
 /// HTLC `note.address` for the claim branch -- binds the redeemer's
@@ -187,6 +256,41 @@ mod tests {
         // None; there is nothing to verify against, so any preimage passes.
         let descriptor = descriptor_with_payment_hash(None);
         assert!(descriptor.check_preimage([9u8; 32]).is_ok());
+    }
+
+    #[test]
+    fn tagged_descriptor_roundtrips_and_rejects_wrong_command() {
+        let descriptor = descriptor_with_payment_hash(Some([3u8; 32]));
+
+        let json = to_tagged_json(REDEEM_DESCRIPTOR_TYPE, &descriptor).unwrap();
+        assert!(
+            json.contains(REDEEM_DESCRIPTOR_TYPE),
+            "serialized file must carry its type tag"
+        );
+
+        // Reading it back as the matching command succeeds and preserves data.
+        let back: EscrowNoteDescriptor = from_tagged_json(&json, REDEEM_DESCRIPTOR_TYPE).unwrap();
+        assert_eq!(back.payment_hash, descriptor.payment_hash);
+
+        // Passing the redeem descriptor to escrow-refund yields a clear,
+        // command-naming error rather than an opaque serde "missing field".
+        let err = from_tagged_json::<EscrowNoteDescriptor>(&json, REFUND_WITNESS_TYPE)
+            .expect_err("a redeem descriptor must be rejected when a refund witness is expected");
+        assert!(matches!(err, EscrowFileError::WrongType { .. }));
+        assert!(err.to_string().contains(REFUND_WITNESS_TYPE));
+    }
+
+    #[test]
+    fn untagged_file_is_accepted_for_backward_compat() {
+        // A descriptor written by a CLI predating tagging has no "type" key; it
+        // must still deserialize, since an untagged file cannot be misattributed
+        // to the wrong command.
+        let descriptor = descriptor_with_payment_hash(Some([3u8; 32]));
+        let untagged = serde_json::to_string(&descriptor).unwrap();
+        assert!(!untagged.contains("\"type\""));
+
+        let back: EscrowNoteDescriptor = from_tagged_json(&untagged, REDEEM_DESCRIPTOR_TYPE).unwrap();
+        assert_eq!(back.payment_hash, descriptor.payment_hash);
     }
 
     #[test]
