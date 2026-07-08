@@ -2,7 +2,7 @@ use element::Element;
 use rand::RngCore;
 use rand::rngs::OsRng;
 use serde::{Deserialize, Serialize};
-use zk_primitives::{CitreaNetwork, Note, citrea_wcbtc_note_kind, citrea_ctusd_note_kind};
+use zk_primitives::{CitreaNetwork, Note, citrea_ctusd_note_kind, citrea_wcbtc_note_kind};
 
 pub const WCBTC_TICKER: &str = "WCBTC";
 pub const CITREA_USD_TICKER: &str = "CUSD";
@@ -240,51 +240,91 @@ impl CipheraAddress {
 
 #[must_use]
 pub fn decode_address(address: &str) -> CipheraAddress {
+    match try_decode_address(address) {
+        Ok(a) => a,
+        Err(e) => panic!("Failed to decode Ciphera address: {e}"),
+    }
+}
+
+pub fn try_decode_address(address: &str) -> Result<CipheraAddress, String> {
     let address_bytes = bs58::decode(address)
         .into_vec()
-        .expect("Failed to decode base58 payload");
+        .map_err(|e| format!("failed to decode base58 payload: {e}"))?;
 
     let mut rest = &address_bytes[..];
 
+    if rest.len() < 2 {
+        return Err("address payload is too short".to_string());
+    }
     let version = rest[0];
     let currency = rest[1];
     rest = &rest[2..];
 
+    // Reject unknown currency bytes here so callers get a clean error instead
+    // of hitting `unreachable!("currency code must be 1 or 2")` inside
+    // `Note::from(&CipheraAddress)` when `.address()`/`.commitment()` is called.
+    if CitreaToken::from_currency_code(currency).is_none() {
+        return Err(format!(
+            "unsupported currency code {currency}; expected 1 (WCBTC) or 2 (CUSD)"
+        ));
+    }
+
+    if rest.len() < 32 {
+        return Err("not enough bytes for public_key".to_string());
+    }
     let public_key_bytes: [u8; 32] = rest[..32]
         .try_into()
-        .expect("Not enough bytes for public_key");
+        .map_err(|_| "not enough bytes for public_key".to_string())?;
 
     let public_key = Element::from_be_bytes(public_key_bytes);
     rest = &rest[32..];
 
     let psi = match version {
         0 => {
-            let psi_bytes: [u8; 32] = rest[..32].try_into().expect("Not enough bytes for psi");
+            if rest.len() < 32 {
+                return Err("not enough bytes for psi".to_string());
+            }
+            let psi_bytes: [u8; 32] = rest[..32]
+                .try_into()
+                .map_err(|_| "not enough bytes for psi".to_string())?;
             rest = &rest[32..];
             Some(Element::from_be_bytes(psi_bytes))
         }
-        _ => unreachable!("only version 1, 2 or 3 is supported"),
+        _ => return Err(format!("unsupported address version {version}")),
     };
 
+    if rest.is_empty() {
+        return Err("missing value length prefix".to_string());
+    }
     let leading_zeros = rest[0] as usize;
+    if leading_zeros > 32 {
+        return Err(format!(
+            "invalid leading zero count {leading_zeros}; expected <= 32"
+        ));
+    }
     rest = &rest[1..];
 
     let value_len = 32 - leading_zeros;
+    if rest.len() != value_len {
+        return Err(format!(
+            "invalid value length: expected {value_len}, got {}",
+            rest.len()
+        ));
+    }
     let value_without_leading_zeros = &rest[..value_len];
     //rest = &rest[value_len..];
 
     let mut value_bytes = [0u8; 32];
     value_bytes[leading_zeros..].copy_from_slice(value_without_leading_zeros);
-    value_bytes[leading_zeros..].copy_from_slice(value_without_leading_zeros);
     let value = Element::from_be_bytes(value_bytes);
 
-    CipheraAddress {
+    Ok(CipheraAddress {
         version,
         currency,
         public_key,
         psi,
         value,
-    }
+    })
 }
 
 #[cfg(test)]
@@ -351,6 +391,27 @@ mod tests {
         assert_eq!(decoded_note.value, note.value);
         assert_eq!(decoded_note.address, note.address);
         assert_eq!(decoded_note.psi, note.psi);
+    }
+
+    #[test]
+    fn test_try_decode_address_rejects_unknown_currency() {
+        // A structurally valid address whose currency byte is neither 1 (WCBTC)
+        // nor 2 (CUSD) must surface a clean Err, not panic in Note::from.
+        let addr = CipheraAddress {
+            version: 0,
+            currency: 3,
+            public_key: hash_merge([Element::new(101), Element::ZERO]),
+            psi: Some(Element::ZERO),
+            value: Element::new(1),
+        };
+        let encoded = addr.encode_address();
+
+        let err = try_decode_address(&encoded)
+            .expect_err("unknown currency byte must be rejected, not decoded");
+        assert!(
+            err.contains("currency"),
+            "error should mention the currency code; got: {err}"
+        );
     }
 
     #[test]

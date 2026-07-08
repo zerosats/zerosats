@@ -4,6 +4,11 @@ use cli::NodeClient;
 use cli::Wallet;
 use cli::address::{
     citrea_ticker_from_contract, decode_address, normalize_citrea_ticker, supported_citrea_tokens,
+    try_decode_address,
+};
+use cli::escrow::{
+    EscrowNoteDescriptor, REDEEM_DESCRIPTOR_TYPE, REFUND_WITNESS_TYPE, from_tagged_json,
+    htlc_claim_address_from_hash, htlc_refund_psi, to_tagged_json,
 };
 use cli::note_url::{CipheraURL, decode_url};
 use cli::units;
@@ -45,9 +50,6 @@ struct Cli {
     /// sensible 60 s default baked into the client builder.
     #[arg(global = true, long, default_value = "https://ciphera.satsbridge.com")]
     host: String,
-
-    #[arg(global = true, short, long, default_value = "5115")] // Citrea testnet default
-    chain: u64,
 
     #[arg(
         global = true,
@@ -118,7 +120,13 @@ impl TokenAmountArgs {
 
 #[derive(Subcommand, Debug)]
 enum Commands {
-    Create {},
+    /// Create a new wallet bound to a chain. `--chain` is only accepted
+    /// here: every other command reads the chain from the wallet file.
+    Create {
+        /// Chain id the new wallet is bound to (Citrea testnet by default).
+        #[arg(short, long, default_value = "5115")]
+        chain: u64,
+    },
     /// Connect to a Ciphera node and check its health
     Sync {},
     Address {
@@ -168,6 +176,11 @@ enum Commands {
         #[arg(required = true, long, short)]
         geth_rpc: String,
 
+        /// Chain id of the rollup contract. This command has no wallet to
+        /// read it from, so it stays an explicit flag.
+        #[arg(short, long, default_value = "5115")]
+        chain: u64,
+
         /// Number of past blocks to scan for events (mints + slow burns).
         /// Paginated in 1000-block chunks under the hood.
         #[arg(long, short, default_value = "1000")]
@@ -177,6 +190,11 @@ enum Commands {
     Mints {
         #[arg(required = true, long, short)]
         geth_rpc: String,
+
+        /// Chain id of the rollup contract. This command has no wallet to
+        /// read it from, so it stays an explicit flag.
+        #[arg(short, long, default_value = "5115")]
+        chain: u64,
 
         /// Number of past blocks to scan for MintAdded events.
         /// Paginated in 1000-block chunks under the hood.
@@ -189,6 +207,11 @@ enum Commands {
     ReleaseSlowBurn {
         #[arg(required = true, long, short)]
         geth_rpc: String,
+
+        /// Chain id of the rollup contract. This command has no wallet to
+        /// read it from, so it stays an explicit flag.
+        #[arg(short, long, default_value = "5115")]
+        chain: u64,
 
         /// Private key used to send the releaseSlowBurn transaction.
         #[arg(required = true, long, short)]
@@ -204,39 +227,45 @@ enum Commands {
         #[arg(long, short, default_value = "1000")]
         blocks: u64,
     },
-    /// Lock funds from this wallet into an HTLC escrow note. Spends one
-    /// or two available notes through the standard Utxo Send circuit
-    /// and emits an output note encumbered by `SHA256(preimage)` on the
-    /// claim side and a PoW timelock on the refund side. Writes the
-    /// resulting `EscrowInputNote` (note + secret_key + preimage) to
-    /// `<name>-htlc.json` so it can be picked up by `escrow-redeem` /
-    /// `escrow-refund`.
+    /// Lock funds from this wallet into an HTLC escrow note. The claim
+    /// branch is bound to `--redeemer` and `--hash`; the locker never
+    /// sees the preimage. Writes a secret-free descriptor for the
+    /// redeemer and a separate refund witness for the locker.
     EscrowLock {
         #[command(flatten)]
         amount: TokenAmountArgs,
 
-        /// 32-byte preimage that unlocks the claim path, given as
-        /// 64-hex (optionally prefixed with 0x). The redeemer needs
-        /// this value; share it via the `EscrowInputNote` JSON or out
-        /// of band.
+        /// Redeemer's Ciphera address. The claim branch is bound to the
+        /// address key, so the redeemer wallet must retain the
+        /// corresponding secret key.
+        #[arg(required = true, long)]
+        redeemer: String,
+
+        /// SHA-256 payment hash H that the redeemer will later satisfy
+        /// with `escrow-redeem --preimage P`.
+        #[arg(required = true, long = "hash")]
+        hash: String,
+    },
+    /// Redeem an HTLC escrow note by revealing the preimage. Reads a
+    /// secret-free descriptor from the JSON written at lock time and
+    /// finds the matching redeemer key in this wallet.
+    EscrowRedeem {
+        /// Path to the secret-free escrow descriptor produced by
+        /// `escrow-lock`.
+        #[arg(required = true, long)]
+        note: String,
+
+        /// 32-byte preimage P whose SHA-256 hash is the lock hash H.
         #[arg(required = true, long)]
         preimage: String,
-    },
-    /// Redeem an HTLC escrow note by revealing the preimage. Reads the
-    /// `EscrowInputNote` from the JSON written at lock time.
-    EscrowRedeem {
-        /// Path to the `EscrowInputNote` JSON produced by
-        /// `escrow-lock`.
-        #[arg(required = true, long, default_value = "alice-htlc.json")]
-        note: String,
     },
     /// Refund an HTLC escrow note after the timelock has elapsed.
     /// Reuses the secret key embedded in the JSON written at lock
     /// time; the preimage is *not* required.
     EscrowRefund {
-        /// Path to the `EscrowInputNote` JSON produced by
-        /// `escrow-lock`.
-        #[arg(required = true, long, default_value = "alice-htlc.json")]
+        /// Path to the refund `EscrowInputNote` JSON produced by
+        /// `escrow-lock` or `withdraw-ln`.
+        #[arg(required = true, long)]
         note: String,
     },
     /// Deposit via Lightning using the Atomiq exchange trade protocol:
@@ -369,9 +398,10 @@ async fn handle_create(chain: u64, name: &str) -> Result<(), AppError> {
     println!("   Never share it with anyone.");
 
     println!("\n🚀 Next Steps:");
-    println!("   1. Connect to network:  ciphera-cli --name {name} --chain {chain} sync");
+    println!("   (the wallet is bound to chain {chain}; other commands read it from the wallet file)");
+    println!("   1. Connect to network:  ciphera-cli --name {name} sync");
     println!(
-        "   2. Mint WCBTC:          ciphera-cli --name {name} --chain {chain} --rollup <ROLLUP_CONTRACT> mint --amount-sat <AMOUNT_SAT> --secret <YOUR_CITREA_KEY> --geth-rpc <RPC_URL>"
+        "   2. Mint WCBTC:          ciphera-cli --name {name} --rollup <ROLLUP_CONTRACT> mint --amount-sat <AMOUNT_SAT> --secret <YOUR_CITREA_KEY> --geth-rpc <RPC_URL>"
     );
     println!("   3. Check balance:       cat {wallet_file}");
 
@@ -381,11 +411,7 @@ async fn handle_create(chain: u64, name: &str) -> Result<(), AppError> {
 /// Handle the sync command
 ///
 /// Connects to a Ciphera node and performs health checks
-async fn handle_sync(
-    chain: u64,
-    name: &str,
-    host: &str,
-) -> Result<()> {
+async fn handle_sync(name: &str, host: &str) -> Result<()> {
     debug!(
         "Connecting wallet {} to Ciphera node at {}",
         name, host
@@ -395,7 +421,7 @@ async fn handle_sync(
     let mut client = NodeClient::builder()
         .name(name)
         .host(host)
-        .build(chain, false)?;
+        .build_load()?;
 
     // Check health
     match client.check_health().await {
@@ -426,8 +452,7 @@ async fn handle_sync(
     match client.list_transactions(&Default::default()).await {
         Ok(list) => {
             println!("   Obtained transactions list size: {}", list.txns.len());
-            let (mut synced_wallet, _) = client.get_wallet().prepare_sync(&list.txns)?;
-            synced_wallet.chain_id = Some(chain);
+            let (synced_wallet, _) = client.get_wallet().prepare_sync(&list.txns)?;
             synced_wallet.save()?;
             client.replace_wallet(synced_wallet);
         }
@@ -459,7 +484,6 @@ async fn handle_address(name: &str, amount_wei: u64, ticker: &str) -> Result<()>
 }
 
 async fn handle_note_spend(
-    chain: u64,
     name: &str,
     host: &str,
     amount_wei: u64,
@@ -469,7 +493,7 @@ async fn handle_note_spend(
     let mut client = NodeClient::builder()
         .name(name)
         .host(host)
-        .build(chain, false)?;
+        .build_load()?;
 
     // Prepare transfer. A case, when wallet already has exactly matching note, will be ignored
     let (wallet_with_transfer_note, transfer_note) =
@@ -509,12 +533,7 @@ async fn handle_note_spend(
     }
 }
 
-async fn handle_spend_to(
-    chain: u64,
-    name: &str,
-    host: &str,
-    address: &str,
-) -> Result<()> {
+async fn handle_spend_to(name: &str, host: &str, address: &str) -> Result<()> {
     debug!(
         "Connecting wallet {} to Ciphera node at {}",
         name, host
@@ -524,7 +543,7 @@ async fn handle_spend_to(
     let mut client = NodeClient::builder()
         .name(name)
         .host(host)
-        .build(chain, false)?;
+        .build_load()?;
 
     // Spend to UX leverages a variant of NoteURL encoding for providing an "address" with address
     // and amount needed for UTXO construction
@@ -564,7 +583,6 @@ async fn handle_spend_to(
 async fn handle_receive(
     name: &str,
     host: &str,
-    chain: u64,
     notefile: Option<String>,
     notelink: Option<String>,
 ) -> Result<()> {
@@ -577,7 +595,7 @@ async fn handle_receive(
     let mut client = NodeClient::builder()
         .name(name)
         .host(host)
-        .build(chain, false)?;
+        .build_load()?;
 
     // Check health
     match client.check_health().await {
@@ -652,33 +670,54 @@ async fn handle_receive(
     }
 }
 
-// Parse a 32-byte preimage from `0x`-optional hex.
-fn parse_preimage_hex(s: &str) -> Result<[u8; 32], AppError> {
+fn parse_hex_32(s: &str, label: &str) -> Result<[u8; 32], AppError> {
     let trimmed = s.trim().trim_start_matches("0x");
     let bytes = hex::decode(trimmed)
-        .map_err(|e| AppError::InvalidAddress(format!("preimage must be hex: {e}")))?;
+        .map_err(|e| AppError::InvalidAddress(format!("{label} must be hex: {e}")))?;
     bytes
         .as_slice()
         .try_into()
-        .map_err(|_| AppError::InvalidAddress("preimage must be 32 bytes".to_string()))
+        .map_err(|_| AppError::InvalidAddress(format!("{label} must be 32 bytes")))
+}
+
+// Parse a 32-byte preimage from `0x`-optional hex.
+fn parse_preimage_hex(s: &str) -> Result<[u8; 32], AppError> {
+    parse_hex_32(s, "preimage")
+}
+
+// Parse a 32-byte SHA-256 payment hash from `0x`-optional hex.
+fn parse_payment_hash_hex(s: &str) -> Result<[u8; 32], AppError> {
+    parse_hex_32(s, "hash")
+}
+
+fn parse_redeemer_address(s: &str) -> Result<Element, AppError> {
+    if let Ok(address) = try_decode_address(s) {
+        return Ok(address.address());
+    }
+    Element::from_str(s).map_err(|e| {
+        AppError::InvalidAddress(format!(
+            "redeemer must be an encoded Ciphera address or field element: {e}"
+        ))
+    })
 }
 
 #[allow(clippy::too_many_arguments)]
 async fn handle_escrow_lock(
-    chain: u64,
     name: &str,
     host: &str,
     amount_wei: u64,
     ticker: &str,
-    preimage_hex: &str,
+    redeemer: &str,
+    payment_hash_hex: &str,
     btc_explorer: &str,
 ) -> Result<()> {
     let mut client = NodeClient::builder()
         .name(name)
         .host(host)
-        .build(chain, false)?;
+        .build_load()?;
 
-    let preimage = parse_preimage_hex(preimage_hex)?;
+    let redeemer_address = parse_redeemer_address(redeemer)?;
+    let payment_hash = parse_payment_hash_hex(payment_hash_hex)?;
 
     // Anchor the HTLC refund timelock to the *current Bitcoin tip*. The
     // refund branch (later) must present a PoW chain extending this anchor
@@ -693,17 +732,22 @@ async fn handle_escrow_lock(
         lock.n_blocks,
     );
 
-    // For this single-key test flow the same secret key gates both the
-    // claim and refund branches: convenient for a single-wallet
-    // round-trip, equivalent to running Alice = Bob. A real two-party
-    // HTLC would split this into a redeemer secret + a separate refund
-    // secret; the wallet API can be extended trivially once the second
-    // wallet is wired in.
-    let htlc_secret_key = client.get_wallet().gen_pk();
+    // The claim branch is bound to the maker/redeemer address and the
+    // payment hash. The refund branch is bound to a fresh locker-owned key.
+    let refund_secret_key = client.get_wallet().gen_pk();
+    let (utxo_kind, note_kind) =
+        cli::address::citrea_token_data(client.get_wallet().network(), ticker);
+    let htlc_note = Note {
+        utxo_kind,
+        note_kind,
+        address: htlc_claim_address_from_hash(redeemer_address, payment_hash),
+        psi: htlc_refund_psi(refund_secret_key, &lock),
+        value: Element::from(amount_wei),
+    };
 
-    let (prepared_wallet, utxo, escrow_input_note) = client
+    let (prepared_wallet, utxo) = client
         .get_wallet()
-        .prepare_escrow_lock(amount_wei, ticker, htlc_secret_key, preimage, &lock)?;
+        .prepare_escrow_lock_to_note(htlc_note.clone())?;
 
     let snark = utxo.prove().unwrap();
 
@@ -716,14 +760,37 @@ async fn handle_escrow_lock(
             prepared_wallet.save()?;
             client.replace_wallet(prepared_wallet);
 
-            let note_path = format!("{name}-htlc.json");
-            let json_str = serde_json::to_string_pretty(&escrow_input_note)?;
-            std::fs::write(&note_path, json_str)?;
-            println!("\nSaved HTLC EscrowInputNote to {note_path}");
-            println!("  HTLC secret_key: {}", escrow_input_note.secret_key);
-            println!("  preimage hex:    0x{}", hex::encode(preimage));
-            println!("  note address:    {}", escrow_input_note.note.address);
-            println!("  note psi:        {}", escrow_input_note.note.psi);
+            let descriptor = EscrowNoteDescriptor {
+                note: htlc_note.clone(),
+                timelock: lock.clone(),
+                payment_hash: Some(payment_hash),
+            };
+            let descriptor_path = format!("{name}-htlc-note.json");
+            let descriptor_json = to_tagged_json(REDEEM_DESCRIPTOR_TYPE, &descriptor)?;
+            std::fs::write(&descriptor_path, descriptor_json)?;
+
+            let refund_input_note = Wallet::refund_witness(
+                htlc_note.clone(),
+                refund_secret_key,
+                zk_primitives::TimeProof {
+                    lock: lock.clone(),
+                    ..Default::default()
+                },
+            );
+            let refund_path = format!("{name}-htlc-refund.json");
+            let refund_json = to_tagged_json(REFUND_WITNESS_TYPE, &refund_input_note)?;
+            std::fs::write(&refund_path, refund_json)?;
+
+            println!("\nSaved escrow descriptor to {descriptor_path}");
+            println!("  redeemer address: {}", redeemer_address);
+            println!("  payment hash:     0x{}", hex::encode(payment_hash));
+            println!("  note address:     {}", htlc_note.address);
+            println!("  note psi:         {}", htlc_note.psi);
+            println!("  timelock anchor:  {}", hex::encode(lock.zero_block));
+            println!("  timelock blocks:  {}", lock.n_blocks);
+
+            println!("\nSaved refund witness to {refund_path}");
+            println!("  refund secret_key: {refund_secret_key}");
 
             let b = client.get_wallet().balance;
             println!("\nBalance {} sats {ticker}", units::wei_to_sats(b));
@@ -737,27 +804,29 @@ async fn handle_escrow_lock(
 }
 
 async fn handle_escrow_redeem_or_refund(
-    chain: u64,
     name: &str,
     host: &str,
     note_path: &str,
+    preimage_hex: Option<&str>,
     refund: bool,
     btc_explorer: &str,
 ) -> Result<()> {
     let mut client = NodeClient::builder()
         .name(name)
         .host(host)
-        .build(chain, false)?;
+        .build_load()?;
 
     let json_str = fs::read_to_string(note_path).map_err(|e| {
         AppError::IoError(std::io::Error::new(e.kind(), format!("{note_path}: {e}")))
     })?;
-    let htlc_input_note: zk_primitives::EscrowInputNote = serde_json::from_str(&json_str)?;
 
-    let ticker = cli::address::citrea_ticker_from_contract(htlc_input_note.note.note_kind);
     let label = if refund { "Refund" } else { "Redeem" };
 
-    let (prepared_wallet, escrow, _received) = if refund {
+    let (ticker, prepared_wallet, escrow, _received) = if refund {
+        let htlc_input_note: zk_primitives::EscrowInputNote =
+            from_tagged_json(&json_str, REFUND_WITNESS_TYPE)?;
+        let ticker = cli::address::citrea_ticker_from_contract(htlc_input_note.note.note_kind);
+
         // Build the refund PoW witness from real Bitcoin headers extending
         // the lock anchor committed at lock time. Fails clearly if fewer
         // than `n_blocks` blocks have been mined since the anchor (the
@@ -775,11 +844,38 @@ async fn handle_escrow_redeem_or_refund(
         let time_proof = bitcoin_clock::BitcoinClock::new(btc_explorer)
             .refund_proof(lock)
             .await?;
-        client
+        let (prepared_wallet, escrow, received) = client
             .get_wallet()
-            .prepare_escrow_refund(&htlc_input_note, time_proof)?
+            .prepare_escrow_refund(&htlc_input_note, time_proof)?;
+        (ticker, prepared_wallet, escrow, received)
     } else {
-        client.get_wallet().prepare_escrow_redeem(&htlc_input_note)?
+        let preimage = parse_preimage_hex(preimage_hex.ok_or_else(|| {
+            AppError::InvalidAddress("escrow-redeem requires --preimage".to_string())
+        })?)?;
+        let descriptor: EscrowNoteDescriptor = from_tagged_json(&json_str, REDEEM_DESCRIPTOR_TYPE)?;
+        let ticker = cli::address::citrea_ticker_from_contract(descriptor.note.note_kind);
+
+        // Surface the locker's refund timelock the descriptor carries: once
+        // `n_blocks` Bitcoin blocks are mined on top of the anchor, the locker
+        // can reclaim these funds via escrow-refund and this redeem loses the
+        // race. Printing it here is the only consumer of the field — without it
+        // the descriptor would carry data nothing reads back.
+        let timelock = &descriptor.timelock;
+        println!("\n⏳ Refund window — the locker can reclaim these funds:");
+        println!("   after {} blocks on top of Bitcoin anchor", timelock.n_blocks);
+        println!("   anchor block: {}", hex::encode(timelock.zero_block));
+        println!("   redeem before then to claim ahead of the refund.");
+
+        // Verify the preimage against the committed payment hash *before* the
+        // key search. A mistyped --preimage changes the claim address, so the
+        // search would otherwise fail with the same NoKey error as a genuinely
+        // lost claim key — leaving the redeemer unable to tell a seconds-to-fix
+        // typo from stuck funds.
+        descriptor.check_preimage(preimage)?;
+        let (prepared_wallet, escrow, received) = client
+            .get_wallet()
+            .prepare_escrow_redeem_note(&descriptor.note, preimage)?;
+        (ticker, prepared_wallet, escrow, received)
     };
 
     println!("\n🔓 Generating {label} EscrowProof locally...");
@@ -804,7 +900,10 @@ async fn handle_escrow_redeem_or_refund(
     // commit.
     match client.transaction_escrow(&snark).await {
         Ok(tx) => {
-            println!("\n✅ {label} transaction {} has been submitted!", tx.txn_hash);
+            println!(
+                "\n✅ {label} transaction {} has been submitted!",
+                tx.txn_hash
+            );
             println!("   Height:    {}", tx.height);
             println!("   Root hash: {}", tx.root_hash);
 
@@ -841,7 +940,6 @@ async fn handle_import(name: &str, notefile: &str) -> Result<()> {
 async fn handle_atomiq_depo(
     name: &str,
     host: &str,
-    chain: u64,
     amount_sat: u64,
     onramp_uri: &str,
 ) -> Result<()> {
@@ -856,7 +954,7 @@ async fn handle_atomiq_depo(
     let mut client = NodeClient::builder()
         .name(name)
         .host(host)
-        .build(chain, false)?;
+        .build_load()?;
 
     // 4. Init swap: GET /onramp/{amount}/{payment_hash}
     let http = reqwest::Client::new();
@@ -1049,10 +1147,17 @@ fn preimage_field(preimage: [u8; 32]) -> Element {
 async fn handle_depo_ln(
     name: &str,
     host: &str,
-    chain: u64,
     amount_sat: u64,
     ln_service_uri: &str,
 ) -> Result<()> {
+    // Load the wallet up front: it's the source of the chain/network used to
+    // reconstruct the deposit note below, and failing fast beats waiting on a
+    // Lightning payment only to discover the wallet is missing.
+    let mut client = NodeClient::builder()
+        .name(name)
+        .host(host)
+        .build_load()?;
+
     let http = reqwest::Client::new();
 
     // Step 1 — GET /v0/onramp?amount_sat=N -> { payment_hash, bolt11 }.
@@ -1178,7 +1283,7 @@ async fn handle_depo_ln(
         // Older ln-service returns only a commitment; derive the note from
         // the preimage and this wallet's chain note kind.
         let (utxo_kind, note_kind) =
-            cli::address::citrea_token_data(cli::address::network_for_chain(chain), "WCBTC");
+            cli::address::citrea_token_data(client.get_wallet().network(), "WCBTC");
         Note {
             utxo_kind,
             note_kind,
@@ -1198,14 +1303,15 @@ async fn handle_depo_ln(
     }
 
     // Cross-check the reconstructed note against the commitment the service
-    // reported -- catches a note_kind / amount mismatch (e.g. wrong --chain)
-    // before persisting a note that isn't actually on chain.
+    // reported -- catches a note_kind / amount mismatch (e.g. the wallet is
+    // bound to a different chain than the service) before persisting a note
+    // that isn't actually on chain.
     let expected = Element::from_str(&note_commitment_hex)
         .map_err(|e| color_eyre::eyre::eyre!("invalid note_commitment from service: {e}"))?;
     if note.commitment() != expected {
         return Err(color_eyre::eyre::eyre!(
             "reconstructed note commitment {} != service commitment {}; \
-             note_kind/amount disagree (check --chain matches the service)",
+             note_kind/amount disagree (does the wallet's chain match the service?)",
             note.commitment(),
             expected
         ));
@@ -1214,10 +1320,6 @@ async fn handle_depo_ln(
     let amount_wei = note.value.to_u64_array()[0];
     let input_note = InputNote::new(note, unlock_key);
 
-    let mut client = NodeClient::builder()
-        .name(name)
-        .host(host)
-        .build(chain, false)?;
     let (prepared_wallet, ()) = client.get_wallet().prepare_add_to_avail(input_note)?;
     prepared_wallet.save()?;
     client.replace_wallet(prepared_wallet);
@@ -1233,7 +1335,6 @@ async fn handle_depo_ln(
 async fn handle_atomiq_withdraw(
     name: &str,
     host: &str,
-    chain: u64,
     invoice: &str,
     substitutor: &str,
     address: &str,
@@ -1242,7 +1343,7 @@ async fn handle_atomiq_withdraw(
     /*    let client = NodeClient::builder()
             .name(name)
             .host(host)
-            .build(chain, false)?;
+            .build_load()?;
 
         let b = client.get_wallet().balance;
         TODO: balance check before everything even starts
@@ -1322,7 +1423,6 @@ async fn handle_atomiq_withdraw(
     handle_burn(
         name,
         host,
-        chain,
         address, // refund address
         input_amount_wei_u64,
         "WCBTC",
@@ -1440,7 +1540,7 @@ async fn verify_escrow_note_values(
     service_payment_hash: &str,
     escrow_note: &Note,
     expected_refund_address: &Element,
-    chain: u64,
+    network: zk_primitives::CitreaNetwork,
     timelock: &zk_primitives::TimeLock,
 ) -> Result<()> {
     // Parse the Bolt11 invoice to extract amount and payment hash
@@ -1477,10 +1577,8 @@ async fn verify_escrow_note_values(
     }
 
     // Verify token kind matches expected chain (LN offramp is WCBTC-denominated).
-    let (_, expected_note_kind) = cli::address::citrea_token_data(
-        cli::address::network_for_chain(chain),
-        cli::address::WCBTC_TICKER,
-    );
+    let (_, expected_note_kind) =
+        cli::address::citrea_token_data(network, cli::address::WCBTC_TICKER);
     if escrow_note.note_kind != expected_note_kind {
         return Err(color_eyre::eyre::eyre!(
             "note kind mismatch: expected {} but service returned {}; \
@@ -1539,7 +1637,6 @@ async fn verify_timelock_matches_tip(
 async fn handle_withdraw_ln(
     name: &str,
     host: &str,
-    chain: u64,
     invoice: &str,
     ln_service_uri: &str,
     btc_explorer: &str,
@@ -1547,7 +1644,7 @@ async fn handle_withdraw_ln(
     let mut client = NodeClient::builder()
         .name(name)
         .host(host)
-        .build(chain, false)?;
+        .build_load()?;
 
     // Refund key is the wallet's own: the escrow's refund branch binds
     // `psi` to `get_address_for_private_key(refund_secret_key)`, so only
@@ -1635,7 +1732,7 @@ async fn handle_withdraw_ln(
         &payment_hash,
         &htlc_note,
         &refund_address,
-        chain,
+        client.get_wallet().network(),
         &timelock,
     ).await?;
     println!("✅ Escrow note values verified");
@@ -1672,18 +1769,16 @@ async fn handle_withdraw_ln(
             // The timelock is persisted via TimeProof serialization (only the lock,
             // not the headers which are filled in at refund time from real blocks).
             // Refund branch only: no preimage (zeroed).
-            let refund_input_note = zk_primitives::EscrowInputNote {
-                note: htlc_note.clone(),
-                spend_type: 3,
-                secret_key: refund_secret_key,
-                preimage: [0u8; 32],
-                time_proof: zk_primitives::TimeProof {
+            let refund_input_note = Wallet::refund_witness(
+                htlc_note.clone(),
+                refund_secret_key,
+                zk_primitives::TimeProof {
                     lock: timelock.clone(),
                     ..Default::default()
                 },
-            };
+            );
             let note_path = format!("{name}-htlc.json");
-            let json_str = serde_json::to_string_pretty(&refund_input_note)?;
+            let json_str = to_tagged_json(REFUND_WITNESS_TYPE, &refund_input_note)?;
             std::fs::write(&note_path, json_str)?;
             println!("\nSaved refund EscrowInputNote to {note_path}");
             println!("  refund secret_key: {refund_secret_key}");
@@ -1711,7 +1806,6 @@ async fn handle_mint(
     name: &str,
     host: &str,
     geth_rpc: &str,
-    chain: u64,
     rollup: &str,
     secret: &str,
     amount_wei: u64,
@@ -1722,16 +1816,18 @@ async fn handle_mint(
     let mut client = NodeClient::builder()
         .name(name)
         .host(host)
-        .build(chain, false)?;
+        .build_load()?;
 
     let (prepared_wallet, utxo) = client.get_wallet().prepare_mint(amount_wei, ticker)?;
     let snark = utxo.prove().unwrap();
 
     if !only_snark {
+        // The EVM mint targets the rollup on the wallet's bound chain.
+        let chain_id = client.get_wallet().network().chain_id();
         client
             .admin_mint(
                 geth_rpc,
-                chain,
+                chain_id,
                 secret,
                 rollup,
                 &utxo.output_notes[0],
@@ -1764,7 +1860,6 @@ async fn handle_mint(
 async fn handle_burn(
     name: &str,
     host: &str,
-    chain: u64,
     address: &str,
     amount_wei: u64,
     ticker: &str,
@@ -1774,7 +1869,7 @@ async fn handle_burn(
     let mut client = NodeClient::builder()
         .name(name)
         .host(host)
-        .build(chain, false)?;
+        .build_load()?;
 
     // Prepare burn
     let (wallet_with_burner_key, burner_note) =
@@ -2093,11 +2188,11 @@ async fn main() -> Result<()> {
 
     // Execute command
     match cli.command {
-        Commands::Create {} => {
-            handle_create(cli.chain, &cli.name).await?;
+        Commands::Create { chain } => {
+            handle_create(chain, &cli.name).await?;
         }
         Commands::Sync {} => {
-            handle_sync(cli.chain, &cli.name, &cli.host).await?;
+            handle_sync(&cli.name, &cli.host).await?;
         }
         Commands::Address { amount } => {
             let (ticker_normalized, amount_wei) = amount.to_base_units()?;
@@ -2105,56 +2200,40 @@ async fn main() -> Result<()> {
         }
         Commands::Spend { amount } => {
             let (ticker_normalized, amount_wei) = amount.to_base_units()?;
-            handle_note_spend(
-                cli.chain,
-                &cli.name,
-                &cli.host,
-                amount_wei,
-                ticker_normalized,
-            )
-            .await?;
+            handle_note_spend(&cli.name, &cli.host, amount_wei, ticker_normalized).await?;
         }
         Commands::SpendTo { address } => {
-            handle_spend_to(
-                cli.chain,
-                &cli.name,
-                &cli.host,
-                &address,
-            )
-            .await?;
+            handle_spend_to(&cli.name, &cli.host, &address).await?;
         }
         Commands::Receive { note, link } => {
-            handle_receive(
-                &cli.name,
-                &cli.host,
-                cli.chain,
-                note,
-                link,
-            )
-            .await?;
+            handle_receive(&cli.name, &cli.host, note, link).await?;
         }
         Commands::Import { note } => {
             handle_import(&cli.name, &note).await?;
         }
-        Commands::EscrowLock { amount, preimage } => {
+        Commands::EscrowLock {
+            amount,
+            redeemer,
+            hash,
+        } => {
             let (ticker_normalized, amount_wei) = amount.to_base_units()?;
             handle_escrow_lock(
-                cli.chain,
                 &cli.name,
                 &cli.host,
                 amount_wei,
                 ticker_normalized,
-                &preimage,
+                &redeemer,
+                &hash,
                 &cli.btc_explorer,
             )
             .await?;
         }
-        Commands::EscrowRedeem { note } => {
+        Commands::EscrowRedeem { note, preimage } => {
             handle_escrow_redeem_or_refund(
-                cli.chain,
                 &cli.name,
                 &cli.host,
                 &note,
+                Some(&preimage),
                 false,
                 &cli.btc_explorer,
             )
@@ -2162,10 +2241,10 @@ async fn main() -> Result<()> {
         }
         Commands::EscrowRefund { note } => {
             handle_escrow_redeem_or_refund(
-                cli.chain,
                 &cli.name,
                 &cli.host,
                 &note,
+                None,
                 true,
                 &cli.btc_explorer,
             )
@@ -2182,7 +2261,6 @@ async fn main() -> Result<()> {
                 &cli.name,
                 &cli.host,
                 &geth_rpc,
-                cli.chain,
                 &cli.rollup,
                 &secret,
                 amount_wei,
@@ -2196,7 +2274,6 @@ async fn main() -> Result<()> {
             handle_burn(
                 &cli.name,
                 &cli.host,
-                cli.chain,
                 &address,
                 amount_wei,
                 ticker_normalized,
@@ -2204,46 +2281,40 @@ async fn main() -> Result<()> {
             )
             .await?;
         }
-        Commands::Contract { geth_rpc, blocks } => {
-            handle_rollup(&geth_rpc, cli.chain, &cli.rollup, blocks).await?;
+        Commands::Contract {
+            geth_rpc,
+            chain,
+            blocks,
+        } => {
+            handle_rollup(&geth_rpc, chain, &cli.rollup, blocks).await?;
         }
-        Commands::Mints { geth_rpc, blocks } => {
-            handle_mints(&geth_rpc, cli.chain, &cli.rollup, blocks).await?;
+        Commands::Mints {
+            geth_rpc,
+            chain,
+            blocks,
+        } => {
+            handle_mints(&geth_rpc, chain, &cli.rollup, blocks).await?;
         }
         Commands::ReleaseSlowBurn {
             geth_rpc,
+            chain,
             secret,
             key,
             blocks,
         } => {
-            handle_release_slow_burn(&geth_rpc, cli.chain, &cli.rollup, &secret, &key, blocks)
-                .await?;
+            handle_release_slow_burn(&geth_rpc, chain, &cli.rollup, &secret, &key, blocks).await?;
         }
         Commands::AtomiqDepo {
             amount_sat,
             onramp_uri,
         } => {
-            handle_atomiq_depo(
-                &cli.name,
-                &cli.host,
-                cli.chain,
-                amount_sat,
-                &onramp_uri,
-            )
-            .await?;
+            handle_atomiq_depo(&cli.name, &cli.host, amount_sat, &onramp_uri).await?;
         }
         Commands::DepoLn {
             amount_sat,
             ln_service_uri,
         } => {
-            handle_depo_ln(
-                &cli.name,
-                &cli.host,
-                cli.chain,
-                amount_sat,
-                &ln_service_uri,
-            )
-            .await?;
+            handle_depo_ln(&cli.name, &cli.host, amount_sat, &ln_service_uri).await?;
         }
         Commands::AtomiqWithdraw {
             invoice,
@@ -2254,7 +2325,6 @@ async fn main() -> Result<()> {
             handle_atomiq_withdraw(
                 &cli.name,
                 &cli.host,
-                cli.chain,
                 &invoice,
                 &substitutor,
                 &address,
@@ -2269,7 +2339,6 @@ async fn main() -> Result<()> {
             handle_withdraw_ln(
                 &cli.name,
                 &cli.host,
-                cli.chain,
                 &invoice,
                 &ln_service_uri,
                 &cli.btc_explorer,
